@@ -13,6 +13,7 @@ class LibraryPanel : public juce::Component
 {
 public:
     explicit LibraryPanel (StacksAudioProcessor&);
+    ~LibraryPanel() override;
     void refresh();
     void resized() override;
     void paint (juce::Graphics&) override;

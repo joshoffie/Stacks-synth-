@@ -3,12 +3,14 @@
 #include <JuceHeader.h>
 
 #include "PluginProcessor.h"
+#include "LibraryPanel.h"
 
 namespace stacks
 {
 
 // One patch in the list. Click to audition, ♥ to keep.
-class PatchCard : public juce::Component
+class PatchCard : public juce::Component,
+                  public juce::SettableTooltipClient
 {
 public:
     enum class Style { nowPlaying, ai, random };
@@ -65,8 +67,7 @@ private:
     void layoutCards();
     void rebuildEngineMenu();
     void engineChosen();
-    void saveCurrent();
-    void loadPatch();
+    void showLibrary (bool);
 
     StacksAudioProcessor& processor;
 
@@ -76,7 +77,9 @@ private:
     juce::TextEditor hint;
     juce::Slider variation;
     juce::TextButton newBatchButton { "Fresh ideas" }, evolveButton { "Evolve" }, backButton { "<" };
-    juce::TextButton saveButton { "Save..." }, loadButton { "Load..." };
+    juce::TextButton ideasTab { "IDEAS" }, libraryTab { "LIBRARY" };
+    bool showingLibrary = false;
+    LibraryPanel library;
 
     juce::Viewport viewport;
     juce::Component cardList;
@@ -89,7 +92,6 @@ private:
     juce::Component favouriteStrip;
     std::vector<std::unique_ptr<juce::TextButton>> favouriteChips;
 
-    std::unique_ptr<juce::FileChooser> chooser;
     juce::StringArray engineMenuModels;   // Ollama model name per menu entry
     juce::StringArray engineMenuBuiltins; // built-in model id per menu entry
     int shownGeneration = -1;

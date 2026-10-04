@@ -43,7 +43,7 @@ void PatchCard::set (const Patch& p, Style s, bool isAuditioned, bool isFavourit
     auditioned = isAuditioned;
     favourite = isFavourite;
     favButton.setColour (juce::TextButton::buttonColourId, favourite ? colours::accent : colours::panel);
-    favButton.setTooltip (favourite ? "Remove from favourites" : "Keep this one: the next evolution breeds from it");
+    favButton.setTooltip (favourite ? "Stop breeding from this (it stays saved in the library)" : "Save into the open library folder and breed from it");
     repaint();
 }
 
@@ -123,7 +123,7 @@ void SectionHeader::paint (juce::Graphics& g)
 }
 
 //==============================================================================
-LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p)
+LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p)
 {
     header.setFont (juce::Font (juce::FontOptions (15.0f, juce::Font::bold)));
     header.setColour (juce::Label::textColourId, colours::text);
@@ -208,10 +208,19 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p)
     viewport.setScrollBarsShown (true, false);
     addAndMakeVisible (viewport);
 
-    saveButton.onClick = [this] { saveCurrent(); };
-    addAndMakeVisible (saveButton);
-    loadButton.onClick = [this] { loadPatch(); };
-    addAndMakeVisible (loadButton);
+    for (auto* tab : { &ideasTab, &libraryTab })
+    {
+        tab->setClickingTogglesState (false);
+        tab->setColour (juce::TextButton::buttonOnColourId, colours::accentDim);
+        tab->setColour (juce::TextButton::textColourOnId, colours::text);
+        addAndMakeVisible (*tab);
+    }
+    ideasTab.onClick = [this] { showLibrary (false); };
+    libraryTab.onClick = [this] { showLibrary (true); };
+    libraryTab.setTooltip (juce::String::fromUTF8 ("Your saved patches, in folders. The \xe2\x99\xa5 on any card saves it into the open folder."));
+    addChildComponent (library);
+
+    nowPlaying.setTooltip (juce::String::fromUTF8 ("What you're hearing. Its \xe2\x99\xa5 saves it into the open library folder and breeds from it."));
 
     status.setFont (juce::Font (juce::FontOptions (11.0f)));
     status.setColour (juce::Label::textColourId, colours::muted);
@@ -269,15 +278,16 @@ void LabPanel::resized()
     favouriteStrip.setBounds (r.removeFromTop (26));
     r.removeFromTop (8);
 
+    auto tabs = r.removeFromTop (24);
+    ideasTab.setBounds (tabs.removeFromLeft (tabs.getWidth() / 2).reduced (1, 0));
+    libraryTab.setBounds (tabs.reduced (1, 0));
+    r.removeFromTop (6);
+
     status.setBounds (r.removeFromBottom (18));
     r.removeFromBottom (4);
-    auto bottom = r.removeFromBottom (26);
-    saveButton.setBounds (bottom.removeFromLeft (80));
-    bottom.removeFromLeft (6);
-    loadButton.setBounds (bottom.removeFromLeft (80));
-    r.removeFromBottom (8);
 
     viewport.setBounds (r);
+    library.setBounds (r);
 
     // Favourite chips flow left to right.
     int x = 0;
@@ -483,7 +493,7 @@ void LabPanel::refresh()
     backButton.setEnabled (! busy && ! lab.history.empty());
     engineBox.setEnabled (! busy);
 
-    favouritesLabel.setText (favCount > 0 ? "FAVOURITES" : "FAVOURITES  (click a card's heart to keep it)", juce::dontSendNotification);
+    favouritesLabel.setText (favCount > 0 ? "BREEDING FROM" : juce::String::fromUTF8 ("BREEDING FROM  (press a \xe2\x99\xa5 to save a patch and breed from it)"), juce::dontSendNotification);
 
     // Rebuild favourite chips
     favouriteChips.clear();
@@ -518,6 +528,10 @@ void LabPanel::refresh()
 
     shownNowPlaying.clear();
     refreshNowPlaying();
+    ideasTab.setToggleState (! showingLibrary, juce::dontSendNotification);
+    libraryTab.setToggleState (showingLibrary, juce::dontSendNotification);
+    if (showingLibrary)
+        library.refresh();
 
     // A new batch starts at the top of the list.
     if (lab.generation != shownGeneration)
@@ -533,47 +547,15 @@ void LabPanel::refresh()
     resized();
 }
 
-void LabPanel::saveCurrent()
+void LabPanel::showLibrary (bool show)
 {
-    auto dir = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("Stacks Patches");
-    dir.createDirectory();
-
-    const auto patch = processor.currentPatch();
-    const auto safeName = juce::File::createLegalFileName (patch.name);
-
-    chooser = std::make_unique<juce::FileChooser> ("Save patch", dir.getChildFile (safeName + ".json"), "*.json");
-    chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
-                              | juce::FileBrowserComponent::warnAboutOverwriting,
-                          [this, patch] (const juce::FileChooser& fc)
-                          {
-                              auto file = fc.getResult();
-                              if (file == juce::File())
-                                  return;
-                              auto named = patch;
-                              named.name = file.getFileNameWithoutExtension();
-                              file.replaceWithText (named.toJson());
-                              processor.setCurrentPatchName (named.name);
-                              processor.labBroadcaster.sendChangeMessage();
-                          });
-}
-
-void LabPanel::loadPatch()
-{
-    auto dir = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("Stacks Patches");
-
-    chooser = std::make_unique<juce::FileChooser> ("Load patch", dir, "*.json");
-    chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
-                          [this] (const juce::FileChooser& fc)
-                          {
-                              auto file = fc.getResult();
-                              if (! file.existsAsFile())
-                                  return;
-                              if (auto patch = Patch::fromJson (file.loadFileAsString()))
-                              {
-                                  processor.applyPatch (*patch);
-                                  processor.favouriteCurrent(); // so it can seed the next evolution
-                              }
-                          });
+    showingLibrary = show;
+    ideasTab.setToggleState (! show, juce::dontSendNotification);
+    libraryTab.setToggleState (show, juce::dontSendNotification);
+    viewport.setVisible (! show);
+    library.setVisible (show);
+    if (show)
+        library.refresh();
 }
 
 } // namespace stacks

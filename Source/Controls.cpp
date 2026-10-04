@@ -61,7 +61,10 @@ void ParamKnob::setAssignMode (bool on, juce::Colour sourceColour)
 {
     assignMode = on && isModulatableParam (paramIndex);
     assignColour = sourceColour;
-    setInterceptsMouseClicks (true, ! assignMode); // in assign mode the click is ours, not the slider's
+    // JUCE hit-testing always descends into children that accept clicks, so in
+    // assign mode the slider and label must step aside for the cell to get the click.
+    slider.setInterceptsMouseClicks (! assignMode, ! assignMode);
+    label.setInterceptsMouseClicks (! assignMode, ! assignMode);
     setMouseCursor (assignMode ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
 
     // While assigning, the whole cell is one "Assign to <name>" button for

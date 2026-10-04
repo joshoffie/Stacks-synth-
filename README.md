@@ -56,6 +56,17 @@ Every generated patch (random or AI) passes a tuning guard: oscillator A only at
 octaves, an audible oscillator B only at octaves, fine detune and pitch
 modulation capped, so nothing comes out of key with what you play.
 
+## Modulators
+
+The MODULATORS row has tabs for LFO 1-4, the Mod Env and the performance
+sources (velocity, key, mod wheel, aftertouch, per-note random). Each LFO has a
+display you can draw in (click adds a point, drag moves, double-click removes;
+right-click resets), shape presets, rate or tempo sync, phase, and Free /
+Note (retrigger) mode. To route a modulator: press **Assign >**, then click any
+knob - including effect knobs. The knob shows a ring in the modulator's colour;
+the modulator's tab lists its targets with depth sliders and an × to remove.
+"Pitch / Amp / Pan" adds the targets that aren't knobs.
+
 ## The AI Lab
 
 1. **Fresh ideas** — ten new patches from the direction text alone. **Evolve** —
@@ -84,6 +95,11 @@ modulation capped, so nothing comes out of key with what you play.
 Per batch the AI designs 5 patches that stream into the **✦ AI IDEAS** section
 as they arrive, while the random breeder's 5 land in a folded **RANDOM
 VARIATIONS** section underneath.
+
+**Library**: the LIBRARY tab browses `~/Documents/Stacks Patches`. Make folders,
+open them, click a patch to load it. The ♥ on any card (or on Now Playing)
+saves that patch into the open folder *and* adds it to "Breeding from", the
+set Evolve works from. A patch's "..." moves it to another folder or trashes it.
 
 The engine choice is stored in `~/Library/Application Support/Stacks/`, next to
 `llama.log` (runtime + speed stats), `last-ai-prompt.txt`, `last-ai-reply.txt`

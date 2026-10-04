@@ -105,6 +105,8 @@ public:
 };
 
 //==============================================================================
+LibraryPanel::~LibraryPanel() = default;
+
 LibraryPanel::LibraryPanel (StacksAudioProcessor& p) : processor (p)
 {
     pathLabel.setFont (juce::Font (juce::FontOptions (11.5f, juce::Font::bold)));
@@ -168,7 +170,7 @@ void LibraryPanel::confirmDelete (const juce::File& file)
     juce::NativeMessageBox::showAsync (juce::MessageBoxOptions()
                                            .withIconType (juce::MessageBoxIconType::WarningIcon)
                                            .withTitle ("Move to Trash?")
-                                           .withMessage ("Move \\"" + file.getFileNameWithoutExtension() + "\\" to the Trash?")
+                                           .withMessage ("Move \"" + file.getFileNameWithoutExtension() + "\" to the Trash?")
                                            .withButton ("Move to Trash")
                                            .withButton ("Cancel"),
                                        [this, file] (int result)
