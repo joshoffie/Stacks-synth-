@@ -182,6 +182,19 @@ static void testPatchJson()
     CHECK (child && child->waves[0] == p.waves[0] && (int) child->get (P::oscA_wave) == kCustomWave);
     CHECK (describePatch (p).contains ("Neon"));
 
+    // morphPatch: 0 = from, 1 = to, 0.5 = halfway on knobs, choices switch at 0.5, past 1 keeps going
+    Patch a, b;
+    a.set (P::filter_cutoff, 500.0f);  b.set (P::filter_cutoff, 4000.0f);
+    a.set (P::oscA_wave, 0.0f);         b.set (P::oscA_wave, 2.0f);
+    a.set (P::reverb_mix, 0.1f);        b.set (P::reverb_mix, 0.5f);
+    CHECK_NEAR (morphPatch (a, b, 0.0f).get (P::filter_cutoff), 500.0, 1.0);
+    CHECK_NEAR (morphPatch (a, b, 1.0f).get (P::filter_cutoff), 4000.0, 1.0);
+    const float mid = morphPatch (a, b, 0.5f).get (P::filter_cutoff);
+    CHECK (mid > 600.0f && mid < 3900.0f);
+    CHECK ((int) morphPatch (a, b, 0.4f).get (P::oscA_wave) == 0 && (int) morphPatch (a, b, 0.6f).get (P::oscA_wave) == 2);
+    CHECK_NEAR (morphPatch (a, b, 1.5f).get (P::reverb_mix), 0.7, 0.01);
+    CHECK_NEAR (morphPatch (a, b, 0.5f).get (P::reverb_mix), 0.3, 0.01);
+
     Patch m = p;
     mutatePatch (m, 0.5f, 1234);
     CHECK (! m.sameValuesAs (p));

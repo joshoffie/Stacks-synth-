@@ -64,6 +64,11 @@ struct Patch
 // allowed when B is a silent modulator), fine detune and pitch-LFO depth capped.
 void keepPatchInTune (Patch&);
 
+// A blend of two sounds: t = 0 is `from`, 1 is `to`, past 1 keeps going in the
+// same direction (clamped to each knob's range). Knobs move in normalised
+// space; choices and designed tables switch over at 0.5. Kept in tune.
+Patch morphPatch (const Patch& from, const Patch& to, float t);
+
 // Tags from the sound itself (category, dark/bright, plucky, wide, moving...).
 juce::StringArray autoTags (const Patch&);
 

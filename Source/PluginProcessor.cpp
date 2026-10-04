@@ -1263,6 +1263,42 @@ void StacksAudioProcessor::setFileTags (const juce::File& file, const juce::Stri
     labBroadcaster.sendChangeMessage();
 }
 
+void StacksAudioProcessor::morphCandidate (int index, float t)
+{
+    if (index < 0 || index >= (int) labState.candidates.size())
+        return;
+    const Patch& from = labState.seedIsPatch ? labState.seed : Patch();
+    auto blend = morphPatch (from, labState.candidates[(size_t) index], t);
+    blend.applyTo (apvts);                     // the knobs follow the drag
+    patchName = labState.candidates[(size_t) index].name;
+    labState.auditioned = index;
+    labState.status = "Morphing \"" + patchName + "\"  " + juce::String (juce::roundToInt (t * 100.0f)) + "%";
+    labBroadcaster.sendChangeMessage();
+}
+
+void StacksAudioProcessor::commitMorph (int index, float t)
+{
+    if (index < 0 || index >= (int) labState.candidates.size())
+        return;
+    const Patch from = labState.seedIsPatch ? labState.seed : Patch();
+    auto& candidate = labState.candidates[(size_t) index];
+    auto blend = morphPatch (from, candidate, t);
+    blend.name = candidate.name;
+    blend.category = candidate.category;
+    blend.origin = candidate.origin;
+    blend.tags = candidate.tags;
+    blend.parentName = candidate.parentName;
+    blend.prompt = candidate.prompt;
+    blend.filePath.clear();                    // it is a new sound now
+    blend.favourite = false;
+    blend.description = describePatch (blend);
+    candidate = blend;
+    applyPatch (candidate);
+    labState.auditioned = index;
+    labState.status = "\"" + candidate.name + "\" now sits at " + juce::String (juce::roundToInt (t * 100.0f)) + "% of the way from the seed";
+    labBroadcaster.sendChangeMessage();
+}
+
 void StacksAudioProcessor::auditionSeed()
 {
     if (! labState.seedIsPatch)

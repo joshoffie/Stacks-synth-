@@ -425,6 +425,35 @@ namespace
     }
 }
 
+Patch morphPatch (const Patch& from, const Patch& to, float t)
+{
+    Patch out = to;
+    const auto& specs = paramSpecs();
+    for (int i = 0; i < kNumParams; ++i)
+    {
+        const auto& s = specs[(size_t) i];
+        if (s.kind == ParamKind::Choice)
+        {
+            out.values[(size_t) i] = t < 0.5f ? from.values[(size_t) i] : to.values[(size_t) i];
+            continue;
+        }
+        if (std::string (s.id) == "master_gain")
+            continue;
+        const auto& range = paramRange (i);
+        const float a = range.convertTo0to1 (juce::jlimit (range.start, range.end, from.values[(size_t) i]));
+        const float b = range.convertTo0to1 (juce::jlimit (range.start, range.end, to.values[(size_t) i]));
+        const float v = juce::jlimit (0.0f, 1.0f, a + (b - a) * t);
+        out.set (i, range.convertFrom0to1 (v));
+    }
+    if (t < 0.5f)
+    {
+        out.waves = from.waves;
+        out.lfoShapes = from.lfoShapes;
+    }
+    keepPatchInTune (out);
+    return out;
+}
+
 juce::StringArray autoTags (const Patch& p)
 {
     juce::StringArray t;

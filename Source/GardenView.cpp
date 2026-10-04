@@ -31,7 +31,7 @@ public:
         growth = grow;
         setTooltip (p.name + (p.category.isNotEmpty() ? "  (" + p.category + ")" : "")
                     + (changesFromSeed >= 0 ? "  -  " + juce::String (changesFromSeed) + " audible changes from the seed (closer leaves are more alike)" : juce::String()) + "\n" + p.description
-                    + "\n\nclick: hear   drag outward: wilder   right-click: plant / save");
+                    + "\n\nclick: hear   drag along its branch: blend toward the seed or exaggerate it   right-click: plant / save");
         setTitle ("Audition " + name);
         repaint();
     }
@@ -82,19 +82,42 @@ public:
             return;
         }
         garden.processor.audition (index);
-        dragStart = e.getEventRelativeTo (&garden).position;
-        dragVariation = garden.getVariation ? garden.getVariation() : 0.5f;
+        restCentre = getBounds().toFloat().getCentre();
+        restDistance = juce::jmax (1.0f, restCentre.getDistanceFrom (garden.seedCentre()));
+        dragging = false;
+        morphT = 1.0f;
     }
 
+    // Drag the leaf along its branch: toward the seed the sound blends back into
+    // the seed, past its resting spot it gets exaggerated. The sound follows live.
     void mouseDrag (const juce::MouseEvent& e) override
     {
-        // Pull a leaf outward for wilder children, inward for tamer ones.
-        if (! garden.setVariation) return;
         const auto pos = e.getEventRelativeTo (&garden).position;
         const auto centre = garden.seedCentre();
-        const float d0 = dragStart.getDistanceFrom (centre), d1 = pos.getDistanceFrom (centre);
-        garden.setVariation (juce::jlimit (0.0f, 1.0f, dragVariation + (d1 - d0) / 120.0f));
-        garden.layoutLeaves();
+        const auto dir = restCentre - centre;
+        const float len = juce::jmax (1.0f, dir.getDistanceFromOrigin());
+        const auto unit = dir / len;
+        // project the mouse onto the branch
+        const float along = (pos - centre).getDotProduct (unit);
+        morphT = juce::jlimit (0.05f, 1.6f, along / restDistance);
+        dragging = true;
+        const auto newCentre = centre + unit * (restDistance * morphT);
+        setCentrePosition ((int) newCentre.x, (int) newCentre.y);
+        garden.repaint();
+
+        const double now = juce::Time::getMillisecondCounterHiRes();
+        if (now - lastMorphMs > 40.0)
+        {
+            lastMorphMs = now;
+            garden.processor.morphCandidate (index, morphT);
+        }
+    }
+
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        if (! dragging) return;
+        dragging = false;
+        garden.processor.commitMorph (index, morphT);
     }
 
     std::unique_ptr<juce::AccessibilityHandler> createAccessibilityHandler() override
@@ -108,8 +131,10 @@ public:
     juce::String name;
     bool ai = false, auditioned = false, favourite = false, hovered = false;
     float growth = 1.0f;
-    juce::Point<float> dragStart;
-    float dragVariation = 0.5f;
+    juce::Point<float> restCentre;
+    float restDistance = 1.0f, morphT = 1.0f;
+    bool dragging = false;
+    double lastMorphMs = 0.0;
 };
 
 //==============================================================================
@@ -218,7 +243,8 @@ void GardenView::layoutLeaves()
 
         auto& leaf = *leaves[(size_t) i];
         const int size = (int) (kLeafRadius + 9.0f) * 2;
-        leaf.setBounds ((int) pos.x - size / 2, (int) pos.y - size / 2, size, size);
+        if (! leaf.dragging)
+            leaf.setBounds ((int) pos.x - size / 2, (int) pos.y - size / 2, size, size);
         leaf.set (c, i == lab.auditioned, c.favourite, eased, changes);
     }
 }
@@ -332,9 +358,9 @@ void GardenView::paint (juce::Graphics& g)
     else if (generating)
         text = lab.progressDetail.isNotEmpty() ? lab.progressDetail : "growing...";
     else if (lab.candidates.empty())
-        text = "Describe a sound above and press Generate to grow the first leaves. Click a leaf to hear it, drag it outward for wilder children.";
+        text = "Describe a sound above and press Generate to grow the first leaves. Click a leaf to hear it, drag it in or out to blend it with the seed.";
     else
-        text = lab.seedIsPatch ? "click a leaf: hear   -   click the seed: hear the parent again   -   drag a leaf outward: wilder   -   right-click a leaf: plant or save it"
+        text = lab.seedIsPatch ? "click a leaf: hear   -   click the seed: hear the parent again   -   drag a leaf in or out: blend it with the seed, live   -   right-click: plant or save"
                                : "click a leaf: hear   -   drag a leaf outward: wilder   -   right-click a leaf: plant it   -   Evolve grows from what you're hearing";
     g.drawFittedText (text, footer, juce::Justification::centred, 2, 0.9f);
 

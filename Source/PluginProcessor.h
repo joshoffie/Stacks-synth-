@@ -96,6 +96,11 @@ public:
     void auditionSeed();                                   // hear the parent of this generation again
     void auditionFromTree (int generation, int candidate); // any node of the family tree (candidate -1 = that generation's seed)
 
+    // Dragging a leaf: hear a blend between the seed (t = 0) and that candidate (t = 1), or
+    // an exaggeration past it. commit keeps the blend as the candidate itself.
+    void morphCandidate (int index, float t);
+    void commitMorph (int index, float t);
+
     // Why it sounds like this: quick tips at once, then the model's explanation streams in.
     void explainCurrentPatch();
     juce::String currentExplanationKey() const;
