@@ -1203,7 +1203,24 @@ void StacksAudioProcessor::explainCurrentPatch()
                 if (auto* self = weak.get())
                     if (self->explainToken.load() == token)
                     {
-                        self->labState.modelExplanation = text.trim();
+                        // Small models squeeze knob names together ("ReverbMix"): space them out on the TRY lines.
+                        juce::StringArray lines;
+                        lines.addLines (text.trim());
+                        for (auto& line : lines)
+                        {
+                            if (! line.startsWith ("- ") || ! line.contains (":")) continue;
+                            auto knob = line.fromFirstOccurrenceOf ("- ", false, false).upToFirstOccurrenceOf (":", false, false);
+                            juce::String spaced;
+                            juce::juce_wchar previous = 0;
+                            for (auto c : knob)
+                            {
+                                if (previous != 0 && juce::CharacterFunctions::isUpperCase (c) && juce::CharacterFunctions::isLowerCase (previous)) spaced << ' ';
+                                spaced << juce::String::charToString (c);
+                                previous = c;
+                            }
+                            line = "- " + spaced + line.fromFirstOccurrenceOf (":", true, false);
+                        }
+                        self->labState.modelExplanation = lines.joinIntoString ("\n");
                         self->labBroadcaster.sendChangeMessage();
                     }
             });
