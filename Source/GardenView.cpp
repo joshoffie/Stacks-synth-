@@ -117,6 +117,7 @@ public:
     {
         if (! dragging) return;
         dragging = false;
+        if (index < (int) garden.stretch.size()) garden.stretch[(size_t) index] = morphT;   // stay where it was dropped
         garden.processor.commitMorph (index, morphT);
     }
 
@@ -169,10 +170,12 @@ void GardenView::refresh()
     {
         shownGeneration = lab.generation;
         appearedAt.clear();
+        stretch.clear();
     }
     while (appearedAt.size() < lab.candidates.size())
         appearedAt.push_back (now);
     appearedAt.resize (lab.candidates.size());
+    stretch.resize (lab.candidates.size(), 0.0f);
 
     while (leaves.size() < lab.candidates.size())
     {
@@ -238,7 +241,8 @@ void GardenView::layoutLeaves()
         // Leaves that stray further from the seed sit further out.
         const int changes = lab.seedIsPatch ? countAudibleDifferences (c, lab.seed) : -1;
         const float closeness = changes < 0 ? 1.0f : juce::jlimit (0.72f, 1.12f, 0.72f + 0.4f * (float) changes / 14.0f);
-        const float len = (ai ? length : length * 0.82f) * closeness * eased;
+        const float dragged = i < (int) stretch.size() ? stretch[(size_t) i] : 0.0f;
+        const float len = (ai ? length : length * 0.82f) * (dragged > 0.0f ? dragged : closeness) * eased;
         const juce::Point<float> pos (centre.x + std::cos (angle) * len, centre.y - std::sin (angle) * len);
 
         auto& leaf = *leaves[(size_t) i];

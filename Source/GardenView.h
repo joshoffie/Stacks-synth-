@@ -41,6 +41,7 @@ private:
     std::vector<std::unique_ptr<Leaf>> leaves;
     std::vector<double> appearedAt;             // per leaf, for the sprout animation
     int hoveredLeaf = -1;
+    std::vector<float> stretch;                 // per leaf: where a drag left it (fraction of its branch), 0 = not dragged
     int shownGeneration = -1;
     double lastRefreshMs = 0.0;
 };
