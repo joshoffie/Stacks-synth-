@@ -192,13 +192,15 @@ float SynthVoice::lfoValueFor (int k, const SynthParams& p, int sampleInBlock, i
     return ctx.lfoTables->get (k).at (phase + phaseOffset);
 }
 
-// Built-in tables come from the shared bank, "User n" from the imported slots
-// (a sine stands in for an empty slot).
-float SynthVoice::readWave (int wave, int mip, float morph, float phase) const noexcept
+// Built-in tables come from the shared bank, "User n" from the imported slots,
+// "Custom" from the patch's designed table for this oscillator (a sine stands
+// in for an empty slot).
+float SynthVoice::readWave (int osc, int wave, int mip, float morph, float phase) const noexcept
 {
     if (wave < WavetableBank::kNumBuiltIn)
         return ctx.bank->read (wave, mip, morph, phase);
-    if (auto* table = ctx.user != nullptr ? ctx.user->active (wave - WavetableBank::kNumBuiltIn) : nullptr)
+    const int slot = wave >= kCustomWave ? UserWavetables::customSlot (osc) : wave - WavetableBank::kNumBuiltIn;
+    if (auto* table = ctx.user != nullptr ? ctx.user->active (slot) : nullptr)
         return table->read (mip, morph, phase);
     return std::sin (twoPi * phase);
 }
@@ -304,7 +306,7 @@ void SynthVoice::renderNextBlock (juce::AudioBuffer<float>& out, int startSample
         const int unison        = juce::jlimit (1, kMaxUnison, p.geti (P::unison_voices));
         const float detuneCents = p.get (P::unison_detune);
         const float spread      = p.get (P::unison_spread);
-        constexpr int kLastWave = WavetableBank::kNumBuiltIn + UserWavetables::kSlots - 1;
+        constexpr int kLastWave = kCustomWave;
         const int waveA         = juce::jlimit (0, kLastWave, p.geti (P::oscA_wave));
         const int waveB         = juce::jlimit (0, kLastWave, p.geti (P::oscB_wave));
         const float levelA      = p.get (P::oscA_level);
@@ -361,9 +363,9 @@ void SynthVoice::renderNextBlock (juce::AudioBuffer<float>& out, int startSample
             float l = 0.0f, r = 0.0f;
             for (int u = 0; u < unison; ++u)
             {
-                const float sB = readWave (waveB, mipB, morphB, phaseB[u]);
+                const float sB = readWave (1, waveB, mipB, morphB, phaseB[u]);
                 const float pa = wrap01 (phaseA[u] + fmDepth * sB);
-                const float sA = readWave (waveA, mipA, morphA, pa);
+                const float sA = readWave (0, waveA, mipA, morphA, pa);
                 const float s  = sA * levelA + sB * levelB;
                 l += s * gainL[u];
                 r += s * gainR[u];

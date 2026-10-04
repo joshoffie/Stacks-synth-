@@ -3,7 +3,9 @@
 #include <juce_core/juce_core.h>
 #include <juce_dsp/juce_dsp.h>
 #include <atomic>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace stacks
@@ -89,16 +91,56 @@ struct UserTable
     }
 };
 
+// A wavetable described by its spectrum: 2-4 frames of harmonic amplitudes
+// (harmonic 1 = the fundamental); the Morph knob sweeps from the first frame
+// to the last. `tail` continues the series above the listed harmonics with a
+// 1/k slope, so a table can be as bright as a saw without listing 1000 numbers.
+// This is what the AI (and the random breeder) design; it lives inside a patch.
+struct WaveSpec
+{
+    static constexpr int kHarmonics = 16;
+    static constexpr int kMaxFrames = 4;
+
+    juce::String name;
+    float tail = 0.0f;                        // 0..1
+    std::vector<std::vector<float>> frames;   // each kHarmonics amplitudes, 0..1
+
+    bool isEmpty() const noexcept { return frames.empty(); }
+    bool operator== (const WaveSpec&) const noexcept;
+    bool operator!= (const WaveSpec& o) const noexcept { return ! (*this == o); }
+
+    // Stored as 0..1 amplitudes ("frames"). The language model writes digits
+    // 0-9 instead ("spectra": 0 = silent, 9 = full, 4 dB per step); both are read.
+    juce::var toVar (bool asDigits = false) const;
+    static std::optional<WaveSpec> fromVar (const juce::var&);
+    juce::String toJson (bool asDigits = false) const;
+    static std::optional<WaveSpec> fromJson (const juce::String&);
+
+    static float digitToAmplitude (int digit) noexcept;
+    static int amplitudeToDigit (float amplitude) noexcept;
+};
+
+// Renders a spectrum into a playable, band-limited 16-frame table.
+std::shared_ptr<UserTable> buildSpectralTable (const WaveSpec&);
+
+// The spectrum of an existing wave at morph 0, 0.5 and 1, so a generator can
+// design a relative of it. `sample (morph, phase)` returns the waveform.
+WaveSpec analyseWave (const std::function<float (float, float)>& sample, const juce::String& name);
+
 // Reads a Serum-style wavetable (.wav of 2048-sample frames; other frame sizes
 // and single cycles are resampled). Returns null and fills `error` on failure.
 std::shared_ptr<UserTable> loadUserTable (const juce::File&, juce::String& error);
 
-// The four user slots. Published to the audio thread by atomic pointer; the
+// The imported user slots plus the two designed ("Custom") tables of the loaded
+// patch. Published to the audio thread by atomic pointer; the
 // previous table is kept alive until retireOld() says no voice can still read it.
 class UserWavetables
 {
 public:
-    static constexpr int kSlots = 4;
+    static constexpr int kUserSlots = 4;                       // "User 1-4": imported files
+    static constexpr int kCustomSlotA = 4, kCustomSlotB = 5;   // "Custom": the loaded patch's designed tables
+    static constexpr int kSlots = 6;
+    static int customSlot (int osc) noexcept                   { return osc == 0 ? kCustomSlotA : kCustomSlotB; }
 
     const UserTable* active (int slot) const noexcept
     {
@@ -110,9 +152,12 @@ public:
     juce::String name (int slot) const          { return slot >= 0 && slot < kSlots && owned[slot] ? owned[slot]->name : juce::String(); }
 
 private:
-    std::atomic<const UserTable*> slots[kSlots] { nullptr, nullptr, nullptr, nullptr };
+    std::atomic<const UserTable*> slots[kSlots] {};
     std::shared_ptr<UserTable> owned[kSlots];
     std::vector<std::pair<std::shared_ptr<UserTable>, double>> retired;
 };
+
+// Index of "Custom" in waveNames(): the built-ins, then User 1-4, then Custom.
+constexpr int kCustomWave = WavetableBank::kNumBuiltIn + UserWavetables::kUserSlots;
 
 } // namespace stacks

@@ -87,3 +87,31 @@ target_link_libraries(Stacks
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
+
+# ---- Tests: a console app over the engine-side code (no plug-in wrapper) ----
+# Run build.nosync/StacksTests_artefacts/Release/StacksTests after a build.
+juce_add_console_app(StacksTests PRODUCT_NAME "StacksTests")
+target_sources(StacksTests PRIVATE
+    Tests/Tests.cpp
+    Source/Parameters.cpp
+    Source/Wavetable.cpp
+    Source/Patch.cpp
+    Source/PatchGenerator.cpp
+    Source/ai/LlmPatchGenerator.cpp
+    Source/ai/LlamaBackend.cpp
+    Source/ai/OllamaBackend.cpp
+    Source/ai/ModelManager.cpp)
+target_include_directories(StacksTests PRIVATE Source)
+target_compile_definitions(StacksTests PRIVATE
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_STRICT_REFCOUNTEDPOINTER=1)
+target_link_libraries(StacksTests
+    PRIVATE
+        juce::juce_audio_processors
+        juce::juce_audio_formats
+        juce::juce_dsp
+        llama
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)

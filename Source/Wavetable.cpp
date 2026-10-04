@@ -2,6 +2,7 @@
 
 #include <juce_dsp/juce_dsp.h>
 #include <juce_audio_formats/juce_audio_formats.h>
+#include <algorithm>
 #include <cmath>
 #include <memory>
 
@@ -228,6 +229,197 @@ void UserWavetables::set (int slot, std::shared_ptr<UserTable> table)
         retired.emplace_back (owned[slot], juce::Time::getMillisecondCounterHiRes());
     owned[slot] = std::move (table);
     slots[slot].store (owned[slot].get(), std::memory_order_release);
+}
+
+//==============================================================================
+bool WaveSpec::operator== (const WaveSpec& o) const noexcept
+{
+    if (name != o.name || std::abs (tail - o.tail) > 1.0e-3f || frames.size() != o.frames.size())
+        return false;
+    for (size_t f = 0; f < frames.size(); ++f)
+    {
+        if (frames[f].size() != o.frames[f].size())
+            return false;
+        for (size_t k = 0; k < frames[f].size(); ++k)
+            if (std::abs (frames[f][k] - o.frames[f][k]) > 1.0e-3f)
+                return false;
+    }
+    return true;
+}
+
+float WaveSpec::digitToAmplitude (int digit) noexcept
+{
+    digit = juce::jlimit (0, 9, digit);
+    return digit == 0 ? 0.0f : std::pow (10.0f, -(float) (9 - digit) * 4.0f / 20.0f); // 4 dB per step
+}
+
+int WaveSpec::amplitudeToDigit (float amplitude) noexcept
+{
+    if (amplitude < 0.02f)
+        return 0;
+    return juce::jlimit (1, 9, 9 + juce::roundToInt (20.0f * std::log10 (juce::jmin (1.0f, amplitude)) / 4.0f));
+}
+
+juce::var WaveSpec::toVar (bool asDigits) const
+{
+    auto* obj = new juce::DynamicObject();
+    obj->setProperty ("name", name);
+    obj->setProperty ("tail", asDigits ? juce::var (juce::roundToInt (tail * 9.0f)) : juce::var (std::round (tail * 1000.0f) / 1000.0f));
+    juce::Array<juce::var> frameArray;
+    for (const auto& frame : frames)
+    {
+        juce::Array<juce::var> amps;
+        for (float a : frame)
+            amps.add (asDigits ? juce::var (amplitudeToDigit (a)) : juce::var (std::round (a * 1000.0f) / 1000.0f));
+        frameArray.add (juce::var (amps));
+    }
+    obj->setProperty (asDigits ? "spectra" : "frames", juce::var (frameArray));
+    return juce::var (obj);
+}
+
+std::optional<WaveSpec> WaveSpec::fromVar (const juce::var& v)
+{
+    auto* obj = v.getDynamicObject();
+    if (obj == nullptr)
+        return std::nullopt;
+
+    const bool digits = obj->hasProperty ("spectra");
+    const auto* frameArray = obj->getProperty (digits ? "spectra" : "frames").getArray();
+    if (frameArray == nullptr)
+        return std::nullopt;
+
+    WaveSpec s;
+    s.name = obj->getProperty ("name").toString().trim().substring (0, 24);
+    const auto tailVar = obj->getProperty ("tail");
+    s.tail = juce::jlimit (0.0f, 1.0f, digits ? (float) (int) tailVar / 9.0f : (float) (double) tailVar);
+
+    float peak = 0.0f;
+    for (const auto& frameVar : *frameArray)
+    {
+        auto* amps = frameVar.getArray();
+        if (amps == nullptr)
+            continue;
+        std::vector<float> frame ((size_t) kHarmonics, 0.0f);
+        for (int k = 0; k < kHarmonics && k < amps->size(); ++k)
+        {
+            const auto& a = (*amps)[k];
+            frame[(size_t) k] = digits ? digitToAmplitude ((int) a) : juce::jlimit (0.0f, 1.0f, (float) (double) a);
+            peak = std::max (peak, frame[(size_t) k]);
+        }
+        s.frames.push_back (std::move (frame));
+        if ((int) s.frames.size() >= kMaxFrames)
+            break;
+    }
+    if (s.frames.empty() || peak < 0.05f)   // nothing there, or silence
+        return std::nullopt;
+    return s;
+}
+
+juce::String WaveSpec::toJson (bool asDigits) const
+{
+    return juce::JSON::toString (toVar (asDigits), true);
+}
+
+std::optional<WaveSpec> WaveSpec::fromJson (const juce::String& text)
+{
+    if (text.trim().isEmpty())
+        return std::nullopt;
+    return fromVar (juce::JSON::parse (text));
+}
+
+namespace
+{
+    // The level the tail continues from: the loudest of the last four listed harmonics.
+    float tailAnchor (const std::vector<float>& frame)
+    {
+        float top = 0.0f;
+        for (size_t k = frame.size() >= 4 ? frame.size() - 4 : 0; k < frame.size(); ++k)
+            top = std::max (top, frame[k]);
+        return top;
+    }
+}
+
+std::shared_ptr<UserTable> buildSpectralTable (const WaveSpec& spec)
+{
+    if (spec.isEmpty())
+        return nullptr;
+
+    constexpr int kOutFrames = 16;
+    auto table = std::make_shared<UserTable>();
+    table->name = spec.name.isNotEmpty() ? spec.name : juce::String ("Designed");
+    table->frames = kOutFrames;
+    table->data.assign ((size_t) kOutFrames * Tables::kLevels * Tables::kStride, 0.0f);
+
+    juce::dsp::FFT fft (11);
+    std::vector<float> spectrum ((size_t) Tables::kSize * 2), cycle ((size_t) Tables::kSize);
+    const int last = (int) spec.frames.size() - 1;
+
+    for (int f = 0; f < kOutFrames; ++f)
+    {
+        const float pos = last > 0 ? (float) f / (float) (kOutFrames - 1) * (float) last : 0.0f;
+        const int i0 = juce::jlimit (0, last, (int) pos), i1 = juce::jmin (last, i0 + 1);
+        const float t = pos - (float) i0;
+        const auto& fa = spec.frames[(size_t) i0];
+        const auto& fb = spec.frames[(size_t) i1];
+
+        // Harmonic k is a sine with alternating sign, like a saw's series, so
+        // 1/k levels really make a saw and odd-only levels really make a square.
+        std::fill (spectrum.begin(), spectrum.end(), 0.0f);
+        auto setHarmonic = [&] (int k, float a) { spectrum[(size_t) k * 2 + 1] = (k % 2 == 1 ? -1.0f : 1.0f) * a; };
+        for (int k = 1; k <= WaveSpec::kHarmonics; ++k)
+            setHarmonic (k, fa[(size_t) (k - 1)] + (fb[(size_t) (k - 1)] - fa[(size_t) (k - 1)]) * t);
+
+        const float anchor = tailAnchor (fa) + (tailAnchor (fb) - tailAnchor (fa)) * t;
+        if (spec.tail > 0.001f && anchor > 0.0f)
+            for (int k = WaveSpec::kHarmonics + 1; k < Tables::kSize / 2; ++k)
+                setHarmonic (k, anchor * spec.tail * (float) WaveSpec::kHarmonics / (float) k);
+
+        fft.performRealOnlyInverseTransform (spectrum.data());
+        std::copy (spectrum.begin(), spectrum.begin() + Tables::kSize, cycle.begin());
+        Tables::buildMips (cycle.data(), table->data.data() + (size_t) f * Tables::kLevels * Tables::kStride);
+    }
+    return table;
+}
+
+WaveSpec analyseWave (const std::function<float (float, float)>& sample, const juce::String& name)
+{
+    WaveSpec spec;
+    spec.name = name;
+
+    juce::dsp::FFT fft (11);
+    std::vector<float> buf ((size_t) Tables::kSize * 2);
+    float tailSum = 0.0f;
+    int tailCount = 0;
+
+    for (float morph : { 0.0f, 0.5f, 1.0f })
+    {
+        std::fill (buf.begin(), buf.end(), 0.0f);
+        for (int i = 0; i < Tables::kSize; ++i)
+            buf[(size_t) i] = sample (morph, (float) i / (float) Tables::kSize);
+        fft.performRealOnlyForwardTransform (buf.data(), true);
+        auto magnitude = [&] (int k) { return std::hypot (buf[(size_t) k * 2], buf[(size_t) k * 2 + 1]); };
+
+        std::vector<float> frame ((size_t) WaveSpec::kHarmonics);
+        float peak = 1.0e-9f;
+        for (int k = 1; k <= WaveSpec::kHarmonics; ++k)
+        {
+            frame[(size_t) (k - 1)] = magnitude (k);
+            peak = std::max (peak, frame[(size_t) (k - 1)]);
+        }
+        for (auto& a : frame)
+            a = std::round (a / peak * 100.0f) / 100.0f;
+
+        const float anchor = tailAnchor (frame);
+        if (anchor > 0.02f)
+            for (int k = WaveSpec::kHarmonics + 1; k <= 64; ++k)
+            {
+                tailSum += (magnitude (k) / peak) / (anchor * (float) WaveSpec::kHarmonics / (float) k);
+                ++tailCount;
+            }
+        spec.frames.push_back (std::move (frame));
+    }
+    spec.tail = tailCount > 0 ? juce::jlimit (0.0f, 1.0f, std::round (tailSum / (float) tailCount * 10.0f) / 10.0f) : 0.0f;
+    return spec;
 }
 
 void UserWavetables::retireOld (double olderThanSeconds)

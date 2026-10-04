@@ -20,7 +20,10 @@ struct LabState
 {
     int generation = 0;
     std::vector<Patch> candidates;              // the current batch
-    std::vector<std::vector<Patch>> history;    // earlier batches, for "back"
+    struct Generation { std::vector<Patch> candidates; Patch seed; bool seedIsPatch = false; int generation = 0; };
+    std::vector<Generation> history;            // earlier batches, for "back"
+    Patch seed;                                 // what this generation grew from (the Garden's centre)
+    bool seedIsPatch = false;                   // a real sound you can hear again, not just a "fresh ideas" label
     int auditioned = -1;                        // index into candidates currently loaded
     bool generating = false;
     juce::String status;
@@ -87,6 +90,7 @@ public:
     void cancelGeneration();
     void goBackGeneration();
     void audition (int candidateIndex);
+    void auditionSeed();                                   // hear the parent of this generation again
 
     // Library: your saved patches, in your folders. The heart saves a sound
     // into the open folder (if it isn't saved yet) and marks it a favourite.
@@ -123,6 +127,11 @@ public:
     void cancelDownload();
     bool isDownloading() const                             { return downloader != nullptr && downloader->isRunning(); }
     bool isBusy() const                                    { return labState.generating || isDownloading(); }
+
+    // Let the generators invent new wavetables ("Custom") instead of only picking built-ins. Persisted.
+    bool designWavetables() const                          { return designWaves; }
+    void setDesignWavetables (bool);
+    const WaveSpec& customWave (int osc) const             { return customSpecs[osc & 1]; }
 
     static constexpr int kBatchSize = 10;
     static constexpr int kAiPatchesPerBatch = 5;           // the rest are instant Random variations
@@ -169,6 +178,7 @@ private:
     void handleAsyncUpdate() override;                     // rebuilds LFO tables on the message thread
     void rebuildLfoTables();
     void reloadUserWaves();                                // loads whatever the state tree names
+    void reloadCustomWaves();                              // builds the patch's designed tables from the state tree
     void attachStateListeners();
     void applyGlobalModulation();                          // modulated copy of the params for the effects
     juce::String labToJson() const;
@@ -178,6 +188,8 @@ private:
     // Synth engine
     juce::SharedResourcePointer<WavetableBank> bank;      // built once, shared by all instances
     UserWavetables userWaves;                             // per instance, named in the state tree
+    WaveSpec customSpecs[2];                              // what the Custom slots were built from
+    bool designWaves = true;
     SynthParams params;                                   // base values this block
     SynthParams fxParams;                                 // base + global modulation, read by the effects
     std::array<std::atomic<float>, kNumParams> liveValues {};

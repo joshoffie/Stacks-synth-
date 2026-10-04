@@ -54,6 +54,10 @@ juce::var Patch::toVar() const
         obj->setProperty ("userWaves", juce::var (waves));
     }
 
+    for (int osc = 0; osc < 2; ++osc)
+        if (! this->waves[(size_t) osc].isEmpty())
+            obj->setProperty (osc == 0 ? "waveA" : "waveB", this->waves[(size_t) osc].toVar());
+
     bool anyShape = false;
     for (const auto& sh : lfoShapes) anyShape = anyShape || sh.isNotEmpty();
     if (anyShape)
@@ -123,6 +127,7 @@ std::optional<Patch> Patch::fromVar (const juce::var& v, const Patch* base)
     {
         p.lfoShapes = base->lfoShapes;
         p.userWaves = base->userWaves;
+        p.waves = base->waves;
     }
     if (auto* waves = obj->getProperty ("userWaves").getDynamicObject())
         for (int k = 0; k < 4; ++k)
@@ -136,6 +141,9 @@ std::optional<Patch> Patch::fromVar (const juce::var& v, const Patch* base)
             const auto v = shapes->getProperty ("lfo" + juce::String (k + 1));
             if (v.isArray()) p.lfoShapes[(size_t) k] = juce::JSON::toString (v, true);
         }
+    for (int osc = 0; osc < 2; ++osc)
+        if (auto w = WaveSpec::fromVar (obj->getProperty (osc == 0 ? "waveA" : "waveB")))
+            p.waves[(size_t) osc] = *w;
 
     auto* params = obj->getProperty ("params").getDynamicObject();
     if (params == nullptr)
@@ -214,6 +222,17 @@ juce::Identifier Patch::userWaveProperty (int slot)
     return juce::Identifier ("user" + juce::String (slot + 1));
 }
 
+const juce::Identifier& Patch::customWavesTreeType()
+{
+    static const juce::Identifier type ("CustomWaves");
+    return type;
+}
+
+juce::Identifier Patch::customWaveProperty (int osc)
+{
+    return juce::Identifier (osc == 0 ? "waveA" : "waveB");
+}
+
 Patch Patch::capture (const juce::AudioProcessorValueTreeState& apvts)
 {
     Patch p;
@@ -231,6 +250,12 @@ Patch Patch::capture (const juce::AudioProcessorValueTreeState& apvts)
     if (waves.isValid())
         for (int k = 0; k < 4; ++k)
             p.userWaves[(size_t) k] = waves.getProperty (userWaveProperty (k)).toString();
+
+    auto custom = apvts.state.getChildWithName (customWavesTreeType());
+    if (custom.isValid())
+        for (int osc = 0; osc < 2; ++osc)
+            if (auto w = WaveSpec::fromJson (custom.getProperty (customWaveProperty (osc)).toString()))
+                p.waves[(size_t) osc] = *w;
     return p;
 }
 
@@ -255,6 +280,15 @@ void Patch::applyTo (juce::AudioProcessorValueTreeState& apvts) const
     for (int k = 0; k < 4; ++k)
         if (userWaves[(size_t) k].isNotEmpty())
             waves.setProperty (userWaveProperty (k), userWaves[(size_t) k], nullptr);
+
+    // The designed tables travel with the patch: set them, or clear them.
+    auto custom = apvts.state.getOrCreateChildWithName (customWavesTreeType(), nullptr);
+    for (int osc = 0; osc < 2; ++osc)
+    {
+        const auto& w = this->waves[(size_t) osc];
+        if (! w.isEmpty()) custom.setProperty (customWaveProperty (osc), w.toJson(), nullptr);
+        else               custom.removeProperty (customWaveProperty (osc), nullptr);
+    }
 }
 
 //==============================================================================
@@ -290,30 +324,61 @@ void keepPatchInTune (Patch& p)
         p.set (P::oscB_fine, juce::jlimit (-8.0f, 8.0f, p.get (P::oscB_fine)));
     }
 
-    // Pitch modulation: vibrato, a short attack drop or a performance bend,
-    // never a per-note detune (Velocity/Key/Random would put chords out of tune).
+    // Pitch modulation: a gentle vibrato, a short attack drop or a performance
+    // bend - never a per-note detune (Velocity/Key/Random would put chords out
+    // of tune) and never a stepped or random LFO, which is a trill or a drift.
     const int fineA = modTargetForParam ((int) P::oscA_fine), fineB = modTargetForParam ((int) P::oscB_fine);
+    const int cutoffTarget = modTargetForParam ((int) P::filter_cutoff);
+    auto lfoIsSmooth = [&] (int src)
+    {
+        const int shape = (int) p.get (lfoShapeParam (src - SrcLfo1));
+        return shape == ShapeSine || shape == ShapeTriangle;
+    };
     for (int i = 0; i < kNumModSlots; ++i)
     {
         const int src = (int) p.get (modSourceParam (i));
         const int dst = (int) p.get (modDestParam (i));
-        if (dst == fineA || (dst == fineB && audibleB))
+        if (src == SrcOff || dst == TargetOff)
+            continue;
+        const bool isLfo   = src >= SrcLfo1 && src <= SrcLfo4;
+        const bool toPitch = dst == TargetPitch || (dst == TargetPitchB && audibleB);
+        const bool toFine  = dst == fineA || (dst == fineB && audibleB);
+        if (! toPitch && ! toFine)
+            continue;
+        const float a = p.get (modAmountParam (i));
+
+        // A square, saw or random LFO on pitch: send that movement to the filter instead.
+        if (isLfo && ! lfoIsSmooth (src))
         {
-            // fine tune as a target: a few cents of wobble at most
-            p.set (modAmountParam (i), juce::jlimit (-0.08f, 0.08f, p.get (modAmountParam (i))));
+            p.set (modDestParam (i), (float) cutoffTarget);
+            p.set (modAmountParam (i), juce::jlimit (-0.3f, 0.3f, a));
             continue;
         }
-        if (dst != TargetPitch && ! (dst == TargetPitchB && audibleB))
-            continue;
+
         float cap = 0.0f;
-        switch (src)
+        if (toFine)
+            cap = isLfo ? 0.08f : (src == SrcModWheel || src == SrcAftertouch) ? 0.1f : 0.03f; // +-16 cents vibrato, +-6 cents drift
+        else switch (src)
         {
-            case SrcLfo1: case SrcLfo2: case SrcLfo3: case SrcLfo4: cap = 0.08f; break; // ~1 semitone vibrato
+            case SrcLfo1: case SrcLfo2: case SrcLfo3: case SrcLfo4: cap = 0.03f; break; // ~+-36 cents vibrato
             case SrcFilterEnv: case SrcModEnv:     cap = 0.35f; break; // pluck / drum pitch drop
-            case SrcModWheel: case SrcAftertouch:  cap = 0.17f; break; // whole-tone bend
+            case SrcModWheel:                      cap = 0.17f; break; // whole-tone bend
+            case SrcAftertouch:                    cap = 0.08f; break;
             default:                               cap = 0.0f;  break; // Velocity, Key, Random: no
         }
-        const float a = p.get (modAmountParam (i));
+
+        // An envelope that sustains above zero would hold the note off-key.
+        if (toPitch && src == SrcModEnv && p.get (P::menv_sustain) > 0.05f)
+            p.set (P::menv_sustain, 0.0f);
+        if (toPitch && src == SrcFilterEnv && p.get (P::fenv_sustain) > 0.05f)
+            cap = 0.0f;
+
+        if (cap <= 0.0f)
+        {
+            p.set (modSourceParam (i), (float) SrcOff);
+            p.set (modAmountParam (i), 0.0f);
+            continue;
+        }
         p.set (modAmountParam (i), juce::jlimit (-cap, cap, a));
     }
 
@@ -329,9 +394,10 @@ namespace
         return juce::String ((int) std::round (hz)) + " Hz";
     }
 
-    juce::String oscText (const Patch& p, P wave, P coarse)
+    juce::String oscText (const Patch& p, P wave, P coarse, const WaveSpec& designed)
     {
-        auto text = waveNames()[juce::jlimit (0, waveNames().size() - 1, (int) p.get (wave))];
+        const int idx = juce::jlimit (0, waveNames().size() - 1, (int) p.get (wave));
+        auto text = idx == kCustomWave && ! designed.isEmpty() ? designed.name : waveNames()[idx];
         const int st = (int) p.get (coarse);
         if (st != 0)
             text << "(" << (st > 0 ? "+" : "") << st << ")";
@@ -344,9 +410,9 @@ juce::String describePatch (const Patch& p)
     juce::StringArray parts;
 
     // Sources
-    juce::String src = oscText (p, P::oscA_wave, P::oscA_coarse);
+    juce::String src = oscText (p, P::oscA_wave, P::oscA_coarse, p.waves[0]);
     if (p.get (P::oscB_level) > 0.05f)
-        src << " + " << oscText (p, P::oscB_wave, P::oscB_coarse);
+        src << " + " << oscText (p, P::oscB_wave, P::oscB_coarse, p.waves[1]);
     const float fm = p.get (P::fm_amount);
     if (fm > 0.05f)
         src << (fm > 0.3f ? ", heavy FM" : ", light FM");

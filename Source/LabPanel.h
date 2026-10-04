@@ -89,7 +89,7 @@ private:
     void engineChosen();
     enum class View { garden, ideas, library };
     void showView (View);
-    void savePresetDialog();
+    void savePresetDialog (bool markFavourite = false);   // folder + name; the favourite flavour also sets the heart
 
     StacksAudioProcessor& processor;
 
@@ -99,6 +99,8 @@ private:
     juce::TextButton refreshEnginesButton;
     juce::TextEditor hint;
     juce::Slider variation;
+    juce::ToggleButton designWavesToggle { "Design wavetables" };
+    juce::TextButton favouriteButton;
     juce::TextButton newBatchButton { "Fresh ideas" }, evolveButton { "Evolve" }, backButton { "<" };
     juce::TextButton gardenTab { "GARDEN" }, ideasTab { "LIST" }, libraryTab { "LIBRARY" };
     View view = View::garden;

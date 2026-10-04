@@ -54,12 +54,12 @@ inline bool isBipolarSource (int src) noexcept
 
 // X(id, name, group, kind, min, max, default, skewCentre, unit, choices, aiHint)
 #define STACKS_PARAMS(X) \
- X(oscA_wave,      "A Wave",       "OSC A",      Choice,  0,     9,     2,     0,     "",   waveNames,       "oscillator A wavetable (User 1-4 are the player's imported tables; prefer the built-ins)") \
+ X(oscA_wave,      "A Wave",       "OSC A",      Choice,  0,     9,     2,     0,     "",   waveNames,       "oscillator A wavetable; Custom = the table designed in waveA (User 1-4 are the player's imported files: don't pick them)") \
  X(oscA_morph,     "A Morph",      "OSC A",      Float,   0,     1,     0.5,   0,     "",   nullptr,            "position inside wavetable A; changes its timbre") \
  X(oscA_coarse,    "A Coarse",     "OSC A",      Int,    -24,    24,    0,     0,     "st", nullptr,            "oscillator A transpose in semitones") \
  X(oscA_fine,      "A Fine",       "OSC A",      Float,  -100,   100,   0,     0,     "ct", nullptr,            "oscillator A detune in cents") \
  X(oscA_level,     "A Level",      "OSC A",      Float,   0,     1,     0.8,   0,     "",   nullptr,            "oscillator A volume") \
- X(oscB_wave,      "B Wave",       "OSC B",      Choice,  0,     9,     0,     0,     "",   waveNames,       "oscillator B wavetable (User 1-4 are the player's imported tables; prefer the built-ins)") \
+ X(oscB_wave,      "B Wave",       "OSC B",      Choice,  0,     9,     0,     0,     "",   waveNames,       "oscillator B wavetable; Custom = the table designed in waveB (User 1-4 are imported files: don't pick them)") \
  X(oscB_morph,     "B Morph",      "OSC B",      Float,   0,     1,     0.5,   0,     "",   nullptr,            "position inside wavetable B") \
  X(oscB_coarse,    "B Coarse",     "OSC B",      Int,    -24,    24,    0,     0,     "st", nullptr,            "oscillator B transpose in semitones (also the FM ratio)") \
  X(oscB_fine,      "B Fine",       "OSC B",      Float,  -100,   100,   5,     0,     "ct", nullptr,            "oscillator B detune in cents") \

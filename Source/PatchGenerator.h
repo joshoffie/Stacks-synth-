@@ -14,6 +14,8 @@ struct GenerationRequest
     juce::String hint;            // free-text direction from the user, may be empty
     int count = 10;
     float variation = 0.5f;       // 0 = subtle changes, 1 = wild
+    bool designWaves = true;      // invent new wavetables ("Custom") rather than only picking built-ins
+    juce::String brief;           // the AI's own description of what the hint should sound like (filled in by the generator)
     int generation = 1;
 };
 
@@ -52,6 +54,7 @@ public:
 
 private:
     std::atomic<int> counter { 0 };
+    juce::SharedResourcePointer<WavetableBank> bank;   // to analyse a parent's built-in wave
 };
 
 } // namespace stacks

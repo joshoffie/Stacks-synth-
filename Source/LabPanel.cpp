@@ -236,6 +236,18 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
     variation.setTooltip ("How far the children may stray from their parents");
     addAndMakeVisible (variation);
 
+    designWavesToggle.setTooltip ("Let the AI and the random breeder invent new wavetables for oscillator A (shown as \"Custom\"), "
+                                  "instead of only picking built-in ones. AI batches take about a third longer.");
+    designWavesToggle.setColour (juce::ToggleButton::textColourId, colours::muted);
+    designWavesToggle.setColour (juce::ToggleButton::tickColourId, colours::accent);
+    designWavesToggle.onClick = [this] { processor.setDesignWavetables (designWavesToggle.getToggleState()); };
+    addAndMakeVisible (designWavesToggle);
+
+    favouriteButton.setButtonText (heart() + " Favourite");
+    favouriteButton.setTooltip ("Save the sound you're hearing into a library folder of your choice and mark it a favourite");
+    favouriteButton.onClick = [this] { savePresetDialog (true); };
+    addAndMakeVisible (favouriteButton);
+
     newBatchButton.onClick = [this]
     {
         if (processor.lab().generating)
@@ -347,6 +359,8 @@ void LabPanel::resized()
 
     auto varRow = r.removeFromTop (22);
     variationLabel.setBounds (varRow.removeFromLeft (60));
+    designWavesToggle.setBounds (varRow.removeFromRight (150));
+    varRow.removeFromRight (6);
     variation.setBounds (varRow);
     r.removeFromTop (6);
 
@@ -355,6 +369,8 @@ void LabPanel::resized()
     buttons.removeFromLeft (6);
     newBatchButton.setBounds (buttons.removeFromLeft (104));
     buttons.removeFromLeft (6);
+    favouriteButton.setBounds (buttons.removeFromRight (100));
+    buttons.removeFromRight (6);
     evolveButton.setBounds (buttons);
     r.removeFromTop (4);
     progressStrip.setBounds (r.removeFromTop (26));
@@ -568,6 +584,9 @@ void LabPanel::refresh()
                              : "Ten new patches from scratch. Uses the direction text, not the current sound.");
     backButton.setEnabled (! busy && ! lab.history.empty());
     engineBox.setEnabled (! busy);
+    designWavesToggle.setToggleState (processor.designWavetables(), juce::dontSendNotification);
+    favouriteButton.setButtonText (heart() + (processor.currentIsFavourite() ? " Favourite  " : " Favourite"));
+    favouriteButton.setColour (juce::TextButton::buttonColourId, processor.currentIsFavourite() ? colours::accentDim : colours::card);
 
     // Candidate cards
     while (cards.size() < lab.candidates.size())
@@ -618,7 +637,7 @@ void LabPanel::refresh()
     resized();
 }
 
-void LabPanel::savePresetDialog()
+void LabPanel::savePresetDialog (bool markFavourite)
 {
     const auto folders = processor.libraryFolders();
     const auto root = StacksAudioProcessor::libraryRoot();
@@ -636,9 +655,10 @@ void LabPanel::savePresetDialog()
     const bool fromPreset = original.existsAsFile();
     const auto originalName = original.getFileNameWithoutExtension();
 
-    auto* w = new juce::AlertWindow ("Save preset",
+    auto* w = new juce::AlertWindow (markFavourite ? heart() + " Save as a favourite" : juce::String ("Save preset"),
                                      fromPreset ? "This sound came from \"" + originalName + "\"" + (processor.currentIsEdited() ? " and you've changed it." : ".")
-                                                : juce::String ("Saves exactly what you're hearing, knob tweaks included."),
+                                                : juce::String ("Saves exactly what you're hearing, knob tweaks included.")
+                                                  + (markFavourite ? " It gets a heart, so the library's " + heart() + " filter finds it." : juce::String()),
                                      juce::MessageBoxIconType::NoIcon);
     w->addTextEditor ("name", fromPreset ? originalName + " 2" : processor.currentPatchName(), "Name for the new preset");
     w->addComboBox ("folder", names, "Folder");
@@ -647,18 +667,23 @@ void LabPanel::savePresetDialog()
     if (fromPreset)
         w->addButton ("Overwrite \"" + originalName + "\"", 2);
     w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
-    w->enterModalState (true, juce::ModalCallbackFunction::create ([this, w, folders, original, originalName] (int result)
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([this, w, folders, original, originalName, markFavourite] (int result)
     {
         if (result == 2)
         {
             processor.savePreset (originalName, original.getParentDirectory(), false);
-            return;
         }
-        if (result != 1) return;
-        const int idx = w->getComboBoxComponent ("folder")->getSelectedItemIndex();
-        const auto folder = idx >= 0 && idx < (int) folders.size() ? folders[(size_t) idx] : StacksAudioProcessor::libraryRoot();
-        processor.savePreset (w->getTextEditorContents ("name"), folder, true);
-        processor.setLibraryFolder (folder);
+        else if (result == 1)
+        {
+            const int idx = w->getComboBoxComponent ("folder")->getSelectedItemIndex();
+            const auto folder = idx >= 0 && idx < (int) folders.size() ? folders[(size_t) idx] : StacksAudioProcessor::libraryRoot();
+            processor.savePreset (w->getTextEditorContents ("name"), folder, true);
+            processor.setLibraryFolder (folder);
+        }
+        else
+            return;
+        if (markFavourite && ! processor.currentIsFavourite())
+            processor.favouriteCurrent();
     }), true);
 }
 

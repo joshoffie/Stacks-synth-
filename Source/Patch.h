@@ -6,6 +6,7 @@
 
 #include "Parameters.h"
 #include "LfoTable.h"
+#include "Wavetable.h"
 
 namespace stacks
 {
@@ -23,6 +24,7 @@ struct Patch
     std::array<float, kNumParams> values;  // real-world values; Choice params hold the index
     std::array<juce::String, kNumLfos> lfoShapes; // drawn LFO shapes as point JSON, empty = none
     std::array<juce::String, 4> userWaves;        // file names of the imported wavetables in User 1-4
+    std::array<WaveSpec, 2> waves;                // designed tables behind "Custom" for osc A and osc B
     juce::String filePath;                 // library file this patch is saved as (not part of the JSON)
     bool favourite = false;                // the heart
 
@@ -50,6 +52,8 @@ struct Patch
     static juce::Identifier lfoShapeProperty (int k);
     static const juce::Identifier& userWavesTreeType();
     static juce::Identifier userWaveProperty (int slot);
+    static const juce::Identifier& customWavesTreeType();   // the designed tables, as JSON per oscillator
+    static juce::Identifier customWaveProperty (int osc);
 };
 
 // Keeps a patch in tune with the note that is played: oscillator A only at

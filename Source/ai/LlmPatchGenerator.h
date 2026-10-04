@@ -21,9 +21,9 @@ public:
     std::vector<Patch> generate (const GenerationRequest&, const GenerationProgress&) override;
 
     // Exposed so the prompt can be inspected / tuned.
-    static juce::String systemPrompt();
+    static juce::String systemPrompt (bool designWaves = true);
     static juce::String userPrompt (const GenerationRequest&);
-    static juce::String grammar (int patchCount); // GBNF for {"patches":[exactly patchCount]} built from the parameter table
+    static juce::String grammar (int patchCount, bool designWaves = true); // GBNF for {"patches":[exactly patchCount]} built from the parameter table
 
 private:
     std::shared_ptr<LlmBackend> backend;

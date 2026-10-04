@@ -105,7 +105,8 @@ void WaveDisplay::timerCallback()
 {
     const int wave = (int) processor.apvts.getRawParameterValue (paramId (oscB ? P::oscB_wave : P::oscA_wave))->load();
     const float morph = processor.apvts.getRawParameterValue (paramId (oscB ? P::oscB_morph : P::oscA_morph))->load();
-    const auto name = wave >= WavetableBank::kNumBuiltIn ? processor.userWaveName (wave - WavetableBank::kNumBuiltIn) : juce::String();
+    const int slot = wave >= kCustomWave ? UserWavetables::customSlot (oscB ? 1 : 0) : wave - WavetableBank::kNumBuiltIn;
+    const auto name = wave >= WavetableBank::kNumBuiltIn ? processor.userWaveName (slot) : juce::String();
     if (wave != shownWave || std::abs (morph - shownMorph) > 0.002f || name != shownName)
     {
         shownWave = wave;
@@ -123,7 +124,8 @@ void WaveDisplay::paint (juce::Graphics& g)
 
     const int wave = juce::jmax (0, shownWave);
     const float morph = juce::jlimit (0.0f, 1.0f, shownMorph);
-    const int user = wave - WavetableBank::kNumBuiltIn;
+    const bool custom = wave >= kCustomWave;
+    const int user = custom ? UserWavetables::customSlot (oscB ? 1 : 0) : wave - WavetableBank::kNumBuiltIn;
     const UserTable* table = user >= 0 ? processor.userWavetables().active (user) : nullptr;
 
     juce::Path path;
@@ -144,7 +146,8 @@ void WaveDisplay::paint (juce::Graphics& g)
 
     g.setColour (colours::muted);
     g.setFont (juce::Font (juce::FontOptions (9.5f)));
-    const auto caption = user >= 0 ? (table != nullptr ? shownName.upToLastOccurrenceOf (".", false, false) : juce::String ("click to import"))
+    const auto caption = custom    ? (table != nullptr ? shownName : juce::String ("no table designed"))
+                       : user >= 0 ? (table != nullptr ? shownName.upToLastOccurrenceOf (".", false, false) : juce::String ("click to import"))
                                    : juce::String ("import...");
     g.drawText (caption, getLocalBounds().removeFromBottom (14), juce::Justification::centred, true);
     g.drawText ("Shape", getLocalBounds().removeFromTop (14), juce::Justification::centred, true);
@@ -158,7 +161,7 @@ void WaveDisplay::mouseDown (const juce::MouseEvent&)
 void WaveDisplay::importWavetable()
 {
     const int wave = (int) processor.apvts.getRawParameterValue (paramId (oscB ? P::oscB_wave : P::oscA_wave))->load();
-    const int slot = wave >= WavetableBank::kNumBuiltIn ? wave - WavetableBank::kNumBuiltIn : processor.firstFreeUserSlot();
+    const int slot = wave >= WavetableBank::kNumBuiltIn && wave < kCustomWave ? wave - WavetableBank::kNumBuiltIn : processor.firstFreeUserSlot();
 
     chooser = std::make_unique<juce::FileChooser> ("Import a wavetable (.wav with 2048-sample frames, Serum style)",
                                                    juce::File::getSpecialLocation (juce::File::userHomeDirectory), "*.wav;*.aif;*.aiff");

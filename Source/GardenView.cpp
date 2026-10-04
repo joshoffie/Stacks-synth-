@@ -227,6 +227,10 @@ void GardenView::mouseDown (const juce::MouseEvent& e)
             menu.addItem (heart() + "  Favourite this sound", [this] { processor.favouriteCurrent(); });
             menu.showMenuAsync (juce::PopupMenu::Options());
         }
+        else if (processor.lab().seedIsPatch)
+        {
+            processor.auditionSeed();   // hear the parent of this generation again
+        }
     }
 }
 
@@ -235,6 +239,8 @@ void GardenView::paint (juce::Graphics& g)
 {
     const auto& lab = processor.lab();
     const auto centre = seedCentre();
+    // The seed is what this generation grew from, not whatever is loaded now.
+    const auto seedLabel = lab.generation > 0 && lab.seed.name.isNotEmpty() ? lab.seed.name : processor.currentPatchName();
 
     // Branches
     for (int i = 0; i < (int) leaves.size(); ++i)
@@ -282,7 +288,7 @@ void GardenView::paint (juce::Graphics& g)
     }
     g.setColour (colours::text);
     g.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
-    g.drawFittedText (processor.currentPatchName(), juce::Rectangle<float> (centre.x - kSeedRadius + 4.0f, centre.y - kSeedRadius + 6.0f,
+    g.drawFittedText (seedLabel, juce::Rectangle<float> (centre.x - kSeedRadius + 4.0f, centre.y - kSeedRadius + 6.0f,
                                                                            2.0f * kSeedRadius - 8.0f, 2.0f * kSeedRadius - 12.0f).toNearestInt(),
                       juce::Justification::centred, 3, 0.8f);
 
@@ -314,7 +320,8 @@ void GardenView::paint (juce::Graphics& g)
     else if (lab.candidates.empty())
         text = "Press Fresh ideas to grow the first leaves. Click a leaf to hear it, drag it outward for wilder children.";
     else
-        text = "click a leaf: hear   -   drag outward: wilder   -   right-click a leaf: plant it   -   Evolve grows from the seed";
+        text = lab.seedIsPatch ? "click a leaf: hear   -   click the seed: hear the parent again   -   drag a leaf outward: wilder   -   right-click a leaf: plant it"
+                               : "click a leaf: hear   -   drag a leaf outward: wilder   -   right-click a leaf: plant it   -   Evolve grows from what you're hearing";
     g.drawFittedText (text, footer, juce::Justification::centred, 2, 0.9f);
 
     if (lab.generation > 0)

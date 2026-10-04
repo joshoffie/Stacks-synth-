@@ -69,7 +69,7 @@ private:
     float lfoValue (int shape, float phase, float held) const noexcept;
     void updateEnvelopes (const SynthParams&);
 
-    float readWave (int wave, int mip, float morph, float phase) const noexcept;
+    float readWave (int osc, int wave, int mip, float morph, float phase) const noexcept;
     float lfoValueFor (int k, const SynthParams& p, int sampleInBlock, int blockLen, float& heldOut) noexcept;
     float sourceValue (int source, const float* lfo, float filterEnvValue, float modEnvValue) const noexcept;
 

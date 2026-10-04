@@ -427,7 +427,7 @@ namespace
                 const juce::String id (s.id);
                 const float chance = id.endsWith ("_wave") ? 0.3f : id.endsWith ("_dest") ? 0.04f : id.endsWith ("_source") ? 0.06f : 0.12f;
                 if (rng.chance (amount * chance))
-                    p.set (i, (float) rng.r.nextInt (s.choices().size()));
+                    p.set (i, (float) rng.r.nextInt (id.endsWith ("_wave") ? WavetableBank::kNumBuiltIn : s.choices().size()));
                 continue;
             }
 
@@ -458,10 +458,107 @@ namespace
             {
                 currentGroup = specs[(size_t) i].group;
                 donor = &parents[(size_t) rng.r.nextInt ((int) parents.size())];
+                if (currentGroup == "OSC A") child.waves[0] = donor->waves[0];   // a designed table follows its oscillator
+                if (currentGroup == "OSC B") child.waves[1] = donor->waves[1];
             }
             child.values[(size_t) i] = donor->values[(size_t) i];
         }
         return child;
+    }
+
+    //--------------------------------------------------------------------------
+    // Designed wavetables: a spectrum recipe (a 1/k^slope series, maybe odd
+    // harmonics only, maybe sparse partials, maybe a formant bump) in three
+    // frames that drift, so the Morph knob has somewhere to go.
+    WaveSpec randomWaveSpec (int archetype, Rng& rng)
+    {
+        WaveSpec s;
+        const float slope  = archetype == Bass || archetype == Lead ? rng.uni (0.5f, 1.2f) : rng.uni (0.5f, 2.0f);
+        const bool oddOnly = rng.chance (archetype == Bass || archetype == Lead ? 0.4f : 0.25f);
+        const bool sparse  = archetype == Bell || archetype == Keys ? rng.chance (0.6f) : rng.chance (0.15f);
+        const int bumpAt   = rng.chance (archetype == Texture || archetype == Pad ? 0.7f : 0.4f) ? 3 + rng.r.nextInt (10) : 0;
+        const float bumpW  = rng.uni (1.0f, 3.0f), bumpGain = rng.uni (1.5f, 4.0f);
+        const float drift  = rng.uni (-1.0f, 1.0f);   // how the frames change: brighter or darker, the bump moving
+
+        bool keep[WaveSpec::kHarmonics];
+        for (int k = 0; k < WaveSpec::kHarmonics; ++k)
+            keep[k] = ! sparse || k == 0 || rng.chance (0.3f);
+
+        for (int f = 0; f < 3; ++f)
+        {
+            const float m = (float) f / 2.0f;
+            std::vector<float> frame ((size_t) WaveSpec::kHarmonics, 0.0f);
+            float peak = 1.0e-6f;
+            for (int k = 1; k <= WaveSpec::kHarmonics; ++k)
+            {
+                float a = std::pow ((float) k, -(slope + drift * (m - 0.5f)));
+                if (oddOnly && k % 2 == 0) a *= 0.04f;
+                if (! keep[k - 1])         a *= 0.03f;
+                if (bumpAt > 0)
+                {
+                    const float centre = (float) bumpAt + drift * m * 4.0f;
+                    a *= 1.0f + bumpGain * std::exp (-std::pow (((float) k - centre) / bumpW, 2.0f));
+                }
+                frame[(size_t) (k - 1)] = a;
+                peak = std::max (peak, a);
+            }
+            for (auto& a : frame)
+                a = std::round (a / peak * 100.0f) / 100.0f;
+            s.frames.push_back (std::move (frame));
+        }
+        s.tail = rng.chance (0.5f) ? std::round (rng.uni (0.1f, 0.9f) * 10.0f) / 10.0f : 0.0f;
+        s.name = randomName (archetype, rng);
+        return s;
+    }
+
+    WaveSpec mutateWaveSpec (const WaveSpec& parent, float amount, Rng& rng)
+    {
+        WaveSpec s = parent;
+        for (auto& frame : s.frames)
+        {
+            float peak = 1.0e-6f;
+            for (auto& a : frame)
+            {
+                if (rng.chance (0.2f + 0.6f * amount))
+                    a = juce::jlimit (0.0f, 1.0f, a * std::exp (rng.gauss() * 0.6f * amount)
+                                                    + (rng.chance (0.1f * amount) ? rng.uni (0.0f, 0.3f) : 0.0f));
+                peak = std::max (peak, a);
+            }
+            for (auto& a : frame)
+                a = std::round (a / peak * 100.0f) / 100.0f;
+        }
+        if (rng.chance (0.5f))
+            s.tail = juce::jlimit (0.0f, 1.0f, std::round ((s.tail + rng.gauss() * 0.3f * amount) * 10.0f) / 10.0f);
+        s.name = childName (parent.name.isNotEmpty() ? parent.name : juce::String ("Wave"), rng);
+        return s;
+    }
+
+    // Gives oscillator A a designed table: a fresh recipe for a new patch, or a
+    // relative of the parent's table (designed or built-in) when evolving.
+    void designWave (Patch& p, const GenerationRequest& req, const WavetableBank& bank, int archetype, Rng& rng)
+    {
+        if (req.parents.empty())
+        {
+            if (! rng.chance (0.6f))
+                return;
+            p.waves[0] = randomWaveSpec (archetype, rng);
+            p.set (P::oscA_wave, (float) kCustomWave);
+            return;
+        }
+
+        if (! rng.chance (0.7f))
+            return;
+        const int wave = (int) p.get (P::oscA_wave);
+        WaveSpec base;
+        if (wave == kCustomWave && ! p.waves[0].isEmpty())
+            base = p.waves[0];
+        else if (wave < WavetableBank::kNumBuiltIn)
+            base = analyseWave ([&] (float morph, float phase) { return bank.read (wave, 0, morph, phase >= 1.0f ? 0.999f : phase); },
+                                waveNames()[wave]);
+        else
+            return;   // an imported file: leave it alone
+        p.waves[0] = mutateWaveSpec (base, 0.2f + 0.8f * req.variation, rng);
+        p.set (P::oscA_wave, (float) kCustomWave);
     }
 
     // Cheap keyword steering until the language model takes over the hint.
@@ -540,11 +637,12 @@ std::vector<Patch> RandomPatchGenerator::generate (const GenerationRequest& req,
     for (int i = 0; i < req.count; ++i)
     {
         Patch p;
+        int archetype = hintArchetype >= 0 ? hintArchetype : rng.r.nextInt (NumArchetypes);
         if (req.parents.empty())
         {
             // Fresh: cycle through the archetypes so a batch has range, unless
             // the hint asks for a specific kind of sound.
-            const int archetype = hintArchetype >= 0 ? hintArchetype : (i + rng.r.nextInt (NumArchetypes)) % NumArchetypes;
+            archetype = hintArchetype >= 0 ? hintArchetype : (i + rng.r.nextInt (NumArchetypes)) % NumArchetypes;
             p = randomPatch (archetype, rng);
             if (req.variation > 0.6f)
                 mutate (p, (req.variation - 0.6f) * 1.5f, rng);
@@ -557,6 +655,8 @@ std::vector<Patch> RandomPatchGenerator::generate (const GenerationRequest& req,
             p.name = childName (req.parents[(size_t) rng.r.nextInt ((int) req.parents.size())].name, rng);
         }
 
+        if (req.designWaves)
+            designWave (p, req, *bank, archetype, rng);
         applyHint (p, hintLower, rng);
         keepPatchInTune (p);
         p.set (P::master_gain, -6.0f);

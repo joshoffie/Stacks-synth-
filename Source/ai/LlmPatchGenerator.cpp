@@ -29,18 +29,18 @@ namespace
         return juce::JSON::toString (v, true);
     }
 
-    // Settings every patch must state, in this order (the grammar enforces it), followed by one
-    // real connection in slot 1. Without this, small models write 4-5 values and no modulation.
+    // Settings every patch must state, in this order (the grammar enforces it),
+    // followed by one real connection. Without this, small models write 4-5
+    // values and no modulation; with too many forced values they fill in
+    // numbers they don't understand instead of leaning on the defaults.
     const std::vector<const char*>& coreParamIds()
     {
         static const std::vector<const char*> ids {
-            "oscA_wave", "oscA_morph", "oscA_coarse", "oscA_level",
-            "oscB_wave", "oscB_morph", "oscB_coarse", "oscB_level",
-            "sub_level", "noise_level", "fm_amount",
-            "filter_type", "filter_cutoff", "filter_res", "filter_env", "fenv_decay",
+            "oscA_wave", "oscA_morph", "oscA_level",
+            "oscB_wave", "oscB_coarse", "oscB_level", "fm_amount", "sub_level",
+            "filter_type", "filter_cutoff", "filter_res", "filter_env", "fenv_decay", "fenv_sustain",
             "aenv_attack", "aenv_decay", "aenv_sustain", "aenv_release",
-            "lfo1_shape", "lfo1_rate",
-            "unison_voices", "chorus_mix", "delay_mix", "reverb_mix"
+            "unison_voices", "reverb_mix"
         };
         return ids;
     }
@@ -48,12 +48,63 @@ namespace
     bool isCoreParam (const char* id)
     {
         const std::string s (id);
-        if (s == "mod1_source" || s == "mod1_dest" || s == "mod1_amount")
-            return true;
         for (auto* c : coreParamIds())
             if (s == c)
                 return true;
         return false;
+    }
+
+    // Connections the model may write: slots 1-6, each as one unit whose target
+    // list fits its source. LFO 3/4 and slots 7-12 are left to the player.
+    constexpr int kAiSlots = 6;
+    const std::vector<const char*> kLfoTargets    { "A Morph", "B Morph", "Cutoff", "Resonance", "FM B>A", "Amp", "Pan", "Pitch", "Sub", "Noise",
+                                                    "Chorus Mix", "Delay Mix", "Reverb Mix", "Shimmer", "Detune", "Drive" };
+    const std::vector<const char*> kEnvTargets    { "Pitch", "Pitch B", "Cutoff", "A Morph", "B Morph", "FM B>A", "B Level", "Noise", "Resonance", "Drive" };
+    const std::vector<const char*> kVelTargets    { "Cutoff", "Amp", "FM B>A", "A Morph", "Drive", "Resonance", "Decay", "Noise", "B Level" };
+    const std::vector<const char*> kKeyTargets    { "Cutoff", "Pan", "A Morph", "Decay", "Release", "Detune" };
+    const std::vector<const char*> kPerfTargets   { "Cutoff", "FM B>A", "A Morph", "B Morph", "Resonance", "Drive", "Chorus Mix", "Reverb Mix", "Delay Mix", "LFO1 Rate", "Amp" };
+    const std::vector<const char*> kRandomTargets { "A Morph", "B Morph", "Cutoff", "Pan", "Detune", "Decay", "FM B>A" };
+
+    juce::String joinNames (const std::vector<const char*>& names)
+    {
+        juce::StringArray a;
+        for (auto* n : names)
+            if (modTargetNames().contains (n))
+                a.add (n);
+        return a.joinIntoString (", ");
+    }
+
+    // A setting the model may add after the core: not a connection key (those
+    // come as units), not LFO 1/2's shape/rate/sync (they come with their
+    // connection), not LFO 3/4 at all.
+    bool isExtraParam (const char* id)
+    {
+        const juce::String s (id);
+        if (s == "master_gain" || isCoreParam (id) || s.startsWith ("mod") || s.startsWith ("lfo3_") || s.startsWith ("lfo4_"))
+            return false;
+        if ((s.startsWith ("lfo1_") || s.startsWith ("lfo2_")) && (s.endsWith ("_shape") || s.endsWith ("_rate") || s.endsWith ("_sync")))
+            return false;
+        return true;
+    }
+
+    // The parent's oscillator spectra, so a descendant's table can be a relative of them.
+    juce::String parentSpectra (const Patch& parent)
+    {
+        static juce::SharedResourcePointer<WavetableBank> bank;
+        juce::String s;
+        for (int osc = 0; osc < 2; ++osc)
+        {
+            if (osc == 1 && parent.get (P::oscB_level) <= 0.05f)
+                continue;
+            const int wave = (int) parent.get (osc == 0 ? P::oscA_wave : P::oscB_wave);
+            const juce::String key = osc == 0 ? "waveA" : "waveB";
+            if (wave == kCustomWave && ! parent.waves[(size_t) osc].isEmpty())
+                s << key << " (its designed table): " << parent.waves[(size_t) osc].toJson (true) << "\n";
+            else if (wave < WavetableBank::kNumBuiltIn)
+                s << key << " (spectrum of its " << waveNames()[wave] << " table at morph 0, 0.5 and 1): "
+                  << analyseWave ([&] (float m, float ph) { return bank->read (wave, 0, m, ph >= 1.0f ? 0.999f : ph); }, waveNames()[wave]).toJson (true) << "\n";
+        }
+        return s;
     }
 
     // "EchoingPad" -> "Echoing Pad"; models often drop the space.
@@ -208,13 +259,13 @@ juce::String LlmPatchGenerator::name() const
     return backend->name() + " " + backend->modelName();
 }
 
-juce::String LlmPatchGenerator::systemPrompt()
+juce::String LlmPatchGenerator::systemPrompt (bool designWaves)
 {
     juce::String s;
     s << "You are an expert sound designer programming Stacks, a polyphonic hybrid wavetable/FM synthesizer.\n"
       << "Signal path: oscillators A and B (morphing wavetables; B can frequency-modulate A), plus a sub oscillator and noise, "
       << "into a ladder filter with its own envelope, then the amplitude envelope, then chorus, delay and reverb. "
-      << "Four LFOs, a mod envelope, velocity, key, mod wheel, aftertouch and per-note random are wired to targets through twelve connections. Unison stacks detuned copies of a note for width.\n\n"
+      << "LFOs, a mod envelope, velocity, key, mod wheel, aftertouch and per-note random are wired to targets through connections. Unison stacks detuned copies of a note for width.\n\n"
       << "Parameters (id: range [unit] - meaning):\n";
 
     // The four LFOs and twelve connections are described once each as families.
@@ -229,13 +280,11 @@ juce::String LlmPatchGenerator::systemPrompt()
         {
             if (! id.startsWith ("lfo1_")) continue;
             id = "lfoN_" + id.fromFirstOccurrenceOf ("_", false, false);
-            suffix = " (N = 1 to 4)";
+            suffix = " (N = 1 or 2)";
         }
         else if (id.startsWith ("mod") && (id.endsWith ("_source") || id.endsWith ("_dest") || id.endsWith ("_amount")))
         {
-            if (! id.startsWith ("mod1_")) continue;
-            id = "modN_" + id.fromFirstOccurrenceOf ("_", false, false);
-            suffix = " (N = 1 to 12)";
+            continue; // described as connections below
         }
 
         s << id << suffix << ": ";
@@ -251,12 +300,19 @@ juce::String LlmPatchGenerator::systemPrompt()
       << "Sync = aggressive hard-sync (morph raises the sync pitch); Organ = drawbars (morph changes the registration); "
       << "Formant = vocal (morph moves the formant up); Glass = sparse bell-like partials; "
       << "Fold = wavefolded sine (morph adds folds, saturated); Grit = noisy random harmonics (digital, lo-fi).\n"
-      << "Modulation is routed with connections (modN_source, modN_dest, modN_amount); modN_dest is Pitch, Pitch B, Amp, Pan or the exact name of a knob, "
-      << "and the amount is a fraction of that knob's travel (bipolar sources swing both ways). LFOs do nothing until a connection uses them. "
-      << "Typical: LFO 1 > A Morph 0.2-0.4 for slow movement (lfo1_rate 0.05-0.5); LFO 1 > Pitch 0.02-0.05 with lfo1_rate 4-7 for vibrato; "
-      << "Velocity > Cutoff 0.2-0.5 so dynamics matter; Mod Env > FM B>A or A Morph 0.3-0.6 for an evolving attack (menv_decay 0.2-1, menv_sustain 0); "
-      << "Mod Wheel > Cutoff 0.3-0.6 for live control; LFO 2 > Chorus Mix or Reverb Mix 0.2-0.4 for effects that breathe; Random > A Morph 0.1-0.3 for per-note variation. "
-      << "Every patch uses at least one connection; Velocity > Cutoff is the usual minimum.\n"
+      << "Connections route modulation: modN_source, modN_dest, modN_amount (N = 1 to " << kAiSlots << "), written together. Each source only goes to targets that suit it:\n"
+      << "  LFO 1 or LFO 2 > " << joinNames (kLfoTargets) << "  (write that LFO's lfoN_shape, lfoN_rate and lfoN_sync right before the connection)\n"
+      << "  Filter Env or Mod Env > " << joinNames (kEnvTargets) << "  (Mod Env: write menv_decay and menv_sustain right before it)\n"
+      << "  Velocity > " << joinNames (kVelTargets) << "\n"
+      << "  Key > " << joinNames (kKeyTargets) << "\n"
+      << "  Mod Wheel or Aftertouch > " << joinNames (kPerfTargets) << "\n"
+      << "  Random (a new value on every note) > " << joinNames (kRandomTargets) << "\n"
+      << "amount is -1 to 1: a fraction of the target knob's travel (on Pitch, 1 = 12 semitones). "
+      << "Using LFOs well: a slow Sine or Triangle at 0.05-0.5 Hz on A Morph, Cutoff or Pan (0.2-0.4) gives pads and textures life; "
+      << "a Sine at 4-7 Hz on Pitch at 0.02-0.03 is vibrato, on Amp at 0.2-0.4 tremolo; a Square or Random with lfoN_sync 1/8 or 1/16 on Cutoff, Pan or A Morph (0.3-0.5) chops rhythmically; "
+      << "an LFO on Chorus Mix, Reverb Mix or Shimmer (0.2-0.4) makes the effects breathe. Never put a Square, Saw, Ramp or Random LFO on Pitch. "
+      << "Velocity > Cutoff 0.2-0.5 makes playing dynamics matter; Mod Env (menv_decay 0.2-1, menv_sustain 0) > FM B>A or A Morph 0.3-0.6 gives an evolving attack; Mod Wheel > Cutoff 0.3-0.6 is live control. "
+      << "Every patch has at least one connection and most have two or three; each one should be clearly audible and musical.\n"
       << "Effects: reverb_type Shimmer with reverb_shimmer 0.3-0.7 gives a glowing octave-up halo (pads, textures); Hall for long tails, Room for short; "
       << "chorus_mode Ensemble is a lush string-machine, Dimension is wide and subtle, Flanger needs chorus_feedback 0.4-0.8; "
       << "delay_mode Ping-Pong with delay_sync 1/8 or 1/8D suits plucks and leads, Tape is dark and wobbly.\n"
@@ -268,21 +324,33 @@ juce::String LlmPatchGenerator::systemPrompt()
       << "textures want Grit, Formant or Fold, some noise, LFOs routed to Morph A or FM, and long delay feedback.\n"
       << "Stay in tune with the played note: oscA_coarse only -24, -12, 0, 12 or 24; oscB_coarse at octaves when oscB_level is above 0.05, "
       << "or 7, 19 or 24 only when B is a silent FM modulator; keep oscA_fine within -12..12 and oscB_fine within -20..20 cents; "
-      << "a slot to Pitch is only for vibrato (LFO, amount up to 0.08) or an attack pitch drop (Mod Env, amount up to 0.35); never Velocity, Key or Random to Pitch.\n"
+      << "Pitch is only modulated for vibrato (Sine LFO, amount up to 0.03) or an attack pitch drop (Mod Env with menv_sustain 0, amount up to 0.35); never Velocity, Key or Random to Pitch.\n"
       << "Avoid filter_res above 0.8 together with filter_drive above 4, and aenv_attack above 3.\n\n"
-      << "Reply with JSON only, no prose, in exactly this shape:\n"
-      << "{\"patches\":[{\"name\":\"Velvet Horizon\",\"category\":\"Pad\",\"description\":\"one vivid sentence about how it sounds\",\"parent\":1,"
-      << "\"params\":{\"oscA_wave\":\"Saw\",\"oscA_morph\":0.4,\"oscA_coarse\":0,\"oscA_level\":0.8,"
-      << "\"oscB_wave\":\"Triangle\",\"oscB_morph\":0.2,\"oscB_coarse\":-12,\"oscB_level\":0.4,\"sub_level\":0.2,\"noise_level\":0,\"fm_amount\":0,"
-      << "\"filter_type\":\"LP24\",\"filter_cutoff\":1800,\"filter_res\":0.2,\"filter_env\":1.5,\"fenv_decay\":0.8,"
-      << "\"aenv_attack\":0.6,\"aenv_decay\":1,\"aenv_sustain\":0.8,\"aenv_release\":1.5,\"lfo1_shape\":\"Sine\",\"lfo1_rate\":0.2,"
-      << "\"unison_voices\":3,\"chorus_mix\":0.3,\"delay_mix\":0.1,\"reverb_mix\":0.35,"
-      << "\"mod1_source\":\"LFO 1\",\"mod1_dest\":\"A Morph\",\"mod1_amount\":0.3,"
-      << "\"mod2_source\":\"Velocity\",\"mod2_dest\":\"Cutoff\",\"mod2_amount\":0.4,\"reverb_type\":\"Hall\",\"unison_detune\":18}}]}\n"
-      << "The example shows the shape only - never reuse its name or values. category is one of Pad, Pluck, Bass, Keys, Lead, Bell, Texture, Drone. "
+      << "Reply with JSON only, no prose. Shape (angle brackets are placeholders for your own choices, never copy them):\n"
+      << "{\"patches\":[{\"name\":\"<two words>\",\"category\":\"<Pad|Pluck|Bass|Keys|Lead|Bell|Texture|Drone>\",\"description\":\"<one vivid sentence about how it sounds>\",\"parent\":<1>,"
+      << "\"params\":{\"oscA_wave\":\"<wave>\",\"oscA_morph\":<0-1>,\"oscA_level\":<0-1>,"
+      << "\"oscB_wave\":\"<wave>\",\"oscB_coarse\":<semitones>,\"oscB_level\":<0-1>,\"fm_amount\":<0-1>,\"sub_level\":<0-1>,"
+      << "\"filter_type\":\"<type>\",\"filter_cutoff\":<Hz>,\"filter_res\":<0-1>,\"filter_env\":<-5..5>,\"fenv_decay\":<seconds>,\"fenv_sustain\":<0-1>,"
+      << "\"aenv_attack\":<seconds>,\"aenv_decay\":<seconds>,\"aenv_sustain\":<0-1>,\"aenv_release\":<seconds>,"
+      << "\"unison_voices\":<1-4>,\"reverb_mix\":<0-1>,"
+      << "\"mod1_source\":\"<source>\",\"mod1_dest\":\"<a target that suits the source>\",\"mod1_amount\":<-1..1>,<any extra settings and connections>}";
+    if (designWaves)
+        s << ",\"waveA\":{\"name\":\"<two words>\",\"tail\":<0-9>,\"spectra\":[[<16 digits>],[<16 digits>],[<16 digits>]]}";
+    s << "}]}\n"
+      << "category is one of Pad, Pluck, Bass, Keys, Lead, Bell, Texture, Drone. "
       << "params always starts with these core settings in this exact order: " << juce::StringArray (coreParamIds().data(), (int) coreParamIds().size()).joinIntoString (", ")
-      << ", then the first connection (mod1_source, mod1_dest, mod1_amount - never Off), then any extra settings that define the sound "
-      << "(a second or third connection, LFO 2, effect details, glide, filter drive...). Every parameter you omit keeps its base value. "
+      << ", then the first connection, then any extra settings that define the sound "
+      << "(more connections, oscA_coarse, noise, chorus and delay, effect details, glide, filter drive...). Every parameter you omit keeps its base value. ";
+    if (designWaves)
+        s << "\nWavetable design: every patch ends with \"waveA\", a brand-new wavetable for oscillator A (oscA_wave then becomes Custom). "
+          << "Each spectrum lists the levels of harmonics 1-16 as digits 0-9 (9 = full, every step down is 4 dB quieter, 0 = silent); "
+          << "give 2 to 4 spectra that differ - the Morph knob sweeps from the first to the last. "
+          << "tail = how much the harmonics above 16 keep going (0 = mellow, 9 = as bright as a saw). "
+          << "Recipes: saw 9,8,7,6,5,5,5,4,4,4,4,3,3,3,3,3 - square 9,0,7,0,6,0,5,0,5,0,4,0,4,0,4,0 - hollow 9,2,8,2,5,1,3,1,2,0,1,0,1,0,0,0 - "
+          << "glassy bell 9,0,0,6,0,0,5,0,0,0,4,0,0,0,0,3 (sparse partials) - vocal 5,8,9,9,6,3,2,1,1,0,0,0,0,0,0,0 (a bump is a formant) - "
+          << "organ 9,8,0,7,0,0,0,6,0,0,0,0,0,0,0,0. Invent your own that fits the sound and give it a two-word name; never copy a recipe exactly. "
+          << "\"waveB\" (same format) is optional and designs oscillator B instead of a built-in.\n";
+    s
       << "Use plain numbers without units and the exact option names for choice parameters. "
       << "Make every patch in a batch clearly different from the others. "
       << "Write compact JSON on a single line with no indentation, no newlines, no markdown fences and nothing before or after it.";
@@ -300,7 +368,11 @@ juce::String LlmPatchGenerator::userPrompt (const GenerationRequest& req)
             s << "Direction from the user: \"" << req.hint.trim() << "\". Follow it closely.\n";
         else
             s << "Cover a range of categories: pads, plucks, basses, keys, leads, bells, textures.\n";
+        if (req.brief.isNotEmpty())
+            s << "Sound brief (your own notes on that direction - turn it into settings): " << req.brief << "\n";
         s << variationPhrase (req.variation, false) << "\n";
+        if (req.designWaves)
+            s << "Design a new wavetable (waveA) for each one.\n";
     }
     else
     {
@@ -312,6 +384,8 @@ juce::String LlmPatchGenerator::userPrompt (const GenerationRequest& req)
             if (parent.category.isNotEmpty()) s << " (" << parent.category << ")";
             if (parent.description.isNotEmpty()) s << ": " << parent.description;
             s << "\nparams: " << compactParams (parent) << "\n";
+            if (req.designWaves)
+                s << parentSpectra (parent);
         }
         s << "Create " << req.count << " descendants. Keep what makes the parents appealing and vary them "
           << variationPhrase (req.variation, true) << ". ";
@@ -319,8 +393,12 @@ juce::String LlmPatchGenerator::userPrompt (const GenerationRequest& req)
             s << "Let some descendants combine traits from two parents. ";
         s << "Set \"parent\" to the number of the parent whose values fill in anything you omit. "
           << "Give each descendant a fresh two-word name that shares one word with its parent.\n";
+        if (req.designWaves)
+            s << "Design each descendant's waveA as a relative of its parent's spectrum: keep the character, change the shape.\n";
         if (req.hint.trim().isNotEmpty())
             s << "Direction from the user: \"" << req.hint.trim() << "\". Follow it closely.\n";
+        if (req.brief.isNotEmpty())
+            s << "Sound brief (your own notes on that direction - turn it into settings): " << req.brief << "\n";
     }
 
     s << "The \"patches\" array must contain exactly " << req.count << " entries - do not stop early.\n"
@@ -328,7 +406,7 @@ juce::String LlmPatchGenerator::userPrompt (const GenerationRequest& req)
     return s;
 }
 
-juce::String LlmPatchGenerator::grammar (int patchCount)
+juce::String LlmPatchGenerator::grammar (int patchCount, bool designWaves)
 {
     patchCount = juce::jlimit (1, 20, patchCount);
     auto lit = [] (const juce::String& text)
@@ -344,7 +422,9 @@ juce::String LlmPatchGenerator::grammar (int patchCount)
         g << " (" << lit (",") << " patch){" << (patchCount - 1) << "}";
     g << " " << lit ("]}") << "\n"
       << "patch ::= " << lit ("{\"name\":") << " name " << lit (",\"category\":") << " category "
-      << lit (",\"description\":") << " desc " << lit (",\"parent\":") << " int " << lit (",\"params\":{") << " params " << lit ("}}") << "\n"
+      << lit (",\"description\":") << " desc " << lit (",\"parent\":") << " int " << lit (",\"params\":{") << " params " << lit ("}")
+      << (designWaves ? " " + lit (",\"waveA\":") + " wave (" + lit (",\"waveB\":") + " wave)?" : juce::String())
+      << " " << lit ("}") << "\n"
       << "params ::= core (" << lit (",") << " param)*\n";
 
     // GBNF rule names may contain '-' but not '_', so "oscA_wave" becomes rule "p-oscA-wave".
@@ -357,28 +437,66 @@ juce::String LlmPatchGenerator::grammar (int patchCount)
     coreRules.add ("conn1");
     g << "core ::= " << coreRules.joinIntoString (" " + lit (",") + " ") << "\n";
 
-    auto choicesWithoutOff = [&] (const ParamSpec& spec)
+    // Connections are units: source, target and amount together, with a target
+    // list that fits the source, so an LFO can't land on a fine-tune and
+    // velocity can't land on the reverb width. LFO units also carry that LFO's
+    // shape, rate and sync; the Mod Env unit carries its decay and sustain.
+    auto targetRule = [&] (const juce::String& rule, const std::vector<const char*>& names)
     {
         juce::StringArray options;
-        for (const auto& c : spec.choices())
-            if (c != "Off")
-                options.add (lit ("\"" + c + "\""));
-        return "(" + options.joinIntoString (" | ") + ")";
+        for (auto* n : names)
+            if (modTargetNames().contains (n))
+                options.add (lit ("\"" + juce::String (n) + "\""));
+        g << rule << " ::= " << options.joinIntoString (" | ") << "\n";
     };
-    g << "conn1 ::= " << key ("mod1_source") << " " << choicesWithoutOff (spec (modSourceParam (0)))
-      << " " << lit (",") << " " << key ("mod1_dest") << " " << choicesWithoutOff (spec (modDestParam (0)))
-      << " " << lit (",") << " " << key ("mod1_amount") << " num\n";
+    targetRule ("lfo-target", kLfoTargets);
+    targetRule ("env-target", kEnvTargets);
+    targetRule ("vel-target", kVelTargets);
+    targetRule ("key-target", kKeyTargets);
+    targetRule ("perf-target", kPerfTargets);
+    targetRule ("rnd-target", kRandomTargets);
 
-    // Extras: anything that is not already part of the core.
+    for (int n = 1; n <= kAiSlots; ++n)
+    {
+        const juce::String N (n);
+        auto unit = [&] (const juce::String& rule, const juce::String& prefix, const juce::String& sourceAlternatives, const juce::String& target)
+        {
+            g << rule << N << " ::= " << prefix << lit ("\"mod" + N + "_source\":") << " " << sourceAlternatives << " "
+              << lit (",\"mod" + N + "_dest\":") << " " << target << " " << lit (",\"mod" + N + "_amount\":") << " num\n";
+        };
+        const juce::String comma = " " + lit (",") + " ";
+        unit ("lfo1-conn", "p-lfo1-shape" + comma + "p-lfo1-rate" + comma + "p-lfo1-sync" + comma, lit ("\"LFO 1\""), "lfo-target");
+        unit ("lfo2-conn", "p-lfo2-shape" + comma + "p-lfo2-rate" + comma + "p-lfo2-sync" + comma, lit ("\"LFO 2\""), "lfo-target");
+        unit ("fenv-conn", "", lit ("\"Filter Env\""), "env-target");
+        unit ("menv-conn", "p-menv-decay" + comma + "p-menv-sustain" + comma, lit ("\"Mod Env\""), "env-target");
+        unit ("vel-conn",  "", lit ("\"Velocity\""), "vel-target");
+        unit ("key-conn",  "", lit ("\"Key\""), "key-target");
+        unit ("perf-conn", "", "(" + lit ("\"Mod Wheel\"") + " | " + lit ("\"Aftertouch\"") + ")", "perf-target");
+        unit ("rnd-conn",  "", lit ("\"Random\""), "rnd-target");
+        g << "conn" << N << " ::= lfo1-conn" << N << " | lfo2-conn" << N << " | fenv-conn" << N << " | menv-conn" << N
+          << " | vel-conn" << N << " | key-conn" << N << " | perf-conn" << N << " | rnd-conn" << N << "\n";
+    }
+
+    // Extras: anything that is not already part of the core, plus more connections.
     juce::StringArray alternatives;
     for (const auto& spec : paramSpecs())
-        if (std::string (spec.id) != "master_gain" && ! isCoreParam (spec.id))
+        if (isExtraParam (spec.id))
             alternatives.add (ruleName (spec.id));
+    for (int n = 2; n <= kAiSlots; ++n)
+        alternatives.add ("conn" + juce::String (n));
     g << "param ::= " << alternatives.joinIntoString (" | ") << "\n";
+
+    // Only rules the grammar references.
+    auto isUsed = [&] (const char* id)
+    {
+        const juce::String s (id);
+        return isCoreParam (id) || isExtraParam (id) || s == "menv_decay" || s == "menv_sustain"
+            || ((s.startsWith ("lfo1_") || s.startsWith ("lfo2_")) && (s.endsWith ("_shape") || s.endsWith ("_rate") || s.endsWith ("_sync")));
+    };
 
     for (const auto& spec : paramSpecs())
     {
-        if (std::string (spec.id) == "master_gain")
+        if (! isUsed (spec.id))
             continue;
         g << ruleName (spec.id) << " ::= " << key (spec.id) << " ";
         if (spec.kind == ParamKind::Choice)
@@ -418,16 +536,46 @@ juce::String LlmPatchGenerator::grammar (int patchCount)
       << "num ::= \"-\"? [0-9]{1,5} (\".\" [0-9]{1,4})?\n"
       << "int ::= [0-9]{1,2}\n"
       << "sint ::= \"-\"? [0-9]{1,2}\n";
+    if (designWaves)
+        g << "wave ::= " << lit ("{\"name\":") << " name " << lit (",\"tail\":") << " digit " << lit (",\"spectra\":[")
+          << " spectrum (" << lit (",") << " spectrum){1,3} " << lit ("]}") << "\n"
+          << "spectrum ::= " << lit ("[") << " digit (" << lit (",") << " digit){15} " << lit ("]") << "\n"
+          << "digit ::= [0-9]\n";
     return g;
 }
 
-std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& req, const GenerationProgress& progress)
+std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request, const GenerationProgress& progress)
 {
     juce::String reason;
     if (! backend->isAvailable (reason))
     {
         progress.status ("AI unavailable (" + reason + ") - using Random");
-        return fallback->generate (req, progress);
+        return fallback->generate (request, progress);
+    }
+
+    // A style or artist reference ("like MGMT", "80s Italo bass") is a lot to
+    // ask of a small model mid-JSON. So first it writes a few sentences about
+    // what that should sound like in synth terms, and designs from those.
+    GenerationRequest req = request;
+    if (req.hint.trim().isNotEmpty() && ! progress.cancelled())
+    {
+        const auto hint = req.hint.trim();
+        progress.status ("Thinking about \"" + hint + "\"...");
+        progress.progress (0.0f, "Thinking about what \"" + hint + "\" should sound like...");
+        juce::String brief, briefError;
+        const juce::String briefGrammar = "root ::= [\\x20-\\x7E\\n]{80,700}\n";
+        backend->chat ("You are an expert synthesizer sound designer with encyclopaedic knowledge of artists, songs and genres.",
+                       "In three or four short sentences, describe the synthesizer sound(s) for this request: \"" + hint + "\". "
+                       "Be concrete: waveforms and layering, filter and envelope shape, movement (what the LFOs modulate and how fast), effects, and the vibe. "
+                       "If it names an artist, song or genre, describe the synth sounds they are known for. No preamble. /no_think",
+                       briefGrammar,
+                       [&] (const juce::String& t) { brief += t; },
+                       [&] (const juce::String& phase) { progress.status (phase); },
+                       [&] { return progress.cancelled() || brief.length() > 900; },
+                       briefError);
+        req.brief = brief.replace ("\n", " ").trim().substring (0, 900);
+        if (progress.cancelled())
+            return {};
     }
 
     progress.status ("Asking " + backend->modelName() + "...");
@@ -437,8 +585,8 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& req, co
         auto dir = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
                        .getChildFile ("Application Support").getChildFile ("Stacks");
         dir.createDirectory();
-        dir.getChildFile ("last-ai-prompt.txt").replaceWithText (systemPrompt() + "\n\n----- USER -----\n" + userPrompt (req));
-        dir.getChildFile ("grammar.gbnf").replaceWithText (grammar (req.count));
+        dir.getChildFile ("last-ai-prompt.txt").replaceWithText (systemPrompt (req.designWaves) + "\n\n----- USER -----\n" + userPrompt (req));
+        dir.getChildFile ("grammar.gbnf").replaceWithText (grammar (req.count, req.designWaves));
     }
 
     std::vector<Patch> out;
@@ -466,6 +614,17 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& req, co
         auto patch = Patch::fromVar (v, base);
         if (! patch)
             return;
+
+        // A designed table switches its oscillator to Custom; Custom without a table falls back to a saw.
+        if (auto* obj = v.getDynamicObject())
+            for (int osc = 0; osc < 2; ++osc)
+            {
+                const P waveParam = osc == 0 ? P::oscA_wave : P::oscB_wave;
+                if (obj->hasProperty (osc == 0 ? "waveA" : "waveB") && ! patch->waves[(size_t) osc].isEmpty())
+                    patch->set (waveParam, (float) kCustomWave);
+                if ((int) patch->get (waveParam) == kCustomWave && patch->waves[(size_t) osc].isEmpty())
+                    patch->set (waveParam, 2.0f);
+            }
 
         // Small models sometimes repeat themselves; a duplicate helps nobody.
         for (const auto& existing : out)
@@ -530,7 +689,7 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& req, co
     };
 
     juce::String error, rawReply;
-    const bool ok = backend->chat (systemPrompt(), userPrompt (req), grammar (req.count),
+    const bool ok = backend->chat (systemPrompt (req.designWaves), userPrompt (req), grammar (req.count, req.designWaves),
                                    [&] (const juce::String& delta) { rawReply << delta; parser.feed (delta); reportProgress (false); },
                                    [&] (const juce::String& phaseText) { progress.progress (-1.0f, phaseText); },
                                    progress.shouldCancel, error);

@@ -75,6 +75,7 @@ StacksAudioProcessor::StacksAudioProcessor()
     attachStateListeners();
     rebuildLfoTables();
     reloadUserWaves();
+    reloadCustomWaves();
 
     refreshModels();
     loadEngineFromSettings();
@@ -307,6 +308,7 @@ void StacksAudioProcessor::setStateInformation (const void* data, int sizeInByte
             attachStateListeners();
             rebuildLfoTables();
             reloadUserWaves();
+            reloadCustomWaves();
         }
 
         auto lab = root.getChildWithName ("Lab");
@@ -318,6 +320,8 @@ void StacksAudioProcessor::setStateInformation (const void* data, int sizeInByte
         apvts.replaceState (root);
         attachStateListeners();
         rebuildLfoTables();
+        reloadUserWaves();
+        reloadCustomWaves();
     }
 
     labBroadcaster.sendChangeMessage();
@@ -329,24 +333,26 @@ void StacksAudioProcessor::attachStateListeners()
     apvts.state.removeListener (this);
     apvts.state.getOrCreateChildWithName (Patch::lfoShapesTreeType(), nullptr);
     apvts.state.getOrCreateChildWithName (Patch::userWavesTreeType(), nullptr);
+    apvts.state.getOrCreateChildWithName (Patch::customWavesTreeType(), nullptr);
     apvts.state.addListener (this);
 }
 
 void StacksAudioProcessor::parameterChanged (const juce::String&, float)     { triggerAsyncUpdate(); }
 void StacksAudioProcessor::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&)
 {
-    if (tree.hasType (Patch::lfoShapesTreeType()) || tree.hasType (Patch::userWavesTreeType()))
+    if (tree.hasType (Patch::lfoShapesTreeType()) || tree.hasType (Patch::userWavesTreeType()) || tree.hasType (Patch::customWavesTreeType()))
         triggerAsyncUpdate();
 }
 void StacksAudioProcessor::valueTreeChildAdded (juce::ValueTree&, juce::ValueTree& child)
 {
-    if (child.hasType (Patch::lfoShapesTreeType()) || child.hasType (Patch::userWavesTreeType()))
+    if (child.hasType (Patch::lfoShapesTreeType()) || child.hasType (Patch::userWavesTreeType()) || child.hasType (Patch::customWavesTreeType()))
         triggerAsyncUpdate();
 }
 void StacksAudioProcessor::handleAsyncUpdate()
 {
     rebuildLfoTables();
     reloadUserWaves();
+    reloadCustomWaves();
 }
 
 void StacksAudioProcessor::rebuildLfoTables()
@@ -514,6 +520,7 @@ void StacksAudioProcessor::setCurrentPatchName (const juce::String& name)
 void StacksAudioProcessor::loadEngineFromSettings()
 {
     auto& s = settings();
+    designWaves = s.getBoolValue ("designWaves", true);
     EngineChoice choice;
     const auto kind = s.getValue ("engine", "random");
     choice.kind  = kind == "ollama" ? EngineKind::Ollama : kind == "builtin" ? EngineKind::Builtin : EngineKind::Random;
@@ -575,7 +582,7 @@ juce::File StacksAudioProcessor::wavetablesDirectory()
 
 int StacksAudioProcessor::firstFreeUserSlot() const
 {
-    for (int i = 0; i < UserWavetables::kSlots; ++i)
+    for (int i = 0; i < UserWavetables::kUserSlots; ++i)
         if (userWaves.active (i) == nullptr)
             return i;
     return 0;
@@ -602,7 +609,7 @@ bool StacksAudioProcessor::importWavetable (const juce::File& source, int slot, 
     if (table == nullptr)
         return false;
 
-    slot = juce::jlimit (0, UserWavetables::kSlots - 1, slot);
+    slot = juce::jlimit (0, UserWavetables::kUserSlots - 1, slot);
     userWaves.set (slot, std::move (table));
     auto waves = apvts.state.getOrCreateChildWithName (Patch::userWavesTreeType(), nullptr);
     waves.setProperty (Patch::userWaveProperty (slot), target.getFileName(), nullptr);
@@ -615,7 +622,7 @@ void StacksAudioProcessor::reloadUserWaves()
     auto waves = apvts.state.getChildWithName (Patch::userWavesTreeType());
     if (! waves.isValid())
         return;
-    for (int slot = 0; slot < UserWavetables::kSlots; ++slot)
+    for (int slot = 0; slot < UserWavetables::kUserSlots; ++slot)
     {
         const auto name = waves.getProperty (Patch::userWaveProperty (slot)).toString();
         if (name.isEmpty() || name == userWaves.name (slot))
@@ -624,6 +631,34 @@ void StacksAudioProcessor::reloadUserWaves()
         if (auto table = loadUserTable (wavetablesDirectory().getChildFile (name), error))
             userWaves.set (slot, std::move (table));
     }
+}
+
+// The "Custom" wave of each oscillator is the designed table stored with the
+// patch (as JSON in the state tree). Rebuilt only when the spectrum changes.
+void StacksAudioProcessor::reloadCustomWaves()
+{
+    auto tree = apvts.state.getChildWithName (Patch::customWavesTreeType());
+    for (int osc = 0; osc < 2; ++osc)
+    {
+        WaveSpec spec;
+        if (tree.isValid())
+            if (auto parsed = WaveSpec::fromJson (tree.getProperty (Patch::customWaveProperty (osc)).toString()))
+                spec = *parsed;
+        const int slot = UserWavetables::customSlot (osc);
+        if (spec == customSpecs[osc] && (spec.isEmpty() == (userWaves.active (slot) == nullptr)))
+            continue;
+        customSpecs[osc] = spec;
+        userWaves.set (slot, spec.isEmpty() ? nullptr : buildSpectralTable (spec));
+    }
+}
+
+void StacksAudioProcessor::setDesignWavetables (bool shouldDesign)
+{
+    designWaves = shouldDesign;
+    auto& s = settings();
+    s.setValue ("designWaves", shouldDesign);
+    s.saveIfNeeded();
+    labBroadcaster.sendChangeMessage();
 }
 
 void StacksAudioProcessor::refreshModels()
@@ -768,13 +803,28 @@ void StacksAudioProcessor::startGeneration (GenerationRequest req)
     // somewhere to land. The sound that is loaded stays exactly as it is.
     if (! labState.candidates.empty())
     {
-        labState.history.push_back (std::move (labState.candidates));
+        labState.history.push_back ({ std::move (labState.candidates), labState.seed, labState.seedIsPatch, labState.generation });
         if (labState.history.size() > 20)
             labState.history.erase (labState.history.begin());
     }
     labState.candidates.clear();
     labState.auditioned = -1;
     labState.generation = req.generation;
+    req.designWaves = designWaves;
+
+    // The Garden's seed is what this batch grows from. Loading other sounds
+    // later (from the library, say) leaves the garden exactly as it is.
+    if (! req.parents.empty())
+    {
+        labState.seed = req.parents.front();
+        labState.seedIsPatch = true;
+    }
+    else
+    {
+        labState.seed = Patch();
+        labState.seed.name = req.hint.trim().isNotEmpty() ? "\"" + req.hint.trim() + "\"" : juce::String ("Fresh ideas");
+        labState.seedIsPatch = false;
+    }
     labState.generating = true;
     labState.status = "Generating with " + engineName() + "...";
 
@@ -909,9 +959,12 @@ void StacksAudioProcessor::goBackGeneration()
     if (labState.history.empty() || labState.generating)
         return;
 
-    labState.candidates = std::move (labState.history.back());
+    auto& previous = labState.history.back();
+    labState.candidates = std::move (previous.candidates);
+    labState.seed = std::move (previous.seed);
+    labState.seedIsPatch = previous.seedIsPatch;
+    labState.generation = juce::jmax (1, previous.generation > 0 ? previous.generation : labState.generation - 1);
     labState.history.pop_back();
-    labState.generation = juce::jmax (1, labState.generation - 1);
     labState.status = "Generation " + juce::String (labState.generation) + "  (restored)";
     labState.auditioned = -1;
     labBroadcaster.sendChangeMessage();
@@ -924,6 +977,15 @@ void StacksAudioProcessor::audition (int index)
 
     applyPatch (labState.candidates[(size_t) index]);
     labState.auditioned = index;
+    labBroadcaster.sendChangeMessage();
+}
+
+void StacksAudioProcessor::auditionSeed()
+{
+    if (! labState.seedIsPatch)
+        return;
+    applyPatch (labState.seed);
+    labState.auditioned = -1;
     labBroadcaster.sendChangeMessage();
 }
 
@@ -1076,6 +1138,8 @@ juce::String StacksAudioProcessor::labToJson() const
     obj->setProperty ("patchCategory", patchCategory);
     obj->setProperty ("patchOrigin", patchOrigin);
     obj->setProperty ("candidates", toArray (labState.candidates));
+    obj->setProperty ("seed", labState.seed.toVar());
+    obj->setProperty ("seedIsPatch", labState.seedIsPatch);
     obj->setProperty ("patchFile", patchFile);
     obj->setProperty ("patchFavourite", patchFavourite);
     return juce::JSON::toString (juce::var (obj), true);
@@ -1105,6 +1169,11 @@ void StacksAudioProcessor::labFromJson (const juce::String& json)
     labState.generation = (int) obj->getProperty ("generation");
     labState.auditioned = (int) obj->getProperty ("auditioned");
     labState.candidates = readArray (obj->getProperty ("candidates"));
+    // Sessions saved before the seed existed show the loaded sound as the seed.
+    labState.seed = Patch();
+    labState.seed.name.clear();
+    if (auto seed = Patch::fromVar (obj->getProperty ("seed"))) labState.seed = *seed;
+    labState.seedIsPatch = (bool) obj->getProperty ("seedIsPatch");
     patchFile = obj->getProperty ("patchFile").toString();
     patchFavourite = (bool) obj->getProperty ("patchFavourite");
     labState.history.clear();

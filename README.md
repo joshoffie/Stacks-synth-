@@ -36,7 +36,8 @@ colour-coded (knob colour = row). The tabs above them switch between **ALL**
 (every row at once) and one row at a time, enlarged to fill the panel:
 
 1. **SOUND** — Osc A, Osc B (morphing wavetables, importable "User 1-4"
-   tables via each oscillator's Shape cell), Mix (sub, noise, FM B→A)
+   tables via each oscillator's Shape cell, and **Custom**: a table the AI or
+   the random breeder designed for this patch), Mix (sub, noise, FM B→A)
 2. **FILTER** — ladder filter, its envelope, the amp envelope
 3. **MODULATORS** — LFO 1-4 with drawable shapes, the Mod Env, Assign, plus
    Voice (unison, glide). See *Modulators* below.
@@ -87,11 +88,24 @@ the model is on, its name as soon as it is known, and how many settings it has
 written so far; the Garden draws the same progress as a ring around the seed.
 
 1. **Fresh ideas** — ten new patches from the direction text alone. **Evolve** —
-   ten descendants of your ♥ favourites (or of the sound you're playing, if you
-   have none). The sound you're playing is never replaced; it stays pinned at
-   the top as *Now Playing*.
-2. Click a card to load it and play; click its ♥ to keep it as a parent.
-3. Type a direction ("darker", "more movement", "plucky") to steer the next round.
+   ten descendants of the sound you're playing. The sound you're playing is
+   never replaced; it stays pinned at the top of the LIST as *Now Playing*,
+   and the Garden's seed is whatever this generation grew from, so loading
+   other sounds (from the library, say) leaves the Garden alone. Click the
+   seed to hear the parent again.
+2. Click a leaf or card to load it and play. **♥ Favourite** saves what you're
+   hearing into a library folder of your choice and gives it a heart.
+3. Type a direction ("darker", "more movement", "in the style of MGMT") to
+   steer the next round. With an AI engine, the model first writes itself a
+   short *sound brief* about what that direction should sound like, then
+   designs from it.
+4. **Design wavetables** (on by default) lets both the AI and the random
+   breeder invent a new wavetable for oscillator A in most patches - written
+   as a spectrum (harmonic levels for 2-4 morph frames) and rendered into a
+   band-limited table on the spot. When you Evolve, the model sees the
+   parent's spectrum (even for a built-in wave) and designs a relative of it.
+   The Shape cell shows the table and its name. Turn it off for faster
+   batches that only pick built-in waves.
 
 **Engine** picks who designs the patches:
 
@@ -103,9 +117,14 @@ written so far; the Garden draws the same progress as a ring around the seed.
   `~/Library/Application Support/Stacks/models/` (1.7B ≈ 1.8 GB, 4B ≈ 2.5 GB,
   8B ≈ 5 GB). If the Ollama app has already pulled a Qwen3 model, Stacks lists
   it as "(Ollama's copy)" and uses that file directly, no second download.
-  Output is grammar-constrained, so the model can only produce valid patches;
-  the grammar also makes every patch state a core set of ~26 settings and at
-  least one modulation connection, so AI sounds always have real movement.
+  Output is grammar-constrained, so the model can only produce valid patches.
+  The grammar also makes every patch state a core set of 20 settings and at
+  least one modulation connection, and connections are written as units whose
+  target list fits the source (an LFO can land on Morph, Cutoff, Pan, Amp,
+  effect mixes or a gentle Pitch vibrato, never on a fine-tune; velocity on
+  Cutoff, Amp, Decay...), with the LFO's shape, rate and sync alongside.
+  A tuning guard then reroutes any stepped or random LFO off pitch and caps
+  vibrato, so nothing comes out of key.
   On an M4 with 16 GB the 4B model runs at ~23-30 tokens/s: a batch of five
   patches takes about a minute. The model is unloaded after 10 idle minutes.
 - *Ollama app* — the same models served by a running [Ollama](https://ollama.com).
@@ -127,6 +146,18 @@ The engine choice is stored in `~/Library/Application Support/Stacks/`, next to
 `llama.log` (runtime + speed stats), `last-ai-prompt.txt`, `last-ai-reply.txt`
 and `grammar.gbnf` for prompt tuning. Patches are plain JSON (`Save…` / `Load…`,
 default folder `~/Music/Stacks Patches`).
+
+## Tests
+
+`StacksTests` is a console app over the engine-side code (no plug-in wrapper):
+spectral table rendering and analysis, the patch JSON format, the tuning
+guard, the AI grammar (every referenced rule defined, no underscores) and
+prompt, the random breeder, and the AI generator fed by a fake model that
+streams canned JSON in awkward chunks.
+
+```bash
+cmake --build build.nosync --target StacksTests && ./build.nosync/StacksTests_artefacts/Release/StacksTests
+```
 
 ## Giving it to friends
 
