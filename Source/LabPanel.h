@@ -26,11 +26,11 @@ public:
     void mouseDown (const juce::MouseEvent&) override;
     std::unique_ptr<juce::AccessibilityHandler> createAccessibilityHandler() override;
 
-    std::function<void()> onAudition, onFavourite, onSave;
+    std::function<void()> onAudition, onSave;        // click: hear; right-click or the Save button: save
     void showSaveButton (bool);
 
 private:
-    juce::TextButton favButton, saveButton { "Save" };
+    juce::TextButton saveButton { "Save" };
     juce::String name, description, category;
     Style style = Style::ai;
     int changesFromSeed = -1;
@@ -90,7 +90,7 @@ private:
     void layoutCards();
     enum class View { garden, tree, ideas, library, explain };
     void showView (View);
-    void savePresetDialog (bool markFavourite = false);   // folder + name; the favourite flavour also sets the heart
+    void savePresetDialog();                               // folder + name, saves exactly what's playing
 
     StacksAudioProcessor& processor;
 
@@ -99,7 +99,7 @@ private:
     juce::TextEditor hint;
     juce::Slider variation;
     juce::ToggleButton designWavesToggle { "Design wavetables" };
-    juce::TextButton favouriteButton;
+    juce::TextButton savePresetButton;
     juce::TextButton newBatchButton { "Generate" }, evolveButton { "Evolve" }, backButton { "<" };
     juce::TextButton gardenTab { "GARDEN" }, treeTab { "TREE" }, ideasTab { "LIST" }, libraryTab { "LIBRARY" }, explainTab { "EXPLAIN" };
     View view = View::garden;

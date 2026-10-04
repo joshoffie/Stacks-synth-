@@ -103,8 +103,10 @@ written so far; the Garden draws the same progress as a ring around the seed.
    and the Garden's seed is whatever this generation grew from, so loading
    other sounds (from the library, say) leaves the Garden alone. Click the
    seed to hear the parent again.
-2. Click a leaf or card to load it and play. **♥ Favourite** saves what you're
-   hearing into a library folder of your choice and gives it a heart.
+2. Click a leaf or card to load it and play. **Save** (the button, or a
+   right-click on a leaf, the seed or a card) stores what you're hearing into a
+   library folder of your choice. Hearts live in the library: the ♥ on a saved
+   preset marks it a favourite, and the library's ♥ filter shows only those.
 3. The direction text also steers Evolve. With an AI engine, the model first
    writes itself a short *sound brief* about what the direction should sound
    like, then designs from it.
@@ -144,12 +146,12 @@ as they arrive, while the random breeder's 5 land in a folded **RANDOM
 VARIATIONS** section underneath.
 
 **Library**: the LIBRARY tab browses `~/Music/Stacks Patches`: only your own
-saved presets and the folders you made. **Save** on the Now Playing card asks
-for a folder and a name and stores the sound exactly as it is; if you edited a
-preset you loaded, it offers *Save as new* or *Overwrite*. The ♥ on a card or
-in the library is just a favourite flag (the ♥ filter in the library shows only
-those); to grow from a favourite, select it and press Evolve. A patch's "..."
-moves it to another folder or trashes it.
+saved presets and the folders you made. **Save** asks for a folder and a name
+and stores the sound exactly as it is; if you edited a preset you loaded, it
+offers *Save as new* or *Overwrite*. The ♥ on a library row is the only
+favourite: a flag on that saved preset, which the ♥ filter shows. To grow from
+a favourite, load it and press Evolve. A patch's "..." moves it to another
+folder, edits its tags or trashes it.
 
 The engine choice is stored in `~/Library/Application Support/Stacks/`, next to
 `llama.log` (runtime + speed stats), `last-ai-prompt.txt`, `last-ai-reply.txt`

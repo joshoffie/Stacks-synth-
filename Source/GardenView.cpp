@@ -31,7 +31,7 @@ public:
         growth = grow;
         setTooltip (p.name + (p.category.isNotEmpty() ? "  (" + p.category + ")" : "")
                     + (changesFromSeed >= 0 ? "  -  " + juce::String (changesFromSeed) + " audible changes from the seed (closer leaves are more alike)" : juce::String()) + "\n" + p.description
-                    + "\n\nclick: hear   drag outward: wilder   right-click: plant / favourite");
+                    + "\n\nclick: hear   drag outward: wilder   right-click: plant / save");
         setTitle ("Audition " + name);
         repaint();
     }
@@ -72,13 +72,11 @@ public:
             juce::PopupMenu menu;
             juce::Component::SafePointer<Leaf> safe (this);   // the leaf may be gone by the time the menu is used
             menu.addItem ("Plant: evolve from this", [safe] { if (safe != nullptr && safe->garden.onEvolveFrom) safe->garden.onEvolveFrom (safe->index); });
-            // Favourite = hear it, then save it into a folder with a heart (same as the Favourite button); again = un-favourite.
-            menu.addItem ((favourite ? "Un-favourite" : heart() + "  Favourite..."), [safe]
+            menu.addItem ("Save...", [safe]
             {
                 if (safe == nullptr) return;
-                if (safe->favourite) { safe->garden.processor.toggleFavourite (safe->index); return; }
                 safe->garden.processor.audition (safe->index);
-                if (safe->garden.onFavourite) safe->garden.onFavourite();
+                if (safe->garden.onSave) safe->garden.onSave();
             });
             menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this));
             return;
@@ -240,11 +238,7 @@ void GardenView::mouseDown (const juce::MouseEvent& e)
             juce::PopupMenu menu;
             menu.addItem ("Generate from the description (new generation from scratch)", [this] { if (onFresh) onFresh(); });
             menu.addItem ("Evolve this sound", [this] { if (onEvolve) onEvolve(); });
-            menu.addItem (heart() + (processor.currentIsFavourite() ? "  Un-favourite this sound" : "  Favourite this sound..."), [this]
-            {
-                if (processor.currentIsFavourite()) processor.favouriteCurrent();
-                else if (onFavourite) onFavourite();
-            });
+            menu.addItem ("Save this sound...", [this] { if (onSave) onSave(); });
             menu.showMenuAsync (juce::PopupMenu::Options());
         }
         else if (processor.lab().seedIsPatch)
@@ -340,7 +334,7 @@ void GardenView::paint (juce::Graphics& g)
     else if (lab.candidates.empty())
         text = "Describe a sound above and press Generate to grow the first leaves. Click a leaf to hear it, drag it outward for wilder children.";
     else
-        text = lab.seedIsPatch ? "click a leaf: hear   -   click the seed: hear the parent again   -   drag a leaf outward: wilder   -   right-click a leaf: plant it"
+        text = lab.seedIsPatch ? "click a leaf: hear   -   click the seed: hear the parent again   -   drag a leaf outward: wilder   -   right-click a leaf: plant or save it"
                                : "click a leaf: hear   -   drag a leaf outward: wilder   -   right-click a leaf: plant it   -   Evolve grows from what you're hearing";
     g.drawFittedText (text, footer, juce::Justification::centred, 2, 0.9f);
 

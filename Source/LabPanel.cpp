@@ -19,13 +19,6 @@ namespace
 //==============================================================================
 PatchCard::PatchCard()
 {
-    favButton.setButtonText (heart());
-    favButton.setTitle ("Favourite");
-    favButton.setColour (juce::TextButton::textColourOffId, colours::text);
-    favButton.setColour (juce::TextButton::textColourOnId, colours::text);
-    favButton.onClick = [this] { if (onFavourite) onFavourite(); };
-    addAndMakeVisible (favButton);
-
     saveButton.setTooltip ("Save this sound as a preset: pick a folder and a name");
     saveButton.setColour (juce::TextButton::buttonColourId, colours::accent);
     saveButton.setColour (juce::TextButton::textColourOffId, juce::Colours::black);
@@ -48,20 +41,18 @@ void PatchCard::set (const Patch& p, Style s, bool isAuditioned, bool isFavourit
     style = s;
     auditioned = isAuditioned;
     favourite = isFavourite;
-    favButton.setColour (juce::TextButton::buttonColourId, favourite ? colours::accent : colours::panel);
-    favButton.setTooltip (favourite ? "Favourite (click to un-favourite)" : "Mark as a favourite");
     setTitle ((style == Style::nowPlaying ? "Now playing " : "Audition ") + name);
     repaint();
 }
 
 void PatchCard::resized()
 {
-    favButton.setBounds (getWidth() - 36, 6, 28, 24);
-    saveButton.setBounds (getWidth() - 36 - 4 - 52, 6, 52, 24);
+    saveButton.setBounds (getWidth() - 60, 6, 52, 24);
 }
 
-void PatchCard::mouseDown (const juce::MouseEvent&)
+void PatchCard::mouseDown (const juce::MouseEvent& e)
 {
+    if (e.mods.isPopupMenu()) { if (onSave) onSave(); return; }   // right-click: save it
     if (onAudition)
         onAudition();
 }
@@ -225,10 +216,10 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
     designWavesToggle.onClick = [this] { processor.setDesignWavetables (designWavesToggle.getToggleState()); };
     addAndMakeVisible (designWavesToggle);
 
-    favouriteButton.setButtonText (heart() + " Favourite");
-    favouriteButton.setTooltip ("Save the sound you're hearing into a library folder of your choice and mark it a favourite");
-    favouriteButton.onClick = [this] { savePresetDialog (true); };
-    addAndMakeVisible (favouriteButton);
+    savePresetButton.setButtonText ("Save");
+    savePresetButton.setTooltip ("Save the sound you're hearing as a preset: pick a folder and a name. Hearts live in the library.");
+    savePresetButton.onClick = [this] { savePresetDialog(); };
+    addAndMakeVisible (savePresetButton);
 
     newBatchButton.onClick = [this]
     {
@@ -250,10 +241,8 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
     backButton.onClick = [this] { processor.goBackGeneration(); };
     addAndMakeVisible (backButton);
 
-    // Every heart means the same thing: not yet a favourite -> save it into a folder with a heart; already one -> un-favourite.
-    nowPlaying.onFavourite = [this] { if (processor.currentIsFavourite()) processor.favouriteCurrent(); else savePresetDialog (true); };
-    garden.onFavourite = [this] { savePresetDialog (true); };
     nowPlaying.onSave = [this] { savePresetDialog(); };
+    garden.onSave = [this] { savePresetDialog(); };
     nowPlaying.showSaveButton (true);
     cardList.addAndMakeVisible (nowPlaying);
 
@@ -353,7 +342,7 @@ void LabPanel::resized()
     buttons.removeFromLeft (6);
     newBatchButton.setBounds (buttons.removeFromLeft (104));
     buttons.removeFromLeft (6);
-    favouriteButton.setBounds (buttons.removeFromRight (100));
+    savePresetButton.setBounds (buttons.removeFromRight (70));
     buttons.removeFromRight (6);
     evolveButton.setBounds (buttons);
     r.removeFromTop (4);
@@ -479,8 +468,6 @@ void LabPanel::refresh()
                              : "New patches from your description alone - no preset needed. (Evolve grows from the sound you're hearing instead.)");
     backButton.setEnabled (! busy && ! lab.history.empty());
     designWavesToggle.setToggleState (processor.designWavetables(), juce::dontSendNotification);
-    favouriteButton.setButtonText (heart() + (processor.currentIsFavourite() ? " Favourite  " : " Favourite"));
-    favouriteButton.setColour (juce::TextButton::buttonColourId, processor.currentIsFavourite() ? colours::accentDim : colours::card);
 
     // Candidate cards
     while (cards.size() < lab.candidates.size())
@@ -488,14 +475,7 @@ void LabPanel::refresh()
         auto card = std::make_unique<PatchCard>();
         const int index = (int) cards.size();
         card->onAudition  = [this, index] { processor.audition (index); };
-        card->onFavourite = [this, index]
-        {
-            const auto& lab = processor.lab();
-            if (index >= (int) lab.candidates.size()) return;
-            if (lab.candidates[(size_t) index].favourite) { processor.toggleFavourite (index); return; }
-            processor.audition (index);
-            savePresetDialog (true);
-        };
+        card->onSave = [this, index] { processor.audition (index); savePresetDialog(); };   // right-click a card: save it
         cardList.addAndMakeVisible (*card);
         cards.push_back (std::move (card));
     }
@@ -541,7 +521,7 @@ void LabPanel::refresh()
     resized();
 }
 
-void LabPanel::savePresetDialog (bool markFavourite)
+void LabPanel::savePresetDialog()
 {
     const auto folders = processor.libraryFolders();
     const auto root = StacksAudioProcessor::libraryRoot();
@@ -559,10 +539,9 @@ void LabPanel::savePresetDialog (bool markFavourite)
     const bool fromPreset = original.existsAsFile();
     const auto originalName = original.getFileNameWithoutExtension();
 
-    auto* w = new juce::AlertWindow (markFavourite ? heart() + " Save as a favourite" : juce::String ("Save preset"),
+    auto* w = new juce::AlertWindow ("Save preset",
                                      fromPreset ? "This sound came from \"" + originalName + "\"" + (processor.currentIsEdited() ? " and you've changed it." : ".")
-                                                : juce::String ("Saves exactly what you're hearing, knob tweaks included.")
-                                                  + (markFavourite ? " It gets a heart, so the library's " + heart() + " filter finds it." : juce::String()),
+                                                : juce::String ("Saves exactly what you're hearing, knob tweaks included. Heart it in the library afterwards if it's a keeper."),
                                      juce::MessageBoxIconType::NoIcon);
     w->addTextEditor ("name", fromPreset ? originalName + " 2" : processor.currentPatchName(), "Name for the new preset");
     w->addComboBox ("folder", names, "Folder");
@@ -571,7 +550,7 @@ void LabPanel::savePresetDialog (bool markFavourite)
     if (fromPreset)
         w->addButton ("Overwrite \"" + originalName + "\"", 2);
     w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
-    w->enterModalState (true, juce::ModalCallbackFunction::create ([this, w, folders, original, originalName, markFavourite] (int result)
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([this, w, folders, original, originalName] (int result)
     {
         if (result == 2)
         {
@@ -584,10 +563,6 @@ void LabPanel::savePresetDialog (bool markFavourite)
             processor.savePreset (w->getTextEditorContents ("name"), folder, true);
             processor.setLibraryFolder (folder);
         }
-        else
-            return;
-        if (markFavourite && ! processor.currentIsFavourite())
-            processor.favouriteCurrent();
     }), true);
 }
 
