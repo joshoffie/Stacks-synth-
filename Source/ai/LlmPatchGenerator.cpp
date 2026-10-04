@@ -194,7 +194,8 @@ juce::String LlmPatchGenerator::systemPrompt()
       << "Modulation is routed with the six matrix slots (modN_source, modN_dest, modN_amount); LFOs do nothing until a slot routes them. "
       << "Typical routings: LFO 1 > Morph A 0.2-0.5 for slow movement (lfo1_rate 0.05-0.5); LFO 1 > Pitch 0.02-0.05 with lfo1_rate 4-7 for vibrato; "
       << "Velocity > Filter 0.2-0.5 so playing dynamics matter; Mod Env > FM or Morph A 0.3-0.6 for an evolving attack (set menv_decay 0.2-1, menv_sustain 0); "
-      << "Mod Wheel > Filter 0.3-0.6 for live control; Random > Morph A 0.1-0.3 for subtle per-note variation.\n"
+      << "Mod Wheel > Filter 0.3-0.6 for live control; Random > Morph A 0.1-0.3 for subtle per-note variation. "
+      << "Every patch uses at least one matrix slot; Velocity > Filter is the usual minimum.\n"
       << "Effects: reverb_type Shimmer with reverb_shimmer 0.3-0.7 gives a glowing octave-up halo (pads, textures); Hall for long tails, Room for short; "
       << "chorus_mode Ensemble is a lush string-machine, Dimension is wide and subtle, Flanger needs chorus_feedback 0.4-0.8; "
       << "delay_mode Ping-Pong with delay_sync 1/8 or 1/8D suits plucks and leads, Tape is dark and wobbly.\n"
@@ -225,7 +226,7 @@ juce::String LlmPatchGenerator::userPrompt (const GenerationRequest& req)
 
     if (req.parents.empty())
     {
-        s << "Create " << req.count << " patches. Base values for anything you omit: " << compactParams (Patch()) << "\n";
+        s << "Create " << req.count << " patches. Anything you omit keeps its default (a plain saw into an open low-pass with a quick envelope, no effects, no modulation).\n";
         if (req.hint.trim().isNotEmpty())
             s << "Direction from the user: \"" << req.hint.trim() << "\". Follow it closely.\n";
         else
