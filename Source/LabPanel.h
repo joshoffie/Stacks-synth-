@@ -24,10 +24,11 @@ public:
     void mouseDown (const juce::MouseEvent&) override;
     std::unique_ptr<juce::AccessibilityHandler> createAccessibilityHandler() override;
 
-    std::function<void()> onAudition, onFavourite;
+    std::function<void()> onAudition, onFavourite, onSave;
+    void showSaveButton (bool);
 
 private:
-    juce::TextButton favButton;
+    juce::TextButton favButton, saveButton { "Save" };
     juce::String name, description, category;
     Style style = Style::ai;
     bool auditioned = false, favourite = false;
@@ -71,10 +72,11 @@ private:
     void engineChosen();
     enum class View { garden, ideas, library };
     void showView (View);
+    void savePresetDialog();
 
     StacksAudioProcessor& processor;
 
-    juce::Label header, engineLabel, variationLabel, favouritesLabel, status;
+    juce::Label header, engineLabel, variationLabel, status;
     juce::ComboBox engineBox;
     juce::TextButton refreshEnginesButton;
     juce::TextEditor hint;
@@ -93,8 +95,6 @@ private:
     bool randomExpanded = false, randomExpandedByUser = false;
     juce::String shownNowPlaying;
 
-    juce::Component favouriteStrip;
-    std::vector<std::unique_ptr<juce::TextButton>> favouriteChips;
 
     juce::StringArray engineMenuModels;   // Ollama model name per menu entry
     juce::StringArray engineMenuBuiltins; // built-in model id per menu entry

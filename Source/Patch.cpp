@@ -39,6 +39,8 @@ juce::var Patch::toVar() const
     obj->setProperty ("category", category);
     if (origin.isNotEmpty())
         obj->setProperty ("origin", origin);
+    if (favourite)
+        obj->setProperty ("favourite", true);
     obj->setProperty ("params", paramsToVar());
 
     bool anyWave = false;
@@ -116,6 +118,7 @@ std::optional<Patch> Patch::fromVar (const juce::var& v, const Patch* base)
     if (p.category.isEmpty() && base != nullptr)
         p.category = base->category;
     p.origin = obj->getProperty ("origin").toString().trim();
+    p.favourite = (bool) obj->getProperty ("favourite");
     if (base != nullptr)
     {
         p.lfoShapes = base->lfoShapes;

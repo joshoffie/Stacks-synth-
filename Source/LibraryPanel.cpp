@@ -24,10 +24,11 @@ public:
                 if (p->name.isNotEmpty()) name = p->name;
                 description = p->description;
                 category = p->category;
+                favourite = p->favourite;
             }
             heartButton.setButtonText (heart());
-            heartButton.setTitle ("Breed from " + name);
-            heartButton.setTooltip ("Breed from this patch (it joins the favourites that Evolve uses)");
+            heartButton.setTitle ("Favourite " + name);
+            heartButton.setTooltip ("Favourite");
             heartButton.onClick = [this] { if (onHeart) onHeart(); };
             addAndMakeVisible (heartButton);
             menuButton.setButtonText ("...");
@@ -37,11 +38,10 @@ public:
         }
     }
 
-    void setState (bool isParent, bool isLoaded)
+    void setLoaded (bool isLoaded)
     {
-        parent = isParent;
         loaded = isLoaded;
-        heartButton.setColour (juce::TextButton::buttonColourId, parent ? colours::accent : colours::panel);
+        heartButton.setColour (juce::TextButton::buttonColourId, favourite ? colours::accent : colours::panel);
         repaint();
     }
 
@@ -105,7 +105,7 @@ public:
     }
 
     juce::File file;
-    bool isFolder = false, parent = false, loaded = false;
+    bool isFolder = false, favourite = false, loaded = false;
     juce::String name, description, category;
     juce::TextButton heartButton, menuButton;
     std::function<void()> onOpen, onHeart, onMenu;
@@ -130,6 +130,19 @@ LibraryPanel::LibraryPanel (StacksAudioProcessor& p) : processor (p)
     revealButton.setTooltip ("Show this folder in the Finder");
     revealButton.onClick = [this] { processor.libraryFolder().revealToUser(); };
     addAndMakeVisible (revealButton);
+
+    saveHereButton.setTooltip ("Save the sound you're hearing into this folder");
+    saveHereButton.setColour (juce::TextButton::buttonColourId, colours::accent);
+    saveHereButton.setColour (juce::TextButton::textColourOffId, juce::Colours::black);
+    saveHereButton.onClick = [this] { saveHere(); };
+    addAndMakeVisible (saveHereButton);
+
+    favouritesOnly.setButtonText (heart());
+    favouritesOnly.setTooltip ("Show favourites only");
+    favouritesOnly.setClickingTogglesState (true);
+    favouritesOnly.setColour (juce::TextButton::buttonOnColourId, colours::accent);
+    favouritesOnly.onClick = [this] { showFavouritesOnly = favouritesOnly.getToggleState(); refresh(); };
+    addAndMakeVisible (favouritesOnly);
 
     emptyLabel.setText (juce::String::fromUTF8 ("Nothing here yet. Press the \xe2\x99\xa5 on a card or on Now Playing to save into this folder."), juce::dontSendNotification);
     emptyLabel.setFont (juce::Font (juce::FontOptions (11.5f)));
@@ -172,6 +185,22 @@ void LibraryPanel::newFolder()
     }), true);
 }
 
+void LibraryPanel::saveHere()
+{
+    auto* w = new juce::AlertWindow ("Save preset here", "Into " + (processor.libraryFolder() == StacksAudioProcessor::libraryRoot() ? juce::String ("the library") : processor.libraryFolder().getFileName()), juce::MessageBoxIconType::NoIcon);
+    w->addTextEditor ("name", processor.currentPatchName(), "Name");
+    w->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([this, w] (int result)
+    {
+        if (result == 1)
+        {
+            processor.savePreset (w->getTextEditorContents ("name"), processor.libraryFolder());
+            refresh();
+        }
+    }), true);
+}
+
 void LibraryPanel::confirmDelete (const juce::File& file)
 {
     juce::NativeMessageBox::showAsync (juce::MessageBoxOptions()
@@ -184,8 +213,6 @@ void LibraryPanel::confirmDelete (const juce::File& file)
                                        {
                                            if (result == 1)
                                            {
-                                               const int idx = processor.indexOfFavouriteFile (file);
-                                               if (idx >= 0) processor.removeFavourite (idx);
                                                file.moveToTrash();
                                                refresh();
                                            }
@@ -208,11 +235,7 @@ void LibraryPanel::showMenuFor (const juce::File& file)
         {
             const auto target = folder.getNonexistentChildFile (file.getFileNameWithoutExtension(), ".json", false);
             if (file.moveFileTo (target))
-            {
-                const int idx = processor.indexOfFavouriteFile (file);
-                if (idx >= 0) { processor.removeFavourite (idx); processor.toggleFavouriteFile (target); }
                 refresh();
-            }
         });
     }
     menu.addSubMenu ("Move to", moveTo);
@@ -225,8 +248,7 @@ void LibraryPanel::refresh()
 {
     const auto folder = processor.libraryFolder();
     const auto root = StacksAudioProcessor::libraryRoot();
-    pathLabel.setText (folder == root ? juce::String ("Library") : "Library / " + folder.getRelativePathFrom (root).replaceCharacter ('/', ' ').replace ("  ", " / "),
-                       juce::dontSendNotification);
+    pathLabel.setText (folder == root ? juce::String ("Library") : folder.getRelativePathFrom (root).replaceCharacter ('/', '>'), juce::dontSendNotification);
     upButton.setEnabled (folder != root);
 
     rows.clear();
@@ -245,9 +267,11 @@ void LibraryPanel::refresh()
     for (const auto& f : files)
     {
         auto row = std::make_unique<Row> (f, false);
-        row->setState (processor.indexOfFavouriteFile (f) >= 0, loadedPath == f.getFullPathName());
+        if (showFavouritesOnly && ! row->favourite)
+            continue;
+        row->setLoaded (loadedPath == f.getFullPathName());
         row->onOpen  = [this, f] { processor.loadLibraryPatch (f); refresh(); };
-        row->onHeart = [this, f] { processor.toggleFavouriteFile (f); };
+        row->onHeart = [this, f] { processor.toggleFavouriteFile (f); refresh(); };
         row->onMenu  = [this, f] { showMenuFor (f); };
         list.addAndMakeVisible (*row);
         rows.push_back (std::move (row));
@@ -267,6 +291,10 @@ void LibraryPanel::resized()
     revealButton.setBounds (top.removeFromRight (56));
     top.removeFromRight (4);
     newFolderButton.setBounds (top.removeFromRight (86));
+    top.removeFromRight (4);
+    saveHereButton.setBounds (top.removeFromRight (78));
+    top.removeFromRight (4);
+    favouritesOnly.setBounds (top.removeFromRight (28));
     top.removeFromRight (4);
     pathLabel.setBounds (top);
     r.removeFromTop (6);

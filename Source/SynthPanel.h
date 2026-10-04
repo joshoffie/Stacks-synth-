@@ -38,7 +38,8 @@ private:
 // plus the modulators area. Owns the "assign a modulator to a knob" flow.
 class SynthPanel : public juce::Component,
                    private juce::AudioProcessorValueTreeState::Listener,
-                   private juce::AsyncUpdater
+                   private juce::AsyncUpdater,
+                   private juce::Timer
 {
 public:
     static constexpr int kCell = 60, kChoiceCell = 82, kCellH = 86, kTitleH = 16, kPad = 6, kGap = 6, kBand = 20;
@@ -78,6 +79,7 @@ private:
 
     void parameterChanged (const juce::String&, float) override { triggerAsyncUpdate(); }
     void handleAsyncUpdate() override;                       // refresh rings + connection lists
+    void timerCallback() override;                           // live markers on modulated knobs
     void refreshModulationDisplay();
     Section* findSection (const juce::String& title);
     void showAdvanced (Section&);

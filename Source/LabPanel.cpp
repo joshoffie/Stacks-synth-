@@ -32,6 +32,18 @@ PatchCard::PatchCard()
     favButton.setColour (juce::TextButton::textColourOnId, colours::text);
     favButton.onClick = [this] { if (onFavourite) onFavourite(); };
     addAndMakeVisible (favButton);
+
+    saveButton.setTooltip ("Save this sound as a preset: pick a folder and a name");
+    saveButton.setColour (juce::TextButton::buttonColourId, colours::accent);
+    saveButton.setColour (juce::TextButton::textColourOffId, juce::Colours::black);
+    saveButton.onClick = [this] { if (onSave) onSave(); };
+    addChildComponent (saveButton);
+}
+
+void PatchCard::showSaveButton (bool show)
+{
+    saveButton.setVisible (show);
+    resized();
 }
 
 void PatchCard::set (const Patch& p, Style s, bool isAuditioned, bool isFavourite)
@@ -43,7 +55,7 @@ void PatchCard::set (const Patch& p, Style s, bool isAuditioned, bool isFavourit
     auditioned = isAuditioned;
     favourite = isFavourite;
     favButton.setColour (juce::TextButton::buttonColourId, favourite ? colours::accent : colours::panel);
-    favButton.setTooltip (favourite ? "Stop breeding from this (it stays saved in the library)" : "Save into the open library folder and breed from it");
+    favButton.setTooltip (favourite ? "Favourite (click to un-favourite)" : "Mark as a favourite");
     setTitle ((style == Style::nowPlaying ? "Now playing " : "Audition ") + name);
     repaint();
 }
@@ -51,6 +63,7 @@ void PatchCard::set (const Patch& p, Style s, bool isAuditioned, bool isFavourit
 void PatchCard::resized()
 {
     favButton.setBounds (getWidth() - 36, 6, 28, 24);
+    saveButton.setBounds (getWidth() - 36 - 4 - 52, 6, 52, 24);
 }
 
 void PatchCard::mouseDown (const juce::MouseEvent&)
@@ -79,7 +92,7 @@ void PatchCard::paint (juce::Graphics& g)
         g.drawRoundedRectangle (r.reduced (0.75f), 6.0f, 1.5f);
     }
 
-    auto area = getLocalBounds().reduced (10, 6).withTrimmedRight (34);
+    auto area = getLocalBounds().reduced (10, 6).withTrimmedRight (saveButton.isVisible() ? 92 : 34);
     auto titleRow = area.removeFromTop (18);
 
     g.setColour (isRandom ? colours::text.withAlpha (0.8f) : colours::text);
@@ -188,17 +201,9 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
     backButton.onClick = [this] { processor.goBackGeneration(); };
     addAndMakeVisible (backButton);
 
-    favouritesLabel.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
-    favouritesLabel.setColour (juce::Label::textColourId, colours::accent);
-    addAndMakeVisible (favouritesLabel);
-    addAndMakeVisible (favouriteStrip);
-
-    nowPlaying.onFavourite = [this]
-    {
-        const int idx = processor.indexOfFavourite (processor.currentPatch());
-        if (idx >= 0) processor.removeFavourite (idx);
-        else          processor.favouriteCurrent();
-    };
+    nowPlaying.onFavourite = [this] { processor.favouriteCurrent(); };
+    nowPlaying.onSave = [this] { savePresetDialog(); };
+    nowPlaying.showSaveButton (true);
     cardList.addAndMakeVisible (nowPlaying);
 
     aiHeader.set (spark() + " AI IDEAS", false, true, colours::accent);
@@ -239,10 +244,10 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
     garden.getVariation = [this] { return (float) variation.getValue(); };
     garden.setVariation = [this] (float v) { variation.setValue (v, juce::sendNotificationSync); };
     addChildComponent (garden);
-    libraryTab.setTooltip (juce::String::fromUTF8 ("Your saved patches, in folders. The \xe2\x99\xa5 on any card saves it into the open folder."));
+    libraryTab.setTooltip ("Your saved patches, in your folders.");
     addChildComponent (library);
 
-    nowPlaying.setTooltip (juce::String::fromUTF8 ("What you're hearing. Its \xe2\x99\xa5 saves it into the open library folder and breeds from it."));
+    nowPlaying.setTooltip ("What you're hearing. Evolve grows from it. Save stores it as a preset in a folder you choose.");
 
     status.setFont (juce::Font (juce::FontOptions (11.0f)));
     status.setColour (juce::Label::textColourId, colours::muted);
@@ -297,10 +302,6 @@ void LabPanel::resized()
     evolveButton.setBounds (buttons);
     r.removeFromTop (10);
 
-    favouritesLabel.setBounds (r.removeFromTop (16));
-    favouriteStrip.setBounds (r.removeFromTop (26));
-    r.removeFromTop (8);
-
     auto tabs = r.removeFromTop (24);
     const int tabW = tabs.getWidth() / 3;
     gardenTab.setBounds (tabs.removeFromLeft (tabW).reduced (1, 0));
@@ -314,15 +315,6 @@ void LabPanel::resized()
     viewport.setBounds (r);
     library.setBounds (r);
     garden.setBounds (r);
-
-    // Favourite chips flow left to right.
-    int x = 0;
-    for (auto& chip : favouriteChips)
-    {
-        const int w = juce::jmin (160, chip->getBestWidthForHeight (24));
-        chip->setBounds (x, 1, w, 24);
-        x += w + 4;
-    }
 
     layoutCards();
 }
@@ -481,11 +473,11 @@ void LabPanel::engineChosen()
 void LabPanel::refreshNowPlaying()
 {
     const auto current = processor.currentPatch();
-    const auto key = current.name + "|" + current.description + "|" + juce::String (processor.indexOfFavourite (current));
+    const auto key = current.name + "|" + current.description + "|" + (current.favourite ? "1" : "0");
     if (key == shownNowPlaying)
         return;
     shownNowPlaying = key;
-    nowPlaying.set (current, PatchCard::Style::nowPlaying, false, processor.indexOfFavourite (current) >= 0);
+    nowPlaying.set (current, PatchCard::Style::nowPlaying, false, current.favourite);
 }
 
 void LabPanel::timerCallback()
@@ -504,13 +496,10 @@ void LabPanel::refresh()
     rebuildEngineMenu();
 
     const bool busy = processor.isBusy();
-    const int favCount = (int) lab.favourites.size();
     juce::String currentName = processor.currentPatchName();
     if (currentName.length() > 20) currentName = currentName.substring (0, 19) + juce::String::fromUTF8 ("\xe2\x80\xa6");
-    evolveButton.setButtonText (favCount > 0 ? "Evolve " + juce::String (favCount) + " " + heart()
-                                             : "Evolve: " + currentName);
-    evolveButton.setTooltip (favCount > 0 ? "Ten descendants of your favourites, steered by the direction text"
-                                          : "Ten descendants of the sound you're playing now, steered by the direction text");
+    evolveButton.setButtonText ("Evolve: " + currentName);
+    evolveButton.setTooltip ("Ten descendants of the sound you're playing now, steered by the direction text");
     evolveButton.setEnabled (! busy);
     newBatchButton.setButtonText (busy ? "Stop" : "Fresh ideas");
     newBatchButton.setTooltip (lab.generating ? "Stop generating; keep what has arrived"
@@ -518,19 +507,6 @@ void LabPanel::refresh()
                              : "Ten new patches from scratch. Uses the direction text, not the current sound.");
     backButton.setEnabled (! busy && ! lab.history.empty());
     engineBox.setEnabled (! busy);
-
-    favouritesLabel.setText (favCount > 0 ? "BREEDING FROM" : juce::String::fromUTF8 ("BREEDING FROM  (press a \xe2\x99\xa5 to save a patch and breed from it)"), juce::dontSendNotification);
-
-    // Rebuild favourite chips
-    favouriteChips.clear();
-    for (int i = 0; i < favCount; ++i)
-    {
-        auto chip = std::make_unique<juce::TextButton> (lab.favourites[(size_t) i].name + "  x");
-        chip->setTooltip ("Remove from favourites");
-        chip->onClick = [this, i] { processor.removeFavourite (i); };
-        favouriteStrip.addAndMakeVisible (*chip);
-        favouriteChips.push_back (std::move (chip));
-    }
 
     // Candidate cards
     while (cards.size() < lab.candidates.size())
@@ -549,7 +525,7 @@ void LabPanel::refresh()
     {
         const auto& c = lab.candidates[(size_t) i];
         cards[(size_t) i]->set (c, c.origin == "AI" ? PatchCard::Style::ai : PatchCard::Style::random,
-                                i == lab.auditioned, processor.indexOfFavourite (c) >= 0);
+                                i == lab.auditioned, c.favourite);
     }
 
     shownNowPlaying.clear();
@@ -572,6 +548,34 @@ void LabPanel::refresh()
                     juce::dontSendNotification);
 
     resized();
+}
+
+void LabPanel::savePresetDialog()
+{
+    const auto folders = processor.libraryFolders();
+    const auto root = StacksAudioProcessor::libraryRoot();
+    juce::StringArray names;
+    int selected = 0;
+    for (int i = 0; i < (int) folders.size(); ++i)
+    {
+        names.add (folders[(size_t) i] == root ? juce::String ("Library") : folders[(size_t) i].getRelativePathFrom (root));
+        if (folders[(size_t) i] == processor.libraryFolder()) selected = i;
+    }
+
+    auto* w = new juce::AlertWindow ("Save preset", "Saves exactly what you're hearing, knob tweaks included.", juce::MessageBoxIconType::NoIcon);
+    w->addTextEditor ("name", processor.currentPatchName(), "Name");
+    w->addComboBox ("folder", names, "Folder");
+    w->getComboBoxComponent ("folder")->setSelectedItemIndex (selected, juce::dontSendNotification);
+    w->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([this, w, folders] (int result)
+    {
+        if (result != 1) return;
+        const int idx = w->getComboBoxComponent ("folder")->getSelectedItemIndex();
+        const auto folder = idx >= 0 && idx < (int) folders.size() ? folders[(size_t) idx] : StacksAudioProcessor::libraryRoot();
+        processor.savePreset (w->getTextEditorContents ("name"), folder);
+        processor.setLibraryFolder (folder);
+    }), true);
 }
 
 void LabPanel::showView (View v)

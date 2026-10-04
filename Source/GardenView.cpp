@@ -29,7 +29,7 @@ public:
         favourite = isFavourite;
         growth = grow;
         setTooltip (p.name + (p.category.isNotEmpty() ? "  (" + p.category + ")" : "") + "\n" + p.description
-                    + "\n\nclick: hear   double-click: plant   right-click: more");
+                    + "\n\nclick: hear   double-click: plant (evolve from it)   right-click: more");
         setTitle ("Audition " + name);
         repaint();
     }
@@ -69,7 +69,7 @@ public:
         {
             juce::PopupMenu menu;
             menu.addItem ("Plant: evolve from this", [this] { if (garden.onEvolveFrom) garden.onEvolveFrom (index); });
-            menu.addItem ((favourite ? "Stop breeding from this" : heart() + "  Save & breed from this"), [this] { garden.processor.toggleFavourite (index); });
+            menu.addItem ((favourite ? "Un-favourite" : heart() + "  Favourite"), [this] { garden.processor.toggleFavourite (index); });
             menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this));
             return;
         }
@@ -210,7 +210,7 @@ void GardenView::layoutLeaves()
         auto& leaf = *leaves[(size_t) i];
         const int size = (int) (kLeafRadius + 9.0f) * 2;
         leaf.setBounds ((int) pos.x - size / 2, (int) pos.y - size / 2, size, size);
-        leaf.set (c, i == lab.auditioned, processor.indexOfFavourite (c) >= 0, eased);
+        leaf.set (c, i == lab.auditioned, c.favourite, eased);
     }
 }
 
@@ -229,7 +229,7 @@ void GardenView::mouseDown (const juce::MouseEvent& e)
             juce::PopupMenu menu;
             menu.addItem ("Fresh ideas (new generation from scratch)", [this] { if (onFresh) onFresh(); });
             menu.addItem ("Evolve this sound", [this] { if (onEvolve) onEvolve(); });
-            menu.addItem (heart() + "  Save & breed from this sound", [this] { processor.favouriteCurrent(); });
+            menu.addItem (heart() + "  Favourite this sound", [this] { processor.favouriteCurrent(); });
             menu.showMenuAsync (juce::PopupMenu::Options());
         }
     }

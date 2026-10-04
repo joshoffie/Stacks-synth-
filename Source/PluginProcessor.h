@@ -20,7 +20,6 @@ struct LabState
 {
     int generation = 0;
     std::vector<Patch> candidates;              // the current batch
-    std::vector<Patch> favourites;              // what the next evolution breeds from
     std::vector<std::vector<Patch>> history;    // earlier batches, for "back"
     int auditioned = -1;                        // index into candidates currently loaded
     bool generating = false;
@@ -87,18 +86,19 @@ public:
     void goBackGeneration();
     void audition (int candidateIndex);
 
-    // Library: the heart saves a patch into the current folder and adds it to
-    // the breeding set ("favourites"); the set is what Evolve breeds from.
+    // Library: your saved patches, in your folders. The heart saves a sound
+    // into the open folder (if it isn't saved yet) and marks it a favourite.
     static juce::File libraryRoot();
+    static juce::File historyRoot();                       // auto-saved generations, outside the library
     juce::File libraryFolder() const                       { return currentFolder; }
     void setLibraryFolder (const juce::File&);
     juce::File savePatchToLibrary (Patch&, const juce::File& folder); // sets patch.filePath, returns the file
-    void toggleFavourite (int candidateIndex);             // save (if needed) + toggle breeding membership
-    void favouriteCurrent();                               // the playing sound: save + toggle
-    void toggleFavouriteFile (const juce::File&);          // from the library browser
-    void removeFavourite (int favouriteIndex);
-    int indexOfFavourite (const Patch&) const;
-    int indexOfFavouriteFile (const juce::File&) const;
+    juce::File savePreset (const juce::String& name, const juce::File& folder); // the playing sound, exactly as it is
+    std::vector<juce::File> libraryFolders() const;        // root first, then every subfolder
+    void toggleFavourite (int candidateIndex);             // flip the heart on a candidate
+    void favouriteCurrent();                               // flip the heart on the playing sound
+    bool currentIsFavourite() const                        { return patchFavourite; }
+    void toggleFavouriteFile (const juce::File&);          // a saved patch: flip the heart in its file
     bool loadLibraryPatch (const juce::File&);             // audition a saved patch
 
     Patch currentPatch() const;                            // what is loaded right now, including knob tweaks
@@ -129,6 +129,9 @@ public:
     void clearModulation (int slot);
     int findModulation (int source, int target) const;
     struct Modulation { int slot, source; float amount; };
+    // The parameter's value as the effects see it this block: base plus the
+    // free-running sources (LFOs, wheel, aftertouch). Drives the live markers.
+    float liveValue (int paramIndex) const                  { return liveValues[(size_t) juce::jlimit (0, kNumParams - 1, paramIndex)].load (std::memory_order_relaxed); }
     std::vector<int> modulationsFor (int source) const;      // slots using this source
     std::vector<Modulation> modulationsOnParam (int paramIndex) const;
     void setModulationAmount (int slot, float amount);       // from a ring drag
@@ -173,6 +176,7 @@ private:
     UserWavetables userWaves;                             // per instance, named in the state tree
     SynthParams params;                                   // base values this block
     SynthParams fxParams;                                 // base + global modulation, read by the effects
+    std::array<std::atomic<float>, kNumParams> liveValues {};
     VoiceContext voiceContext;
     LfoTableBank lfoTables;
     float lfoPhase[kNumLfos] {}, lfoHeld[kNumLfos] {};
@@ -203,7 +207,9 @@ private:
     LabState labState;
     juce::File currentFolder;
     juce::String patchName { "Init" };
-    juce::String patchCategory, patchOrigin;               // of the loaded patch, for the Now Playing card
+    juce::String patchCategory, patchOrigin, patchFile;    // of the loaded patch, for the Now Playing card
+    bool patchFavourite = false;
+    void writeFavouriteFlag (const juce::File&, bool);
     int generationToken = 0;                               // bumps per request; stale callbacks are ignored
     std::atomic<bool> cancelRequested { false };
 

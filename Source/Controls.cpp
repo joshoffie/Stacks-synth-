@@ -157,7 +157,21 @@ void ParamKnob::setAccent (juce::Colour c)
 void ParamKnob::setModulations (std::vector<KnobModulation> mods)
 {
     modulations = std::move (mods);
+    if (modulations.empty()) liveNorm = -1.0f;
     repaint();
+}
+
+void ParamKnob::setLiveValue (float realValue)
+{
+    if (modulations.empty() || paramIndex < 0)
+        return;
+    const auto& range = paramRange (paramIndex);
+    const float norm = range.convertTo0to1 (juce::jlimit (range.start, range.end, realValue));
+    if (std::abs (norm - liveNorm) > 0.002f)
+    {
+        liveNorm = norm;
+        repaint();
+    }
 }
 
 void ParamKnob::setAssignMode (bool on, juce::Colour sourceColour)
@@ -247,6 +261,20 @@ void ParamKnob::paint (juce::Graphics& g)
         // a dot at the knob's own value, so the ring reads as "around here"
         const float a = rotary.startAngleRadians + v0 * span;
         g.fillEllipse (centre.x + ringRadius * std::sin (a) - 1.8f, centre.y - ringRadius * std::cos (a) - 1.8f, 3.6f, 3.6f);
+    }
+
+    // Live marker: where the modulation has the value right now.
+    if (liveNorm >= 0.0f)
+    {
+        const float outer = ringRadiusFor ((int) modulations.size() - 1);
+        const float a0 = rotary.startAngleRadians + v0 * span;
+        const float a1 = rotary.startAngleRadians + juce::jlimit (0.0f, 1.0f, liveNorm) * span;
+        juce::Path sweep;
+        sweep.addCentredArc (centre.x, centre.y, outer, outer, 0.0f, juce::jmin (a0, a1), juce::jmax (a0, a1), true);
+        g.setColour (colours::text.withAlpha (0.85f));
+        g.strokePath (sweep, juce::PathStrokeType (2.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        g.setColour (colours::text);
+        g.fillEllipse (centre.x + outer * std::sin (a1) - 3.0f, centre.y - outer * std::cos (a1) - 3.0f, 6.0f, 6.0f);
     }
 }
 

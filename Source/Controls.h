@@ -36,6 +36,7 @@ public:
     ~ParamKnob() override;
     void setAccent (juce::Colour);
     void setModulations (std::vector<KnobModulation>); // repaints the rings
+    void setLiveValue (float realValue);               // where the modulation has the knob right now
     void setAssignMode (bool on, juce::Colour sourceColour);
     int parameterIndex() const { return paramIndex; }
 
@@ -65,6 +66,7 @@ private:
     std::vector<KnobModulation> modulations;
     int paramIndex = -1;
     bool compact = false, assignMode = false, dragOver = false;
+    float liveNorm = -1.0f;                          // -1 = none
     juce::Colour assignColour, dragColour;
 };
 

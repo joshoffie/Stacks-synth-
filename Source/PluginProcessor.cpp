@@ -188,6 +188,8 @@ void StacksAudioProcessor::applyGlobalModulation()
         }
         nudgeParam (fxParams, paramIndex, amount * s);
     }
+    for (int i = 0; i < kNumParams; ++i)
+        liveValues[(size_t) i].store (fxParams.v[i], std::memory_order_relaxed);
 }
 
 void StacksAudioProcessor::processEffects (juce::AudioBuffer<float>& buffer)
@@ -461,8 +463,8 @@ void StacksAudioProcessor::autoSaveGeneration()
 {
     if (labState.candidates.empty())
         return;
-    const auto stamp = juce::Time::getCurrentTime().formatted ("%H.%M");
-    auto folder = libraryRoot().getChildFile ("Generations").getChildFile ("Gen " + juce::String (labState.generation) + " - " + stamp);
+    const auto stamp = juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H.%M");
+    auto folder = historyRoot().getChildFile ("Gen " + juce::String (labState.generation) + " - " + stamp);
     folder.createDirectory();
     for (const auto& c : labState.candidates)
     {
@@ -478,6 +480,8 @@ Patch StacksAudioProcessor::currentPatch() const
     p.name = patchName;
     p.category = patchCategory;
     p.origin = patchOrigin;
+    p.filePath = patchFile;
+    p.favourite = patchFavourite;
     p.description = describePatch (p);
     return p;
 }
@@ -488,6 +492,8 @@ void StacksAudioProcessor::applyPatch (const Patch& p)
     patchName = p.name;
     patchCategory = p.category;
     patchOrigin = p.origin;
+    patchFile = p.filePath;
+    patchFavourite = p.favourite;
 }
 
 void StacksAudioProcessor::setCurrentPatchName (const juce::String& name)
@@ -719,7 +725,7 @@ void StacksAudioProcessor::requestEvolve (const juce::String& hint, float variat
     req.variation = variation;
     req.count = kBatchSize;
     req.generation = labState.generation + 1;
-    req.parents = labState.favourites.empty() ? std::vector<Patch> { currentPatch() } : labState.favourites;
+    req.parents = { currentPatch() }; // Evolve grows from the sound you're hearing
     startGeneration (std::move (req));
 }
 
@@ -899,6 +905,11 @@ juce::File StacksAudioProcessor::libraryRoot()
     return juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("Stacks Patches");
 }
 
+juce::File StacksAudioProcessor::historyRoot()
+{
+    return ModelManager::appDataDirectory().getChildFile ("history");
+}
+
 void StacksAudioProcessor::setLibraryFolder (const juce::File& folder)
 {
     if (! folder.isDirectory())
@@ -913,30 +924,48 @@ juce::File StacksAudioProcessor::savePatchToLibrary (Patch& p, const juce::File&
 {
     folder.createDirectory();
     juce::File file (p.filePath);
-    if (! file.existsAsFile() || ! file.isAChildOf (folder))
+    if (! file.existsAsFile() || ! file.isAChildOf (libraryRoot()))
         file = folder.getNonexistentChildFile (juce::File::createLegalFileName (p.name.isEmpty() ? "Patch" : p.name), ".json", false);
     file.replaceWithText (p.toJson());
     p.filePath = file.getFullPathName();
     return file;
 }
 
-int StacksAudioProcessor::indexOfFavourite (const Patch& p) const
+void StacksAudioProcessor::writeFavouriteFlag (const juce::File& file, bool favourite)
 {
-    for (int i = 0; i < (int) labState.favourites.size(); ++i)
+    if (auto p = Patch::fromJson (file.loadFileAsString()))
     {
-        const auto& f = labState.favourites[(size_t) i];
-        if ((p.filePath.isNotEmpty() && f.filePath == p.filePath) || f.sameValuesAs (p))
-            return i;
+        p->favourite = favourite;
+        file.replaceWithText (p->toJson());
     }
-    return -1;
 }
 
-int StacksAudioProcessor::indexOfFavouriteFile (const juce::File& file) const
+juce::File StacksAudioProcessor::savePreset (const juce::String& name, const juce::File& folder)
 {
-    for (int i = 0; i < (int) labState.favourites.size(); ++i)
-        if (labState.favourites[(size_t) i].filePath == file.getFullPathName())
-            return i;
-    return -1;
+    auto p = currentPatch();
+    p.name = name.trim().isEmpty() ? patchName : name.trim();
+    // Same name in the same folder as the loaded file: overwrite it. Otherwise a new file.
+    juce::File existing (p.filePath);
+    if (! (existing.existsAsFile() && existing.getParentDirectory() == folder && existing.getFileNameWithoutExtension() == juce::File::createLegalFileName (p.name)))
+        p.filePath.clear();
+    const auto file = savePatchToLibrary (p, folder);
+    patchName = p.name;
+    patchFile = p.filePath;
+    if (labState.auditioned >= 0 && labState.auditioned < (int) labState.candidates.size())
+        labState.candidates[(size_t) labState.auditioned].filePath = p.filePath;
+    labState.status = "Saved \"" + p.name + "\" to " + (folder == libraryRoot() ? juce::String ("the library") : folder.getFileName());
+    labBroadcaster.sendChangeMessage();
+    return file;
+}
+
+std::vector<juce::File> StacksAudioProcessor::libraryFolders() const
+{
+    std::vector<juce::File> folders { libraryRoot() };
+    auto subs = libraryRoot().findChildFiles (juce::File::findDirectories, true);
+    subs.sort();
+    for (const auto& f : subs)
+        folders.push_back (f);
+    return folders;
 }
 
 void StacksAudioProcessor::toggleFavourite (int index)
@@ -945,59 +974,36 @@ void StacksAudioProcessor::toggleFavourite (int index)
         return;
 
     auto& candidate = labState.candidates[(size_t) index];
-    const int existing = indexOfFavourite (candidate);
-    if (existing >= 0)
-    {
-        labState.favourites.erase (labState.favourites.begin() + existing); // stays saved in the library
-    }
-    else
-    {
-        if (candidate.filePath.isEmpty() || ! juce::File (candidate.filePath).existsAsFile())
-            savePatchToLibrary (candidate, currentFolder);
-        labState.favourites.push_back (candidate);
-        labState.status = "Saved to " + currentFolder.getFileName() + "  -  Evolve breeds from it";
-    }
+    candidate.favourite = ! candidate.favourite;
+    if (candidate.filePath.isNotEmpty() && juce::File (candidate.filePath).existsAsFile())
+        writeFavouriteFlag (juce::File (candidate.filePath), candidate.favourite);
+    if (labState.auditioned == index)
+        patchFavourite = candidate.favourite;
     labBroadcaster.sendChangeMessage();
 }
 
 void StacksAudioProcessor::favouriteCurrent()
 {
-    auto p = currentPatch();
-    const int existing = indexOfFavourite (p);
-    if (existing >= 0)
-    {
-        labState.favourites.erase (labState.favourites.begin() + existing);
-    }
-    else
-    {
-        savePatchToLibrary (p, currentFolder);
-        labState.favourites.push_back (p);
-        labState.status = "Saved \"" + p.name + "\" to " + currentFolder.getFileName();
-    }
+    patchFavourite = ! patchFavourite;
+    if (patchFile.isNotEmpty() && juce::File (patchFile).existsAsFile())
+        writeFavouriteFlag (juce::File (patchFile), patchFavourite);
+    if (labState.auditioned >= 0 && labState.auditioned < (int) labState.candidates.size())
+        labState.candidates[(size_t) labState.auditioned].favourite = patchFavourite;
     labBroadcaster.sendChangeMessage();
 }
 
 void StacksAudioProcessor::toggleFavouriteFile (const juce::File& file)
 {
-    const int existing = indexOfFavouriteFile (file);
-    if (existing >= 0)
+    if (auto p = Patch::fromJson (file.loadFileAsString()))
     {
-        labState.favourites.erase (labState.favourites.begin() + existing);
+        p->favourite = ! p->favourite;
+        file.replaceWithText (p->toJson());
+        if (patchFile == file.getFullPathName())
+            patchFavourite = p->favourite;
+        for (auto& c : labState.candidates)
+            if (c.filePath == file.getFullPathName())
+                c.favourite = p->favourite;
     }
-    else if (auto p = Patch::fromJson (file.loadFileAsString()))
-    {
-        p->filePath = file.getFullPathName();
-        if (p->name.isEmpty()) p->name = file.getFileNameWithoutExtension();
-        labState.favourites.push_back (*p);
-    }
-    labBroadcaster.sendChangeMessage();
-}
-
-void StacksAudioProcessor::removeFavourite (int favouriteIndex)
-{
-    if (favouriteIndex < 0 || favouriteIndex >= (int) labState.favourites.size())
-        return;
-    labState.favourites.erase (labState.favourites.begin() + favouriteIndex);
     labBroadcaster.sendChangeMessage();
 }
 
@@ -1038,7 +1044,8 @@ juce::String StacksAudioProcessor::labToJson() const
     obj->setProperty ("patchCategory", patchCategory);
     obj->setProperty ("patchOrigin", patchOrigin);
     obj->setProperty ("candidates", toArray (labState.candidates));
-    obj->setProperty ("favourites", toArray (labState.favourites));
+    obj->setProperty ("patchFile", patchFile);
+    obj->setProperty ("patchFavourite", patchFavourite);
     return juce::JSON::toString (juce::var (obj), true);
 }
 
@@ -1066,7 +1073,8 @@ void StacksAudioProcessor::labFromJson (const juce::String& json)
     labState.generation = (int) obj->getProperty ("generation");
     labState.auditioned = (int) obj->getProperty ("auditioned");
     labState.candidates = readArray (obj->getProperty ("candidates"));
-    labState.favourites = readArray (obj->getProperty ("favourites"));
+    patchFile = obj->getProperty ("patchFile").toString();
+    patchFavourite = (bool) obj->getProperty ("patchFavourite");
     labState.history.clear();
     labState.generating = false;
     labState.status = labState.generation > 0 ? "Generation " + juce::String (labState.generation) : juce::String();

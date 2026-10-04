@@ -285,10 +285,18 @@ SynthPanel::SynthPanel (StacksAudioProcessor& p) : processor (p), apvts (p.apvts
         apvts.addParameterListener (paramId (modAmountParam (i)), this);
     }
     refreshModulationDisplay();
+    startTimerHz (30);
+}
+
+void SynthPanel::timerCallback()
+{
+    for (auto* knob : knobs)
+        knob->setLiveValue (processor.liveValue (knob->parameterIndex()));
 }
 
 SynthPanel::~SynthPanel()
 {
+    stopTimer();
     cancelPendingUpdate();
     for (int i = 0; i < kNumModSlots; ++i)
     {
