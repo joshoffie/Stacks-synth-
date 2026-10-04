@@ -359,6 +359,16 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& req, co
         if (! patch)
             return;
 
+        // Small models sometimes repeat themselves; a duplicate helps nobody.
+        for (const auto& existing : out)
+            if (existing.sameValuesAs (*patch) || existing.name.equalsIgnoreCase (patch->name))
+                return;
+
+        // A child wearing its parent's exact name gets a suffix.
+        for (const auto& parent : req.parents)
+            if (parent.name.equalsIgnoreCase (patch->name))
+                patch->name << " II";
+
         patch->set (P::master_gain, -6.0f);
         patch->origin = "AI";
         patch->name = spaceOutCamelCase (patch->name).substring (0, 28);

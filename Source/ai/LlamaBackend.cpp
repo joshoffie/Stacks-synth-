@@ -230,7 +230,7 @@ bool LlamaBackend::chat (const juce::String& systemPrompt, const juce::String& u
         else
             appendLog ("grammar was rejected by llama.cpp; sampling unconstrained");
     }
-    llama_sampler_chain_add (sampler, llama_sampler_init_penalties (llama_vocab_n_tokens (vocab), 64, 1.05f, 0.0f, 0.0f));
+    llama_sampler_chain_add (sampler, llama_sampler_init_penalties (llama_vocab_n_tokens (vocab), 256, 1.08f, 0.0f, 0.0f));
     llama_sampler_chain_add (sampler, llama_sampler_init_top_k (40));
     llama_sampler_chain_add (sampler, llama_sampler_init_top_p (0.95f, 1));
     llama_sampler_chain_add (sampler, llama_sampler_init_min_p (0.05f, 1));
