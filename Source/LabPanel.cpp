@@ -267,12 +267,12 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
         tab->setColour (juce::TextButton::textColourOnId, colours::text);
         addAndMakeVisible (*tab);
     }
-    gardenTab.setTooltip ("The breeding view: your sound is the seed, candidates are leaves");
+    gardenTab.setTooltip ("Stacks: your sound is the seed in the middle, the new ideas grow around it");
     gardenTab.onClick = [this] { showView (View::garden); };
     ideasTab.setTooltip ("The same candidates as a list with descriptions");
     ideasTab.onClick = [this] { showView (View::ideas); };
     libraryTab.onClick = [this] { showView (View::library); };
-    treeTab.setTooltip ("The family tree: every generation this session, click any node to hear it again");
+    treeTab.setTooltip ("History: every generation this session as a family tree, click any node to hear it again");
     treeTab.onClick = [this] { showView (View::tree); };
     explainTab.setTooltip ("Why the playing sound sounds like this, and which knobs to try");
     explainTab.onClick = [this] { showView (View::explain); };

@@ -101,7 +101,7 @@ private:
     juce::ToggleButton designWavesToggle { "Design wavetables" };
     juce::TextButton savePresetButton;
     juce::TextButton newBatchButton { "Generate" }, evolveButton { "Evolve" }, backButton { "<" };
-    juce::TextButton gardenTab { "GARDEN" }, treeTab { "TREE" }, ideasTab { "LIST" }, libraryTab { "LIBRARY" }, explainTab { "EXPLAIN" };
+    juce::TextButton gardenTab { "STACKS" }, treeTab { "HISTORY" }, ideasTab { "LIST" }, libraryTab { "LIBRARY" }, explainTab { "EXPLAIN" };
     View view = View::garden;
     LibraryPanel library;
     GardenView garden;

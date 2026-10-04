@@ -81,7 +81,7 @@ change that connection's depth.
 
 ## The AI Lab
 
-The **GARDEN** tab shows the loop as a plant: the sound you're playing is the
+The **STACKS** tab shows the loop as a plant: the sound you're playing is the
 seed in the middle; AI ideas grow above it, random variations below. Click a
 leaf to hear it, drag it outward for wilder children, right-click it to plant
 it (it becomes the seed and a new generation grows) or to favourite it.
