@@ -1,0 +1,326 @@
+#include "LlmPatchGenerator.h"
+
+#include <string>
+
+namespace stacks
+{
+
+namespace
+{
+    juce::String numberText (float v)
+    {
+        if (std::abs (v - std::round (v)) < 1.0e-4f)
+            return juce::String ((int) std::round (v));
+        return juce::String (v, 3).trimCharactersAtEnd ("0").trimCharactersAtEnd (".");
+    }
+
+    juce::String compactParams (const Patch& p)
+    {
+        return juce::JSON::toString (p.paramsToVar(), true);
+    }
+
+    // "EchoingPad" -> "Echoing Pad"; models often drop the space.
+    juce::String spaceOutCamelCase (const juce::String& name)
+    {
+        juce::String out;
+        juce::juce_wchar previous = 0;
+        for (auto c : name)
+        {
+            if (previous != 0 && juce::CharacterFunctions::isUpperCase (c)
+                && juce::CharacterFunctions::isLowerCase (previous))
+                out << ' ';
+            out << juce::String::charToString (c);
+            previous = c;
+        }
+        return out.trim();
+    }
+
+    juce::String variationPhrase (float v, bool evolving)
+    {
+        if (evolving)
+        {
+            if (v < 0.33f) return "subtly: adjust a handful of parameters, keep the character intact";
+            if (v < 0.66f) return "moderately: change the timbre or the movement while keeping what made the parent appealing";
+            return "boldly: take real risks with waveforms, FM and modulation, but keep every result musical";
+        }
+        if (v < 0.33f) return "Stay conventional and immediately playable.";
+        if (v < 0.66f) return "Balance familiar sounds with a few surprises.";
+        return "Be adventurous and experimental, but musical.";
+    }
+
+    // Pulls complete {...} objects out of the "patches" array while the JSON
+    // is still streaming in, so each candidate can be shown immediately.
+    class StreamingPatchParser
+    {
+    public:
+        explicit StreamingPatchParser (std::function<void (const juce::var&)> onObject) : emit (std::move (onObject)) {}
+
+        void feed (const juce::String& text)
+        {
+            buffer += text.toStdString();
+            scan();
+        }
+
+        // Called once the stream has ended. Falls back to parsing the whole
+        // reply if the incremental scan found nothing (e.g. a bare array).
+        void finish()
+        {
+            scan();
+            if (emitted > 0)
+                return;
+
+            auto text = juce::String::fromUTF8 (buffer.c_str(), (int) buffer.size()).trim();
+            if (text.startsWith ("```"))
+                text = text.fromFirstOccurrenceOf ("\n", false, false).upToLastOccurrenceOf ("```", false, false);
+            auto whole = juce::JSON::parse (text);
+            if (auto* obj = whole.getDynamicObject())
+            {
+                if (auto* arr = obj->getProperty ("patches").getArray())
+                    for (const auto& item : *arr) emitOne (item);
+                else if (obj->hasProperty ("params") || obj->hasProperty ("name"))
+                    emitOne (whole);
+            }
+            else if (auto* arr = whole.getArray())
+            {
+                for (const auto& item : *arr) emitOne (item);
+            }
+        }
+
+        int count() const { return emitted; }
+
+    private:
+        void emitOne (const juce::var& v)
+        {
+            if (v.getDynamicObject() != nullptr)
+            {
+                ++emitted;
+                emit (v);
+            }
+        }
+
+        void scan()
+        {
+            while (pos < buffer.size())
+            {
+                if (! inArray)
+                {
+                    const auto key = buffer.find ("\"patches\"", pos);
+                    if (key == std::string::npos) { pos = buffer.size() > 10 ? buffer.size() - 10 : 0; return; }
+                    const auto bracket = buffer.find ('[', key);
+                    if (bracket == std::string::npos) { pos = key; return; }
+                    inArray = true;
+                    pos = bracket + 1;
+                    continue;
+                }
+
+                const char c = buffer[pos];
+                if (inString)
+                {
+                    if (escape)          escape = false;
+                    else if (c == '\\')  escape = true;
+                    else if (c == '"')   inString = false;
+                }
+                else if (c == '"')
+                {
+                    inString = true;
+                }
+                else if (c == '{')
+                {
+                    if (depth == 0) objectStart = pos;
+                    ++depth;
+                }
+                else if (c == '}')
+                {
+                    if (depth > 0 && --depth == 0 && objectStart != std::string::npos)
+                    {
+                        const auto text = buffer.substr (objectStart, pos - objectStart + 1);
+                        emitOne (juce::JSON::parse (juce::String::fromUTF8 (text.c_str(), (int) text.size())));
+                        objectStart = std::string::npos;
+                    }
+                }
+                else if (c == ']' && depth == 0)
+                {
+                    pos = buffer.size();
+                    return;
+                }
+                ++pos;
+            }
+        }
+
+        std::function<void (const juce::var&)> emit;
+        std::string buffer;
+        size_t pos = 0, objectStart = std::string::npos;
+        int depth = 0, emitted = 0;
+        bool inArray = false, inString = false, escape = false;
+    };
+}
+
+//==============================================================================
+LlmPatchGenerator::LlmPatchGenerator (std::shared_ptr<LlmBackend> b, std::shared_ptr<PatchGenerator> f)
+    : backend (std::move (b)), fallback (std::move (f)) {}
+
+juce::String LlmPatchGenerator::name() const
+{
+    return backend->name() + " " + backend->modelName();
+}
+
+juce::String LlmPatchGenerator::systemPrompt()
+{
+    juce::String s;
+    s << "You are an expert sound designer programming Stacks, a polyphonic hybrid wavetable/FM synthesizer.\n"
+      << "Signal path: oscillators A and B (morphing wavetables; B can frequency-modulate A), plus a sub oscillator and noise, "
+      << "into a ladder filter with its own envelope, then the amplitude envelope, then chorus, delay and reverb. "
+      << "Two LFOs each modulate one destination. Unison stacks detuned copies of a note for width.\n\n"
+      << "Parameters (id: range [unit] - meaning):\n";
+
+    for (const auto& spec : paramSpecs())
+    {
+        if (std::string (spec.id) == "master_gain")
+            continue;
+
+        s << spec.id << ": ";
+        if (spec.kind == ParamKind::Choice)
+            s << "one of " << spec.choices->joinIntoString (", ");
+        else
+            s << numberText (spec.min) << " to " << numberText (spec.max) << (spec.unit[0] != 0 ? juce::String (" ") + spec.unit : juce::String());
+        s << " - " << spec.aiHint << "\n";
+    }
+
+    s << "\nWavetable characters: Sine = pure (morph adds warmth); Triangle = soft (morph skews it toward a saw); "
+      << "Saw = classic (morph 0 is nearly a sine, 1 is razor sharp); Pulse = hollow (morph narrows the pulse); "
+      << "Sync = aggressive hard-sync (morph raises the sync pitch); Organ = drawbars (morph changes the registration); "
+      << "Formant = vocal (morph moves the formant up); Glass = sparse bell-like partials; "
+      << "Fold = wavefolded sine (morph adds folds, saturated); Grit = noisy random harmonics (digital, lo-fi).\n"
+      << "Musical guidance: pads want aenv_attack 0.3-2, long release, unison 3-4, chorus and reverb; "
+      << "plucks want aenv_decay 0.1-0.6, aenv_sustain near 0, filter_env 2-4 with fenv_decay 0.05-0.4; "
+      << "basses want sub_level, filter_cutoff 80-800, oscA_coarse -12; "
+      << "bells want fm_amount 0.3-0.8 with oscB_coarse 7, 12, 19 or 24 and aenv_sustain 0; "
+      << "leads want glide 0.03-0.15 and vibrato (an LFO on Pitch at 4-7 Hz, amount 0.05-0.15); "
+      << "textures want Grit, Formant or Fold, some noise, LFOs on Morph A or FM, and long delay feedback.\n"
+      << "Avoid filter_res above 0.8 together with filter_drive above 4, aenv_attack above 3, and an LFO on Pitch above amount 0.3 unless a wobble is wanted.\n\n"
+      << "Reply with JSON only, no prose, in exactly this shape:\n"
+      << "{\"patches\": [{\"name\": \"Two Words\", \"category\": \"Pad\", \"description\": \"one vivid sentence about how it sounds\", "
+      << "\"parent\": 1, \"params\": {\"oscA_wave\": \"Saw\", \"filter_cutoff\": 1200}}]}\n"
+      << "category is one of Pad, Pluck, Bass, Keys, Lead, Bell, Texture, Drone. "
+      << "In params list only the parameters that define the sound (usually 12 to 25); every parameter you omit keeps its base value. "
+      << "Use plain numbers without units and the exact option names for choice parameters. "
+      << "Make every patch in a batch clearly different from the others. "
+      << "Write compact JSON on a single line with no indentation, no newlines, no markdown fences and nothing before or after it.";
+    return s;
+}
+
+juce::String LlmPatchGenerator::userPrompt (const GenerationRequest& req)
+{
+    juce::String s;
+
+    if (req.parents.empty())
+    {
+        s << "Create " << req.count << " patches. Base values for anything you omit: " << compactParams (Patch()) << "\n";
+        if (req.hint.trim().isNotEmpty())
+            s << "Direction from the user: \"" << req.hint.trim() << "\". Follow it closely.\n";
+        else
+            s << "Cover a range of categories: pads, plucks, basses, keys, leads, bells, textures.\n";
+        s << variationPhrase (req.variation, false) << "\n";
+    }
+    else
+    {
+        s << "The user picked these favourites:\n";
+        for (int i = 0; i < (int) req.parents.size(); ++i)
+        {
+            const auto& parent = req.parents[(size_t) i];
+            s << "Parent " << (i + 1) << " - \"" << parent.name << "\"";
+            if (parent.category.isNotEmpty()) s << " (" << parent.category << ")";
+            if (parent.description.isNotEmpty()) s << ": " << parent.description;
+            s << "\nparams: " << compactParams (parent) << "\n";
+        }
+        s << "Create " << req.count << " descendants. Keep what makes the parents appealing and vary them "
+          << variationPhrase (req.variation, true) << ". ";
+        if (req.parents.size() > 1)
+            s << "Let some descendants combine traits from two parents. ";
+        s << "Set \"parent\" to the number of the parent whose values fill in anything you omit. "
+          << "Give each descendant a fresh two-word name that shares one word with its parent.\n";
+        if (req.hint.trim().isNotEmpty())
+            s << "Direction from the user: \"" << req.hint.trim() << "\". Follow it closely.\n";
+    }
+
+    s << "The \"patches\" array must contain exactly " << req.count << " entries - do not stop early.\n"
+      << "/no_think";
+    return s;
+}
+
+std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& req, const GenerationProgress& progress)
+{
+    juce::String reason;
+    if (! backend->isAvailable (reason))
+    {
+        progress.status ("AI unavailable (" + reason + ") - using Random");
+        return fallback->generate (req, progress);
+    }
+
+    progress.status ("Asking " + backend->modelName() + "...");
+
+    std::vector<Patch> out;
+    const Patch defaults;
+
+    StreamingPatchParser parser ([&] (const juce::var& v)
+    {
+        // Pick the base this patch builds on: the named parent, else parent 1, else defaults.
+        const Patch* base = &defaults;
+        if (! req.parents.empty())
+        {
+            base = &req.parents.front();
+            if (auto* obj = v.getDynamicObject())
+            {
+                const int parentIndex = (int) obj->getProperty ("parent") - 1;
+                if (parentIndex >= 0 && parentIndex < (int) req.parents.size())
+                    base = &req.parents[(size_t) parentIndex];
+            }
+        }
+
+        auto patch = Patch::fromVar (v, base);
+        if (! patch)
+            return;
+
+        patch->set (P::master_gain, -6.0f);
+        patch->origin = "AI";
+        patch->name = spaceOutCamelCase (patch->name).substring (0, 28);
+        if (patch->description.isEmpty())
+            patch->description = describePatch (*patch);
+        else if (patch->description.length() < 60)
+            patch->description << " (" << describePatch (*patch) << ")";
+
+        out.push_back (*patch);
+        progress.patch (*patch);
+        progress.status (juce::String (out.size()) + " of " + juce::String (req.count) + " from " + backend->modelName() + "...");
+    });
+
+    juce::String error, rawReply;
+    const bool ok = backend->chat (systemPrompt(), userPrompt (req),
+                                   [&] (const juce::String& delta) { rawReply << delta; parser.feed (delta); },
+                                   progress.shouldCancel, error);
+    parser.finish();
+
+    // Keep the last exchange on disk: invaluable when tuning the prompt.
+    {
+        auto dir = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                       .getChildFile ("Application Support").getChildFile ("Stacks");
+        dir.createDirectory();
+        dir.getChildFile ("last-ai-prompt.txt").replaceWithText (systemPrompt() + "\n\n----- USER -----\n" + userPrompt (req));
+        dir.getChildFile ("last-ai-reply.txt").replaceWithText (rawReply + (error.isNotEmpty() ? "\n\n----- ERROR -----\n" + error : juce::String()));
+    }
+
+    if (progress.cancelled())
+        return out;
+
+    if (out.empty())
+    {
+        progress.status ("AI gave nothing usable (" + (ok ? juce::String ("empty reply") : error) + ") - using Random");
+        return fallback->generate (req, progress);
+    }
+
+    if ((int) out.size() > req.count)
+        out.resize ((size_t) req.count);
+    return out;
+}
+
+} // namespace stacks

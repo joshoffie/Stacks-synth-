@@ -1,0 +1,8 @@
+# Build output lives in a *.nosync folder so iCloud Drive never tries to sync it.
+build*/
+*.nosync/
+.DS_Store
+compile_commands.json
+.cache/
+# Downloaded AI model weights (large) — fetched on first run, never committed.
+models/

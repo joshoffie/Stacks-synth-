@@ -1,0 +1,527 @@
+#include "PatchGenerator.h"
+
+#include <cmath>
+#include <cstring>
+
+namespace stacks
+{
+
+namespace
+{
+    enum Archetype { Pad, Pluck, Bass, Keys, Lead, Bell, Texture, Drone, NumArchetypes };
+
+    const char* archetypeName (int a)
+    {
+        static const char* names[] = { "Pad", "Pluck", "Bass", "Keys", "Lead", "Bell", "Texture", "Drone" };
+        return names[juce::jlimit (0, NumArchetypes - 1, a)];
+    }
+
+    struct Rng
+    {
+        explicit Rng (juce::int64 seed) : r (seed) {}
+
+        float uni (float a, float b)          { return a + (b - a) * r.nextFloat(); }
+        float logUni (float a, float b)       { return std::exp (uni (std::log (a), std::log (b))); }
+        bool  chance (float p)                { return r.nextFloat() < p; }
+        int   pick (std::initializer_list<int> xs)
+        {
+            auto it = xs.begin();
+            std::advance (it, r.nextInt ((int) xs.size()));
+            return *it;
+        }
+        const char* pick (std::initializer_list<const char*> xs)
+        {
+            auto it = xs.begin();
+            std::advance (it, r.nextInt ((int) xs.size()));
+            return *it;
+        }
+        float gauss()
+        {
+            const float u1 = juce::jmax (1.0e-6f, r.nextFloat()), u2 = r.nextFloat();
+            return std::sqrt (-2.0f * std::log (u1)) * std::cos (juce::MathConstants<float>::twoPi * u2);
+        }
+
+        juce::Random r;
+    };
+
+    int wave (const char* n) { return juce::jmax (0, waveNames().indexOf (n)); }
+    int pickWave (Rng& rng, std::initializer_list<const char*> names) { return wave (rng.pick (names)); }
+
+    //--------------------------------------------------------------------------
+    const juce::StringArray& adjectives()
+    {
+        static const juce::StringArray a { "Velvet", "Amber", "Glacial", "Neon", "Dusty", "Hollow", "Liquid", "Rusted",
+                                           "Silver", "Midnight", "Paper", "Electric", "Frozen", "Golden", "Shadow",
+                                           "Crystal", "Smoky", "Violet", "Static", "Lunar", "Copper", "Feral", "Gentle",
+                                           "Burnt", "Prism", "Opal", "Marble", "Ember", "Saline", "Cobalt" };
+        return a;
+    }
+
+    const juce::StringArray& nouns (int archetype)
+    {
+        static const juce::StringArray n[NumArchetypes] = {
+            { "Pad", "Drift", "Haze", "Bloom", "Choir", "Veil", "Strings", "Field" },
+            { "Pluck", "Spark", "Drop", "Pizz", "Pin", "Tick", "Kalimba" },
+            { "Bass", "Sub", "Growl", "Rumble", "Thump", "Floor" },
+            { "Keys", "Piano", "Clav", "Chime", "Toy", "Celeste" },
+            { "Lead", "Cry", "Horn", "Line", "Siren", "Voice" },
+            { "Bell", "Glass", "Chime", "Tine", "Gong", "Bowl" },
+            { "Texture", "Grain", "Smear", "Cloud", "Swarm", "Rust", "Static" },
+            { "Drone", "Tide", "Abyss", "Hum", "Monolith", "Horizon" } };
+        return n[juce::jlimit (0, NumArchetypes - 1, archetype)];
+    }
+
+    juce::String randomName (int archetype, Rng& rng)
+    {
+        return adjectives()[rng.r.nextInt (adjectives().size())] + " "
+             + nouns (archetype)[rng.r.nextInt (nouns (archetype).size())];
+    }
+
+    // "Velvet Drift" -> "Amber Drift": new adjective, keep the family name.
+    juce::String childName (const juce::String& parent, Rng& rng)
+    {
+        auto words = juce::StringArray::fromTokens (parent.trim(), " ", "");
+        words.removeEmptyStrings();
+        const auto noun = words.isEmpty() ? juce::String ("Patch") : words[words.size() - 1];
+        juce::String adj;
+        do
+            adj = adjectives()[rng.r.nextInt (adjectives().size())];
+        while (words.size() > 1 && adj == words[0]);
+        return adj + " " + noun;
+    }
+
+    int archetypeFromHint (const juce::String& hintLower)
+    {
+        struct Key { const char* word; int archetype; };
+        static const Key keys[] = { { "pad", Pad }, { "string", Pad }, { "choir", Pad },
+                                    { "pluck", Pluck }, { "pizz", Pluck }, { "stab", Pluck },
+                                    { "bass", Bass }, { "sub", Bass }, { "808", Bass },
+                                    { "key", Keys }, { "piano", Keys }, { "clav", Keys }, { "organ", Keys },
+                                    { "lead", Lead }, { "solo", Lead },
+                                    { "bell", Bell }, { "chime", Bell }, { "mallet", Bell },
+                                    { "texture", Texture }, { "noise", Texture }, { "glitch", Texture }, { "grain", Texture },
+                                    { "drone", Drone }, { "ambient", Drone } };
+        for (const auto& k : keys)
+            if (hintLower.contains (k.word))
+                return k.archetype;
+        return -1;
+    }
+
+    //--------------------------------------------------------------------------
+    void setEnvelope (Patch& p, P a, P d, P s, P r, float att, float dec, float sus, float rel)
+    {
+        p.set (a, att); p.set (d, dec); p.set (s, sus); p.set (r, rel);
+    }
+
+    void setLfo (Patch& p, int which, int dest, float rate, float amount, int shape)
+    {
+        if (which == 1) { p.set (P::lfo1_dest, (float) dest); p.set (P::lfo1_rate, rate); p.set (P::lfo1_amount, amount); p.set (P::lfo1_shape, (float) shape); }
+        else            { p.set (P::lfo2_dest, (float) dest); p.set (P::lfo2_rate, rate); p.set (P::lfo2_amount, amount); p.set (P::lfo2_shape, (float) shape); }
+    }
+
+    void setReverb (Patch& p, float mix, float size, float damp)
+    {
+        p.set (P::reverb_mix, mix); p.set (P::reverb_size, size); p.set (P::reverb_damp, damp);
+    }
+
+    void setDelay (Patch& p, Rng& rng, float mix, float feedback)
+    {
+        p.set (P::delay_mix, mix);
+        p.set (P::delay_time, (float) rng.pick ({ 250, 375, 500, 750 }) / 1000.0f);
+        p.set (P::delay_feedback, feedback);
+    }
+
+    Patch randomPatch (int archetype, Rng& rng)
+    {
+        Patch p;
+        p.category = archetypeName (archetype);
+
+        // Shared starting point
+        p.set (P::oscA_morph, rng.uni (0.2f, 0.9f));
+        p.set (P::oscB_morph, rng.uni (0.1f, 0.9f));
+        p.set (P::oscA_level, rng.uni (0.6f, 0.9f));
+        p.set (P::oscA_fine, rng.chance (0.3f) ? rng.uni (-8.0f, 8.0f) : 0.0f);
+        p.set (P::oscB_fine, rng.uni (-12.0f, 12.0f));
+        p.set (P::filter_keytrack, rng.uni (0.1f, 0.6f));
+        p.set (P::lfo1_dest, DestOff);
+        p.set (P::lfo2_dest, DestOff);
+        p.set (P::reverb_mix, 0.0f);
+        p.set (P::delay_mix, 0.0f);
+        p.set (P::chorus_mix, 0.0f);
+
+        switch (archetype)
+        {
+            case Pad:
+                p.set (P::oscA_wave, pickWave (rng, { "Saw", "Triangle", "Organ", "Formant", "Glass" }));
+                p.set (P::oscB_wave, pickWave (rng, { "Saw", "Triangle", "Sine", "Formant", "Organ" }));
+                p.set (P::oscB_level, rng.uni (0.4f, 0.8f));
+                p.set (P::oscB_coarse, (float) rng.pick ({ 0, 0, -12, 7, 12 }));
+                p.set (P::fm_amount, rng.chance (0.3f) ? rng.uni (0.02f, 0.12f) : 0.0f);
+                p.set (P::unison_voices, (float) rng.pick ({ 2, 3, 4, 4 }));
+                p.set (P::unison_detune, rng.uni (8.0f, 25.0f));
+                p.set (P::unison_spread, rng.uni (0.5f, 1.0f));
+                p.set (P::filter_type, (float) rng.pick ({ 0, 1, 1 }));
+                p.set (P::filter_cutoff, rng.logUni (400.0f, 3000.0f));
+                p.set (P::filter_res, rng.uni (0.0f, 0.3f));
+                p.set (P::filter_env, rng.uni (-1.0f, 1.5f));
+                setEnvelope (p, P::fenv_attack, P::fenv_decay, P::fenv_sustain, P::fenv_release,
+                             rng.logUni (0.3f, 2.0f), rng.logUni (1.0f, 4.0f), rng.uni (0.3f, 0.8f), rng.logUni (0.5f, 3.0f));
+                setEnvelope (p, P::aenv_attack, P::aenv_decay, P::aenv_sustain, P::aenv_release,
+                             rng.logUni (0.3f, 2.0f), rng.logUni (1.0f, 3.0f), rng.uni (0.7f, 1.0f), rng.logUni (1.0f, 4.0f));
+                {
+                    const int dest = rng.pick ({ DestMorphA, DestFilter, DestPitch, DestMorphB });
+                    setLfo (p, 1, dest, rng.logUni (0.05f, 0.5f), dest == DestPitch ? rng.uni (0.03f, 0.1f) : rng.uni (0.1f, 0.5f), rng.pick ({ 0, 1 }));
+                }
+                if (rng.chance (0.5f))
+                    setLfo (p, 2, DestPan, rng.logUni (0.05f, 0.3f), rng.uni (0.2f, 0.6f), 0);
+                p.set (P::chorus_mix, rng.uni (0.2f, 0.6f));
+                p.set (P::chorus_rate, rng.uni (0.2f, 1.0f));
+                p.set (P::chorus_depth, rng.uni (0.2f, 0.5f));
+                setReverb (p, rng.uni (0.3f, 0.6f), rng.uni (0.6f, 0.9f), rng.uni (0.3f, 0.7f));
+                if (rng.chance (0.4f))
+                    setDelay (p, rng, rng.uni (0.1f, 0.3f), rng.uni (0.3f, 0.6f));
+                break;
+
+            case Pluck:
+                p.set (P::oscA_wave, pickWave (rng, { "Saw", "Pulse", "Fold", "Glass", "Sync", "Triangle" }));
+                p.set (P::oscB_wave, pickWave (rng, { "Sine", "Saw", "Glass", "Pulse" }));
+                p.set (P::oscB_level, rng.chance (0.6f) ? rng.uni (0.2f, 0.7f) : 0.0f);
+                p.set (P::oscB_coarse, (float) rng.pick ({ 0, 12, 7, 19, -12 }));
+                p.set (P::fm_amount, rng.chance (0.5f) ? rng.uni (0.05f, 0.3f) : 0.0f);
+                p.set (P::unison_voices, (float) rng.pick ({ 1, 1, 2 }));
+                p.set (P::unison_detune, rng.uni (3.0f, 12.0f));
+                p.set (P::filter_type, (float) rng.pick ({ 0, 1 }));
+                p.set (P::filter_cutoff, rng.logUni (300.0f, 2000.0f));
+                p.set (P::filter_res, rng.uni (0.1f, 0.5f));
+                p.set (P::filter_env, rng.uni (1.5f, 4.0f));
+                setEnvelope (p, P::fenv_attack, P::fenv_decay, P::fenv_sustain, P::fenv_release,
+                             0.001f, rng.logUni (0.05f, 0.4f), rng.uni (0.0f, 0.2f), rng.logUni (0.05f, 0.4f));
+                setEnvelope (p, P::aenv_attack, P::aenv_decay, P::aenv_sustain, P::aenv_release,
+                             rng.logUni (0.001f, 0.005f), rng.logUni (0.1f, 0.6f), rng.uni (0.0f, 0.2f), rng.logUni (0.1f, 0.5f));
+                setDelay (p, rng, rng.uni (0.2f, 0.4f), rng.uni (0.3f, 0.6f));
+                setReverb (p, rng.uni (0.1f, 0.3f), rng.uni (0.3f, 0.7f), rng.uni (0.3f, 0.7f));
+                break;
+
+            case Bass:
+                p.set (P::oscA_wave, pickWave (rng, { "Saw", "Pulse", "Fold", "Sine", "Triangle" }));
+                p.set (P::oscA_coarse, (float) rng.pick ({ -12, -12, 0 }));
+                p.set (P::oscB_wave, pickWave (rng, { "Saw", "Pulse", "Sine", "Sync" }));
+                p.set (P::oscB_level, rng.chance (0.6f) ? rng.uni (0.3f, 0.7f) : 0.0f);
+                p.set (P::oscB_coarse, (float) rng.pick ({ 0, -12, 12, 7 }));
+                p.set (P::oscB_fine, rng.uni (-7.0f, 7.0f));
+                p.set (P::fm_amount, rng.chance (0.4f) ? rng.uni (0.05f, 0.25f) : 0.0f);
+                p.set (P::sub_level, rng.uni (0.5f, 1.0f));
+                p.set (P::unison_voices, (float) rng.pick ({ 1, 1, 2 }));
+                p.set (P::unison_detune, rng.uni (3.0f, 10.0f));
+                p.set (P::unison_spread, rng.uni (0.0f, 0.4f));
+                p.set (P::filter_type, 1.0f);
+                p.set (P::filter_cutoff, rng.logUni (80.0f, 800.0f));
+                p.set (P::filter_res, rng.uni (0.1f, 0.5f));
+                p.set (P::filter_drive, rng.uni (1.0f, 4.0f));
+                p.set (P::filter_env, rng.uni (1.0f, 3.0f));
+                p.set (P::filter_keytrack, rng.uni (0.0f, 0.3f));
+                setEnvelope (p, P::fenv_attack, P::fenv_decay, P::fenv_sustain, P::fenv_release,
+                             0.001f, rng.logUni (0.05f, 0.3f), rng.uni (0.0f, 0.3f), rng.logUni (0.05f, 0.3f));
+                setEnvelope (p, P::aenv_attack, P::aenv_decay, P::aenv_sustain, P::aenv_release,
+                             rng.logUni (0.001f, 0.01f), rng.logUni (0.2f, 0.6f), rng.uni (0.4f, 0.9f), rng.logUni (0.05f, 0.3f));
+                p.set (P::glide, rng.chance (0.4f) ? rng.uni (0.02f, 0.08f) : 0.0f);
+                setReverb (p, rng.uni (0.0f, 0.1f), 0.3f, 0.7f);
+                break;
+
+            case Keys:
+                p.set (P::oscA_wave, pickWave (rng, { "Organ", "Glass", "Sine", "Triangle", "Formant" }));
+                p.set (P::oscB_wave, pickWave (rng, { "Sine", "Glass", "Triangle" }));
+                p.set (P::oscB_level, rng.uni (0.0f, 0.5f));
+                p.set (P::oscB_coarse, (float) rng.pick ({ 0, 12, 19, 24, -12 }));
+                p.set (P::fm_amount, rng.uni (0.1f, 0.5f));
+                p.set (P::unison_voices, (float) rng.pick ({ 1, 1, 2 }));
+                p.set (P::unison_detune, rng.uni (3.0f, 8.0f));
+                p.set (P::filter_type, (float) rng.pick ({ 0, 1 }));
+                p.set (P::filter_cutoff, rng.logUni (2000.0f, 8000.0f));
+                p.set (P::filter_res, rng.uni (0.0f, 0.3f));
+                p.set (P::filter_env, rng.uni (0.0f, 1.5f));
+                setEnvelope (p, P::fenv_attack, P::fenv_decay, P::fenv_sustain, P::fenv_release,
+                             0.001f, rng.logUni (0.2f, 1.0f), rng.uni (0.2f, 0.6f), rng.logUni (0.2f, 0.8f));
+                setEnvelope (p, P::aenv_attack, P::aenv_decay, P::aenv_sustain, P::aenv_release,
+                             rng.logUni (0.001f, 0.01f), rng.logUni (0.5f, 2.0f), rng.uni (0.2f, 0.6f), rng.logUni (0.3f, 1.0f));
+                if (rng.chance (0.4f))
+                    setLfo (p, 1, DestAmp, rng.uni (3.0f, 6.0f), rng.uni (0.1f, 0.3f), 0);
+                p.set (P::chorus_mix, rng.uni (0.1f, 0.4f));
+                setReverb (p, rng.uni (0.2f, 0.4f), rng.uni (0.4f, 0.7f), rng.uni (0.3f, 0.7f));
+                break;
+
+            case Lead:
+                p.set (P::oscA_wave, pickWave (rng, { "Saw", "Pulse", "Sync", "Fold" }));
+                p.set (P::oscB_wave, pickWave (rng, { "Saw", "Pulse", "Sine" }));
+                p.set (P::oscB_level, rng.uni (0.3f, 0.8f));
+                p.set (P::oscB_coarse, (float) rng.pick ({ 0, 0, 7, 12, -12 }));
+                p.set (P::fm_amount, rng.chance (0.3f) ? rng.uni (0.05f, 0.2f) : 0.0f);
+                p.set (P::unison_voices, (float) rng.pick ({ 1, 2, 2 }));
+                p.set (P::unison_detune, rng.uni (5.0f, 15.0f));
+                p.set (P::unison_spread, rng.uni (0.0f, 0.5f));
+                p.set (P::glide, rng.uni (0.02f, 0.15f));
+                p.set (P::filter_type, (float) rng.pick ({ 0, 1 }));
+                p.set (P::filter_cutoff, rng.logUni (800.0f, 5000.0f));
+                p.set (P::filter_res, rng.uni (0.2f, 0.6f));
+                p.set (P::filter_drive, rng.uni (1.0f, 3.0f));
+                p.set (P::filter_env, rng.uni (0.5f, 2.5f));
+                setEnvelope (p, P::fenv_attack, P::fenv_decay, P::fenv_sustain, P::fenv_release,
+                             rng.logUni (0.001f, 0.05f), rng.logUni (0.1f, 0.6f), rng.uni (0.3f, 0.7f), rng.logUni (0.1f, 0.4f));
+                setEnvelope (p, P::aenv_attack, P::aenv_decay, P::aenv_sustain, P::aenv_release,
+                             rng.logUni (0.005f, 0.05f), rng.logUni (0.1f, 0.5f), rng.uni (0.8f, 1.0f), rng.logUni (0.1f, 0.4f));
+                setLfo (p, 1, DestPitch, rng.uni (4.0f, 7.0f), rng.uni (0.05f, 0.15f), 0);
+                setDelay (p, rng, rng.uni (0.2f, 0.4f), rng.uni (0.3f, 0.5f));
+                setReverb (p, rng.uni (0.1f, 0.3f), rng.uni (0.4f, 0.7f), 0.5f);
+                break;
+
+            case Bell:
+                p.set (P::oscA_wave, pickWave (rng, { "Sine", "Glass", "Triangle" }));
+                p.set (P::oscB_wave, pickWave (rng, { "Sine", "Glass" }));
+                p.set (P::oscB_level, rng.uni (0.0f, 0.3f));
+                p.set (P::oscB_coarse, (float) rng.pick ({ 7, 12, 19, 24, 31 }));
+                p.set (P::oscB_fine, rng.uni (0.0f, 20.0f));
+                p.set (P::fm_amount, rng.uni (0.3f, 0.8f));
+                p.set (P::unison_voices, (float) rng.pick ({ 1, 1, 2 }));
+                p.set (P::unison_detune, rng.uni (2.0f, 6.0f));
+                p.set (P::filter_type, (float) rng.pick ({ 0, 1, 2 }));
+                p.set (P::filter_cutoff, rng.logUni (3000.0f, 12000.0f));
+                p.set (P::filter_res, rng.uni (0.0f, 0.2f));
+                p.set (P::filter_env, 0.0f);
+                setEnvelope (p, P::aenv_attack, P::aenv_decay, P::aenv_sustain, P::aenv_release,
+                             0.001f, rng.logUni (1.0f, 4.0f), 0.0f, rng.logUni (1.0f, 3.0f));
+                setEnvelope (p, P::fenv_attack, P::fenv_decay, P::fenv_sustain, P::fenv_release,
+                             0.001f, rng.logUni (0.5f, 2.0f), 0.0f, 1.0f);
+                if (rng.chance (0.5f))
+                    setLfo (p, 1, DestFM, rng.logUni (0.1f, 1.0f), rng.uni (0.05f, 0.2f), 0);
+                setReverb (p, rng.uni (0.3f, 0.6f), rng.uni (0.6f, 0.9f), rng.uni (0.2f, 0.5f));
+                break;
+
+            case Texture:
+                p.set (P::oscA_wave, pickWave (rng, { "Grit", "Formant", "Fold", "Sync", "Glass" }));
+                p.set (P::oscB_wave, pickWave (rng, { "Grit", "Formant", "Saw", "Pulse" }));
+                p.set (P::oscB_level, rng.uni (0.3f, 0.8f));
+                p.set (P::oscB_coarse, (float) rng.pick ({ 0, 7, 12, -12, 5, -5 }));
+                p.set (P::fm_amount, rng.uni (0.0f, 0.5f));
+                p.set (P::noise_level, rng.uni (0.1f, 0.4f));
+                p.set (P::unison_voices, (float) rng.pick ({ 1, 2, 4 }));
+                p.set (P::unison_detune, rng.uni (10.0f, 40.0f));
+                p.set (P::unison_spread, rng.uni (0.5f, 1.0f));
+                p.set (P::filter_type, (float) rng.pick ({ 0, 1, 4, 5, 2 }));
+                p.set (P::filter_cutoff, rng.logUni (300.0f, 4000.0f));
+                p.set (P::filter_res, rng.uni (0.2f, 0.7f));
+                p.set (P::filter_drive, rng.uni (1.0f, 5.0f));
+                p.set (P::filter_env, rng.uni (-2.0f, 2.0f));
+                setEnvelope (p, P::fenv_attack, P::fenv_decay, P::fenv_sustain, P::fenv_release,
+                             rng.logUni (0.1f, 3.0f), rng.logUni (0.5f, 4.0f), rng.uni (0.2f, 0.8f), rng.logUni (0.5f, 3.0f));
+                setEnvelope (p, P::aenv_attack, P::aenv_decay, P::aenv_sustain, P::aenv_release,
+                             rng.logUni (0.05f, 2.0f), rng.logUni (0.5f, 3.0f), rng.uni (0.5f, 1.0f), rng.logUni (0.5f, 4.0f));
+                setLfo (p, 1, rng.pick ({ DestMorphA, DestFM, DestMorphB }), rng.logUni (0.1f, 3.0f), rng.uni (0.3f, 1.0f), rng.pick ({ 0, 1, 2, 4 }));
+                setLfo (p, 2, rng.pick ({ DestPan, DestFilter, DestAmp }), rng.logUni (0.1f, 2.0f), rng.uni (0.2f, 0.7f), rng.pick ({ 0, 1, 4 }));
+                setDelay (p, rng, rng.uni (0.3f, 0.6f), rng.uni (0.5f, 0.85f));
+                setReverb (p, rng.uni (0.4f, 0.8f), rng.uni (0.6f, 1.0f), rng.uni (0.2f, 0.6f));
+                break;
+
+            case Drone:
+            default:
+                p.set (P::oscA_wave, pickWave (rng, { "Saw", "Organ", "Formant", "Grit", "Sine" }));
+                p.set (P::oscA_coarse, (float) rng.pick ({ -12, -24, 0 }));
+                p.set (P::oscB_wave, pickWave (rng, { "Saw", "Sine", "Formant", "Glass" }));
+                p.set (P::oscB_level, rng.uni (0.4f, 0.8f));
+                p.set (P::oscB_coarse, (float) rng.pick ({ 0, 7, 12, -12, 5 }));
+                p.set (P::fm_amount, rng.uni (0.0f, 0.15f));
+                p.set (P::sub_level, rng.uni (0.0f, 0.5f));
+                p.set (P::unison_voices, 4.0f);
+                p.set (P::unison_detune, rng.uni (5.0f, 15.0f));
+                p.set (P::unison_spread, rng.uni (0.6f, 1.0f));
+                p.set (P::filter_type, (float) rng.pick ({ 0, 1 }));
+                p.set (P::filter_cutoff, rng.logUni (200.0f, 1500.0f));
+                p.set (P::filter_res, rng.uni (0.1f, 0.5f));
+                p.set (P::filter_env, rng.uni (0.0f, 1.0f));
+                setEnvelope (p, P::fenv_attack, P::fenv_decay, P::fenv_sustain, P::fenv_release,
+                             rng.logUni (2.0f, 8.0f), 4.0f, 1.0f, rng.logUni (2.0f, 6.0f));
+                setEnvelope (p, P::aenv_attack, P::aenv_decay, P::aenv_sustain, P::aenv_release,
+                             rng.logUni (2.0f, 8.0f), 2.0f, 1.0f, rng.logUni (3.0f, 8.0f));
+                setLfo (p, 1, rng.pick ({ DestMorphA, DestFilter }), rng.logUni (0.02f, 0.2f), rng.uni (0.2f, 0.6f), rng.pick ({ 0, 1 }));
+                setLfo (p, 2, rng.pick ({ DestPan, DestMorphB }), rng.logUni (0.02f, 0.15f), rng.uni (0.2f, 0.5f), 0);
+                p.set (P::chorus_mix, rng.uni (0.1f, 0.4f));
+                setReverb (p, rng.uni (0.4f, 0.7f), rng.uni (0.8f, 1.0f), rng.uni (0.2f, 0.5f));
+                break;
+        }
+
+        p.name = randomName (archetype, rng);
+        return p;
+    }
+
+    //--------------------------------------------------------------------------
+    const std::vector<juce::NormalisableRange<float>>& ranges()
+    {
+        static const std::vector<juce::NormalisableRange<float>> r = []
+        {
+            std::vector<juce::NormalisableRange<float>> out;
+            for (const auto& s : paramSpecs())
+            {
+                juce::NormalisableRange<float> range (s.min, s.max);
+                if (s.skewCentre > 0.0f)
+                    range.setSkewForCentre (s.skewCentre);
+                out.push_back (range);
+            }
+            return out;
+        }();
+        return r;
+    }
+
+    // Nudge every parameter a little (or a lot). Perturbation happens in the
+    // knob's normalised space so a cutoff of 200 Hz moves by a musically
+    // similar amount to one at 5 kHz.
+    void mutate (Patch& p, float amount, Rng& rng)
+    {
+        const auto& specs = paramSpecs();
+        for (int i = 0; i < kNumParams; ++i)
+        {
+            const auto& s = specs[(size_t) i];
+            if (std::strcmp (s.id, "master_gain") == 0)
+                continue;
+
+            if (s.kind == ParamKind::Choice)
+            {
+                const bool isWave = juce::String (s.id).endsWith ("_wave");
+                if (rng.chance (amount * (isWave ? 0.3f : 0.12f)))
+                    p.set (i, (float) rng.r.nextInt (s.choices->size()));
+                continue;
+            }
+
+            if (! rng.chance (0.3f + 0.5f * amount))
+                continue;
+
+            const auto& range = ranges()[(size_t) i];
+            float norm = range.convertTo0to1 (juce::jlimit (s.min, s.max, p.values[(size_t) i]));
+            norm = juce::jlimit (0.0f, 1.0f, norm + rng.gauss() * 0.2f * amount);
+            p.set (i, range.convertFrom0to1 (norm));
+        }
+    }
+
+    // Child takes each whole section (OSC A, FILTER, ...) from one parent.
+    Patch crossover (const std::vector<Patch>& parents, Rng& rng)
+    {
+        const auto& base = parents[(size_t) rng.r.nextInt ((int) parents.size())];
+        Patch child = base;
+        if (parents.size() < 2)
+            return child;
+
+        const auto& specs = paramSpecs();
+        juce::String currentGroup;
+        const Patch* donor = &base;
+        for (int i = 0; i < kNumParams; ++i)
+        {
+            if (currentGroup != specs[(size_t) i].group)
+            {
+                currentGroup = specs[(size_t) i].group;
+                donor = &parents[(size_t) rng.r.nextInt ((int) parents.size())];
+            }
+            child.values[(size_t) i] = donor->values[(size_t) i];
+        }
+        return child;
+    }
+
+    // Cheap keyword steering until the language model takes over the hint.
+    void applyHint (Patch& p, const juce::String& hintLower, Rng& rng)
+    {
+        if (hintLower.isEmpty())
+            return;
+
+        auto scaleCutoff = [&] (float f) { p.set (P::filter_cutoff, p.get (P::filter_cutoff) * f); };
+
+        if (hintLower.contains ("dark") || hintLower.contains ("warm") || hintLower.contains ("muffled")) scaleCutoff (0.5f);
+        if (hintLower.contains ("bright") || hintLower.contains ("sharp") || hintLower.contains ("crisp"))  scaleCutoff (2.0f);
+        if (hintLower.contains ("slow") || hintLower.contains ("swell"))
+        {
+            p.set (P::aenv_attack, juce::jmax (p.get (P::aenv_attack), rng.uni (0.5f, 2.0f)));
+            p.set (P::aenv_release, juce::jmax (p.get (P::aenv_release), rng.uni (1.0f, 3.0f)));
+        }
+        if (hintLower.contains ("fast") || hintLower.contains ("snappy") || hintLower.contains ("short") || hintLower.contains ("tight"))
+        {
+            p.set (P::aenv_attack, 0.002f);
+            p.set (P::aenv_decay, juce::jmin (p.get (P::aenv_decay), rng.uni (0.1f, 0.4f)));
+            p.set (P::aenv_release, juce::jmin (p.get (P::aenv_release), rng.uni (0.05f, 0.3f)));
+        }
+        if (hintLower.contains ("wet") || hintLower.contains ("space") || hintLower.contains ("reverb") || hintLower.contains ("ambient"))
+        {
+            p.set (P::reverb_mix, juce::jmax (p.get (P::reverb_mix), rng.uni (0.4f, 0.7f)));
+            p.set (P::reverb_size, juce::jmax (p.get (P::reverb_size), 0.7f));
+        }
+        if (hintLower.contains ("dry"))
+        {
+            p.set (P::reverb_mix, 0.0f); p.set (P::delay_mix, 0.0f); p.set (P::chorus_mix, 0.0f);
+        }
+        if (hintLower.contains ("wide") || hintLower.contains ("thick") || hintLower.contains ("huge"))
+        {
+            p.set (P::unison_voices, 4.0f);
+            p.set (P::unison_spread, 1.0f);
+            p.set (P::unison_detune, juce::jmax (p.get (P::unison_detune), 12.0f));
+        }
+        if (hintLower.contains ("mono") || hintLower.contains ("thin") || hintLower.contains ("simple"))
+            p.set (P::unison_voices, 1.0f);
+        if (hintLower.contains ("movement") || hintLower.contains ("motion") || hintLower.contains ("evolving") || hintLower.contains ("wobble"))
+        {
+            if ((int) p.get (P::lfo1_dest) == DestOff)
+                setLfo (p, 1, rng.pick ({ DestMorphA, DestFilter, DestMorphB }), rng.logUni (0.1f, 1.0f), rng.uni (0.3f, 0.7f), rng.pick ({ 0, 1 }));
+            else
+                p.set (P::lfo1_amount, juce::jmax (p.get (P::lfo1_amount), rng.uni (0.3f, 0.7f)));
+        }
+        if (hintLower.contains ("metal") || hintLower.contains ("fm") || hintLower.contains ("glassy"))
+            p.set (P::fm_amount, juce::jmax (p.get (P::fm_amount), rng.uni (0.3f, 0.6f)));
+        if (hintLower.contains ("dirty") || hintLower.contains ("grit") || hintLower.contains ("distort"))
+            p.set (P::filter_drive, juce::jmax (p.get (P::filter_drive), rng.uni (3.0f, 7.0f)));
+        if (hintLower.contains ("octave down") || hintLower.contains ("lower") || hintLower.contains ("deeper"))
+            p.set (P::oscA_coarse, p.get (P::oscA_coarse) - 12.0f);
+        if (hintLower.contains ("octave up") || hintLower.contains ("higher"))
+            p.set (P::oscA_coarse, p.get (P::oscA_coarse) + 12.0f);
+    }
+} // namespace
+
+std::vector<Patch> RandomPatchGenerator::generate (const GenerationRequest& req, const GenerationProgress& progress)
+{
+    const auto ticks = (juce::uint64) juce::Time::getHighResolutionTicks();
+    const auto salt  = (juce::uint64) counter.fetch_add (1) * 0x9E3779B97F4A7C15ULL;
+    Rng rng ((juce::int64) (ticks ^ salt));
+
+    const auto hintLower = req.hint.toLowerCase();
+    const int hintArchetype = archetypeFromHint (hintLower);
+
+    std::vector<Patch> out;
+    out.reserve ((size_t) req.count);
+
+    for (int i = 0; i < req.count; ++i)
+    {
+        Patch p;
+        if (req.parents.empty())
+        {
+            // Fresh: cycle through the archetypes so a batch has range, unless
+            // the hint asks for a specific kind of sound.
+            const int archetype = hintArchetype >= 0 ? hintArchetype : (i + rng.r.nextInt (NumArchetypes)) % NumArchetypes;
+            p = randomPatch (archetype, rng);
+            if (req.variation > 0.6f)
+                mutate (p, (req.variation - 0.6f) * 1.5f, rng);
+        }
+        else
+        {
+            p = crossover (req.parents, rng);
+            // Scale 0..1 variation to a useful range: 0.5 should feel like a sibling.
+            mutate (p, 0.15f + 0.85f * req.variation, rng);
+            p.name = childName (req.parents[(size_t) rng.r.nextInt ((int) req.parents.size())].name, rng);
+        }
+
+        applyHint (p, hintLower, rng);
+        p.set (P::master_gain, -6.0f);
+        p.description = describePatch (p);
+        progress.patch (p);
+        out.push_back (std::move (p));
+
+        if (progress.cancelled())
+            break;
+    }
+
+    return out;
+}
+
+} // namespace stacks
