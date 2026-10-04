@@ -58,6 +58,11 @@ SettingsPanel::SettingsPanel (StacksAudioProcessor& p) : processor (p)
     addModelButton.onClick = [this] { addCustomModel(); };
     addAndMakeVisible (addModelButton);
 
+    urlModelButton.setButtonText ("Download from a URL...");
+    urlModelButton.setTooltip ("Paste a direct link to a .gguf file (a Hugging Face 'download' link, for instance). It lands in the models folder and is selected when done.");
+    urlModelButton.onClick = [this] { addModelFromUrl(); };
+    addAndMakeVisible (urlModelButton);
+
     removeModelButton.setButtonText ("Forget this model");
     removeModelButton.setTooltip ("Removes your own model from the list (the file stays where it is)");
     removeModelButton.onClick = [this]
@@ -144,9 +149,11 @@ void SettingsPanel::resized()
     auto buttons = r.removeFromTop (26);
     downloadButton.setBounds (buttons.removeFromLeft (110));
     buttons.removeFromLeft (8);
-    addModelButton.setBounds (buttons.removeFromLeft (220));
+    addModelButton.setBounds (buttons.removeFromLeft (200));
     buttons.removeFromLeft (8);
-    removeModelButton.setBounds (buttons.removeFromLeft (140));
+    urlModelButton.setBounds (buttons.removeFromLeft (160));
+    buttons.removeFromLeft (8);
+    removeModelButton.setBounds (buttons.removeFromLeft (130));
     r.removeFromTop (14);
 
     calmToggle.setBounds (r.removeFromTop (22));
@@ -261,6 +268,36 @@ void SettingsPanel::addCustomModel()
     });
 }
 
+void SettingsPanel::addModelFromUrl()
+{
+    auto* w = new juce::AlertWindow ("Download a model", "A direct link to a .gguf file. On Hugging Face, open the file and copy its \"download\" link.",
+                                     juce::MessageBoxIconType::NoIcon);
+    w->addTextEditor ("url", "", "URL");
+    w->addButton ("Download", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([this, w] (int result)
+    {
+        if (result != 1) return;
+        const juce::URL url (w->getTextEditorContents ("url").trim());
+        const auto fileName = url.getFileName();
+        if (! url.isWellFormed() || ! fileName.endsWithIgnoreCase (".gguf"))
+        {
+            juce::NativeMessageBox::showAsync (juce::MessageBoxOptions().withIconType (juce::MessageBoxIconType::WarningIcon)
+                                                   .withTitle ("Not a model link").withMessage ("That link doesn't end in .gguf. Use the direct download link of a GGUF file.").withButton ("OK"), nullptr);
+            return;
+        }
+        ModelInfo m;
+        m.file = ModelManager::modelsDirectory().getChildFile (fileName);
+        m.id = "file:" + m.file.getFullPathName();
+        m.label = m.file.getFileNameWithoutExtension().substring (0, 36);
+        m.note = "downloaded from " + url.getDomain();
+        m.url = url.toString (true);
+        if (! processor.startModelDownload (m))
+            statusLabel.setText ("A download is already running.", juce::dontSendNotification);
+        refresh();
+    }), true);
+}
+
 juce::String SettingsPanel::guideText()
 {
     return juce::String::fromUTF8 (R"(STACKS MODEL GUIDE
@@ -299,8 +336,11 @@ Ollama offers, but the app has to be running.
 YOUR OWN MODEL
 
 "Add your own model (.gguf)..." accepts any chat model in GGUF format that
-llama.cpp can load (Qwen, Llama 3.x, Mistral, Gemma, Phi and so on).
-What matters:
+llama.cpp can load (Qwen, Llama 3.x, Mistral, Gemma, Phi, DeepSeek and so
+on); "Download from a URL..." fetches one straight from a direct .gguf link
+(on Hugging Face, open the file and copy its download link). Models in
+safetensors or PyTorch form need converting to GGUF first (llama.cpp's
+convert_hf_to_gguf.py does it). What matters:
 
   - Pick an *instruct* / *chat* variant, not a base model.
   - Quantised files work well: Q4_K_M is the usual sweet spot. Expect about

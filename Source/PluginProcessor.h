@@ -137,6 +137,7 @@ public:
     const std::vector<ModelInfo>& builtInModels() const    { return knownModels; }
     void refreshModels();
     bool startModelDownload (const juce::String& modelId); // false if one is already running
+    bool startModelDownload (const ModelInfo&);           // any GGUF, e.g. one you pasted a URL for
     void cancelDownload();
     bool isDownloading() const                             { return downloader != nullptr && downloader->isRunning(); }
     bool isBusy() const                                    { return labState.generating || isDownloading(); }

@@ -30,12 +30,13 @@ private:
     void rebuildMenu();
     void engineChosen();
     void addCustomModel();
+    void addModelFromUrl();
 
     StacksAudioProcessor& processor;
     StacksLookAndFeel lookAndFeel;
     juce::Label title, engineLabel, statusLabel, guideTitle;
     juce::ComboBox engineBox;
-    juce::TextButton refreshButton, downloadButton, addModelButton, removeModelButton, saveGuideButton;
+    juce::TextButton refreshButton, downloadButton, addModelButton, urlModelButton, removeModelButton, saveGuideButton;
     juce::ToggleButton calmToggle { "Calm mode: no live knob markers or LFO playhead (the scope stays)" };
     juce::TextEditor guide;
     juce::StringArray menuBuiltins, menuOllama;

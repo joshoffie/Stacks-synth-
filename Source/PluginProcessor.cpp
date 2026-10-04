@@ -800,12 +800,19 @@ void StacksAudioProcessor::refreshModels()
 
 bool StacksAudioProcessor::startModelDownload (const juce::String& modelId)
 {
+    auto found = ModelManager::find (modelId);
+    if (! found || found->installed)
+        return false;
+    return startModelDownload (*found);
+}
+
+bool StacksAudioProcessor::startModelDownload (const ModelInfo& chosen)
+{
     if (isDownloading())
         return false;
 
-    auto info = ModelManager::find (modelId);
-    if (! info || info->installed)
-        return false;
+    std::optional<ModelInfo> info = chosen;
+    const juce::String modelId = chosen.id;
 
     downloader = std::make_unique<ModelDownloader>();
     lastDownloadPercent = -1;
@@ -823,6 +830,8 @@ bool StacksAudioProcessor::startModelDownload (const juce::String& modelId)
     };
     downloader->onFinished = [this, label, modelId] (bool ok, const juce::String& error)
     {
+        if (ok && modelId.startsWith ("file:"))
+            ModelManager::addCustomModel (juce::File (modelId.fromFirstOccurrenceOf ("file:", false, false)));
         refreshModels();
         if (ok)
         {
