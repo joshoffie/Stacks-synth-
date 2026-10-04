@@ -176,6 +176,21 @@ void StacksAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     }
 
     synth.renderNextBlock (buffer, midi, 0, numSamples);
+
+    // The dry synth for the tuner (reverb and chorus would smear the pitch).
+    {
+        const int n = buffer.getNumSamples();
+        const float* l = buffer.getReadPointer (0);
+        const float* r = buffer.getNumChannels() > 1 ? buffer.getReadPointer (1) : l;
+        int w = dryWrite.load (std::memory_order_relaxed);
+        for (int i = 0; i < n; ++i)
+        {
+            dryRing[(size_t) w] = 0.5f * (l[i] + r[i]);
+            w = (w + 1) % kScopeSize;
+        }
+        dryWrite.store (w, std::memory_order_release);
+    }
+
     processEffects (buffer);
 
     // Feed the scope: a mono mix, written without locks (the display tolerates a torn float).
@@ -191,6 +206,73 @@ void StacksAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         }
         scopeWrite.store (w, std::memory_order_release);
     }
+}
+
+void StacksAudioProcessor::copyRecentDry (float* dest, int count) const
+{
+    count = juce::jlimit (0, kScopeSize, count);
+    int start = dryWrite.load (std::memory_order_acquire) - count;
+    if (start < 0) start += kScopeSize;
+    for (int i = 0; i < count; ++i)
+        dest[i] = dryRing[(size_t) ((start + i) % kScopeSize)];
+}
+
+int StacksAudioProcessor::lastPlayedNote() const
+{
+    const float n = voiceContext.lastNote.load();
+    return n < 0.0f ? -1 : juce::roundToInt (n);
+}
+
+juce::String StacksAudioProcessor::autoTune (float measuredCents)
+{
+    auto p = currentPatch();
+    const Patch before = p;
+
+    // 1. The rules: octaves for the carriers, pitch modulation that can't drift.
+    keepPatchInTune (p);
+    const bool coarseChanged = p.get (P::oscA_coarse) != before.get (P::oscA_coarse) || p.get (P::oscB_coarse) != before.get (P::oscB_coarse);
+
+    // 2. Fine tune shifts the fundamental: centre A, keep B's small relative detune.
+    const float fineA = p.get (P::oscA_fine);
+    p.set (P::oscA_fine, 0.0f);
+    if (p.get (P::oscB_level) > 0.05f)
+        p.set (P::oscB_fine, juce::jlimit (-10.0f, 10.0f, p.get (P::oscB_fine) - fineA));
+
+    // 3. What the tuner still hears off after that (FM and designed tables pull the perceived pitch): compensate.
+    const float remaining = measuredCents - fineA;
+    if (! coarseChanged && std::abs (measuredCents) > 3.0f && std::abs (remaining) > 3.0f && std::abs (remaining) < 60.0f)
+    {
+        p.set (P::oscA_fine, juce::jlimit (-50.0f, 50.0f, -remaining));
+        if (p.get (P::oscB_level) > 0.05f)
+            p.set (P::oscB_fine, juce::jlimit (-50.0f, 50.0f, p.get (P::oscB_fine) - remaining));
+    }
+
+    // Report, then apply (as an edit to the playing sound, not a new patch).
+    juce::StringArray changes;
+    auto report = [&] (P param, const juce::String& label, const juce::String& unit)
+    {
+        if (std::abs (p.get (param) - before.get (param)) > 0.01f)
+            changes.add (label + " " + juce::String (before.get (param), unit == "st" ? 0 : 0) + unit + " > " + juce::String (p.get (param), 0) + unit);
+    };
+    report (P::oscA_coarse, "A Coarse", "st");
+    report (P::oscB_coarse, "B Coarse", "st");
+    report (P::oscA_fine, "A Fine", juce::String::fromUTF8 ("\xc2\xa2"));
+    report (P::oscB_fine, "B Fine", juce::String::fromUTF8 ("\xc2\xa2"));
+    int modsChanged = 0;
+    for (int i = 0; i < kNumModSlots; ++i)
+        if (p.get (modSourceParam (i)) != before.get (modSourceParam (i)) || p.get (modDestParam (i)) != before.get (modDestParam (i))
+            || std::abs (p.get (modAmountParam (i)) - before.get (modAmountParam (i))) > 0.001f)
+            ++modsChanged;
+    if (modsChanged > 0) changes.add (juce::String (modsChanged) + " pitch modulation" + (modsChanged > 1 ? "s" : "") + " tamed");
+    if (std::abs (p.get (P::menv_sustain) - before.get (P::menv_sustain)) > 0.001f) changes.add ("ME Sustain > 0");
+
+    if (changes.isEmpty())
+        return "Auto-tune: already in tune" + (std::abs (measuredCents) > 3.0f ? juce::String (" by the rules; play a single note and press again to trim ") + juce::String ((int) std::round (measuredCents)) + juce::String::fromUTF8 ("\xc2\xa2") : juce::String());
+
+    p.applyTo (apvts);
+    labState.status = "Auto-tune: " + changes.joinIntoString (", ");
+    labBroadcaster.sendChangeMessage();
+    return labState.status;
 }
 
 void StacksAudioProcessor::copyRecentOutput (float* dest, int count) const

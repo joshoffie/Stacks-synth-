@@ -176,6 +176,12 @@ public:
 
     // The last few thousand output samples (mono), for the scope. Any thread may read.
     void copyRecentOutput (float* dest, int count) const;
+    void copyRecentDry (float* dest, int count) const;    // the synth before the effects, for the tuner
+    int lastPlayedNote() const;                          // MIDI note of the most recent key, -1 if none yet
+
+    // Puts the playing patch in tune without changing its character; returns what changed.
+    // `measuredCents` is what the tuner hears off right now (0 if unknown).
+    juce::String autoTune (float measuredCents);
 
     // Drawn LFO shapes and the tables the UI can display
     LfoPoints lfoPoints (int k) const;
@@ -230,6 +236,8 @@ private:
     static constexpr int kScopeSize = 8192;
     std::array<float, kScopeSize> scopeRing {};
     std::atomic<int> scopeWrite { 0 };
+    std::array<float, kScopeSize> dryRing {};
+    std::atomic<int> dryWrite { 0 };
     juce::SmoothedValue<float> masterGain;
     double currentSampleRate = 44100.0;
     double currentBpm = 120.0;

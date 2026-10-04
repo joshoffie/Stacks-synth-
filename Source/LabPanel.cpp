@@ -250,7 +250,9 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
     backButton.onClick = [this] { processor.goBackGeneration(); };
     addAndMakeVisible (backButton);
 
-    nowPlaying.onFavourite = [this] { processor.favouriteCurrent(); };
+    // Every heart means the same thing: not yet a favourite -> save it into a folder with a heart; already one -> un-favourite.
+    nowPlaying.onFavourite = [this] { if (processor.currentIsFavourite()) processor.favouriteCurrent(); else savePresetDialog (true); };
+    garden.onFavourite = [this] { savePresetDialog (true); };
     nowPlaying.onSave = [this] { savePresetDialog(); };
     nowPlaying.showSaveButton (true);
     cardList.addAndMakeVisible (nowPlaying);
@@ -486,7 +488,14 @@ void LabPanel::refresh()
         auto card = std::make_unique<PatchCard>();
         const int index = (int) cards.size();
         card->onAudition  = [this, index] { processor.audition (index); };
-        card->onFavourite = [this, index] { processor.toggleFavourite (index); };
+        card->onFavourite = [this, index]
+        {
+            const auto& lab = processor.lab();
+            if (index >= (int) lab.candidates.size()) return;
+            if (lab.candidates[(size_t) index].favourite) { processor.toggleFavourite (index); return; }
+            processor.audition (index);
+            savePresetDialog (true);
+        };
         cardList.addAndMakeVisible (*card);
         cards.push_back (std::move (card));
     }

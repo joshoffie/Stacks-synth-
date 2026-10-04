@@ -72,7 +72,14 @@ public:
             juce::PopupMenu menu;
             juce::Component::SafePointer<Leaf> safe (this);   // the leaf may be gone by the time the menu is used
             menu.addItem ("Plant: evolve from this", [safe] { if (safe != nullptr && safe->garden.onEvolveFrom) safe->garden.onEvolveFrom (safe->index); });
-            menu.addItem ((favourite ? "Un-favourite" : heart() + "  Favourite"), [safe] { if (safe != nullptr) safe->garden.processor.toggleFavourite (safe->index); });
+            // Favourite = hear it, then save it into a folder with a heart (same as the Favourite button); again = un-favourite.
+            menu.addItem ((favourite ? "Un-favourite" : heart() + "  Favourite..."), [safe]
+            {
+                if (safe == nullptr) return;
+                if (safe->favourite) { safe->garden.processor.toggleFavourite (safe->index); return; }
+                safe->garden.processor.audition (safe->index);
+                if (safe->garden.onFavourite) safe->garden.onFavourite();
+            });
             menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this));
             return;
         }
@@ -233,7 +240,11 @@ void GardenView::mouseDown (const juce::MouseEvent& e)
             juce::PopupMenu menu;
             menu.addItem ("Generate from the description (new generation from scratch)", [this] { if (onFresh) onFresh(); });
             menu.addItem ("Evolve this sound", [this] { if (onEvolve) onEvolve(); });
-            menu.addItem (heart() + "  Favourite this sound", [this] { processor.favouriteCurrent(); });
+            menu.addItem (heart() + (processor.currentIsFavourite() ? "  Un-favourite this sound" : "  Favourite this sound..."), [this]
+            {
+                if (processor.currentIsFavourite()) processor.favouriteCurrent();
+                else if (onFavourite) onFavourite();
+            });
             menu.showMenuAsync (juce::PopupMenu::Options());
         }
         else if (processor.lab().seedIsPatch)

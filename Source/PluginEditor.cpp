@@ -16,6 +16,7 @@ StacksAudioProcessorEditor::StacksAudioProcessorEditor (StacksAudioProcessor& p)
       synthProcessor (p),
       masterKnob (p.apvts, spec (P::master_gain), true),
       scope (p),
+      tuner (p),
       synthPanel (p),
       labPanel (p),
       keyboard (p.keyboardState, juce::MidiKeyboardComponent::horizontalKeyboard)
@@ -36,6 +37,7 @@ StacksAudioProcessorEditor::StacksAudioProcessorEditor (StacksAudioProcessor& p)
 
     addAndMakeVisible (masterKnob);
     addAndMakeVisible (scope);
+    addAndMakeVisible (tuner);
 
     settingsButton.setButtonText (juce::String::fromUTF8 ("\xe2\x9a\x99"));   // gear
     settingsButton.setTooltip ("Settings: which AI model designs patches, your own models, calm mode, and the model guide");
@@ -85,6 +87,8 @@ void StacksAudioProcessorEditor::resized()
     header.removeFromRight (6);
     title.setBounds (header.removeFromLeft (130).withTrimmedBottom (14));
     patchName.setBounds (header.removeFromLeft (juce::jmin (420, header.getWidth() / 2)).reduced (6, 0).withTrimmedBottom (14));
+    header.removeFromRight (10);
+    tuner.setBounds (header.removeFromRight (236).reduced (0, 4));
     header.removeFromRight (10);
     scope.setBounds (header.reduced (0, 4));
     r.removeFromTop (kMargin);

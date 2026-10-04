@@ -7,6 +7,7 @@
 #include "StacksLookAndFeel.h"
 #include "Displays.h"
 #include "SettingsPanel.h"
+#include "TunerView.h"
 #include "SynthPanel.h"
 #include "LabPanel.h"
 
@@ -33,6 +34,7 @@ private:
     juce::Label title, patchName;
     ParamKnob masterKnob;
     ScopeView scope;
+    TunerView tuner;
     juce::TextButton settingsButton;
     SynthPanel synthPanel;
     LabPanel labPanel;

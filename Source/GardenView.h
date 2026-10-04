@@ -24,6 +24,7 @@ public:
     void mouseDown (const juce::MouseEvent&) override;
 
     std::function<void()> onEvolve;             // plant the seed: evolve from current / favourites
+    std::function<void()> onFavourite;          // save what's playing into a folder with a heart (the Lab's dialog)
     std::function<void()> onFresh;              // fresh ideas
     std::function<void (int)> onEvolveFrom;     // evolve from candidate index
     std::function<float()> getVariation;

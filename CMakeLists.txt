@@ -70,6 +70,7 @@ target_sources(Stacks PRIVATE
     Source/Displays.cpp
     Source/SettingsPanel.cpp
     Source/TreeView.cpp
+    Source/TunerView.cpp
     Source/ExplainView.cpp
     Source/ai/PatchExplainer.cpp
     Source/SynthPanel.cpp
