@@ -99,6 +99,7 @@ private:
     std::unique_ptr<ModulatorsPanel> modulators;
     std::vector<std::unique_ptr<juce::TextButton>> viewButtons;
     std::unique_ptr<HelpStrip> help;
+    std::vector<juce::Component*> optionalDisplays;          // shown when the row has room (always in a single-row view)
     int viewMode = -1;                                        // -1 = all
     int assigningSource = -1;
 };

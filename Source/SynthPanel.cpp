@@ -399,6 +399,7 @@ SynthPanel::SynthPanel (StacksAudioProcessor& p) : processor (p), apvts (p.apvts
         if (auto* section = findSection (group))
         {
             addAndMakeVisible (*display);
+            optionalDisplays.push_back (display.get());
             section->controls.insert (section->controls.begin(), { display.get(), width });
             controls.push_back (std::move (display));
         }
@@ -593,15 +594,32 @@ void SynthPanel::resized()
 
     const int normalH = kTitleH + kCellH + kPad;
 
+    // The dense ALL view drops the response/envelope displays when a row would
+    // not fit the panel otherwise; a single-row view always has room for them.
+    auto isOptional = [this] (juce::Component* c) { return std::find (optionalDisplays.begin(), optionalDisplays.end(), c) != optionalDisplays.end(); };
+    bool compact = false;
+    if (viewMode < 0)
+        for (const auto& row : rows)
+        {
+            int full = kBand + kPad;
+            for (auto* section : row.sections)
+            {
+                full += 2 * kPad + kGap;
+                for (const auto& [component, cellWidth] : section->controls) full += cellWidth;
+            }
+            if (full > area.getWidth() - 8) compact = true;
+        }
+
     // Lay every row out in its own container at natural size...
     for (auto& row : rows)
     {
         int x = kBand + kPad;
         for (auto* section : row.sections)
         {
+            auto widthOf = [&] (juce::Component* c, int cellWidth) { return compact && isOptional (c) ? 0 : cellWidth; };
             int w = 2 * kPad;
             for (const auto& [component, cellWidth] : section->controls)
-                w += cellWidth;
+                w += widthOf (component, cellWidth);
             const int h = section->tall ? row.height : normalH;
             section->bounds = { x, 0, w, h };
             if (section->moreButton != nullptr)
@@ -609,11 +627,15 @@ void SynthPanel::resized()
             int cx = x + kPad;
             for (const auto& [component, cellWidth] : section->controls)
             {
-                component->setBounds (cx, kTitleH, cellWidth, section->tall ? h - kTitleH - kPad : kCellH);
-                cx += cellWidth;
+                const int cw = widthOf (component, cellWidth);
+                component->setVisible (cw > 0);
+                if (cw > 0)
+                    component->setBounds (cx, kTitleH, cw, section->tall ? h - kTitleH - kPad : kCellH);
+                cx += cw;
             }
             x += w + kGap;
         }
+        row.naturalWidth = x;
         row.container->setSize (row.naturalWidth, row.height);
     }
 
