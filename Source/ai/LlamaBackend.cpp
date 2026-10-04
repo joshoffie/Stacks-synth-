@@ -83,7 +83,7 @@ bool LlamaBackend::isAvailable (juce::String& reason)
     return true;
 }
 
-bool LlamaBackend::ensureLoaded (juce::String& error)
+bool LlamaBackend::ensureLoaded (juce::String& error, const std::function<bool()>& cancelled)
 {
     if (model != nullptr)
         return true;
@@ -92,11 +92,18 @@ bool LlamaBackend::ensureLoaded (juce::String& error)
 
     auto modelParams = llama_model_default_params();
     modelParams.n_gpu_layers = 999; // everything on the GPU
+    // Loading a multi-gigabyte file takes seconds; let Stop interrupt it.
+    modelParams.progress_callback_user_data = (void*) &cancelled;
+    modelParams.progress_callback = [] (float, void* user) -> bool
+    {
+        auto* cancel = static_cast<const std::function<bool()>*> (user);
+        return ! (*cancel && (*cancel)());
+    };
 
     model = llama_model_load_from_file (modelFile.getFullPathName().toRawUTF8(), modelParams);
     if (model == nullptr)
     {
-        error = "could not load " + modelFile.getFileName();
+        error = cancelled && cancelled() ? juce::String ("cancelled") : "could not load " + modelFile.getFileName();
         return false;
     }
 
@@ -151,12 +158,11 @@ bool LlamaBackend::chat (const juce::String& systemPrompt, const juce::String& u
     lastUsedMs = juce::Time::getMillisecondCounterHiRes();
 
     auto phase = [&] (const juce::String& text) { if (onPhase) onPhase (text); };
+    auto cancelled = [&] { return shouldCancel && shouldCancel(); };
     if (model == nullptr)
         phase ("Loading " + displayName + " into memory...");
-    if (! ensureLoaded (error))
+    if (! ensureLoaded (error, cancelled))
         return false;
-
-    auto cancelled = [&] { return shouldCancel && shouldCancel(); };
 
     // ---- prompt, through the model's own chat template ----------------------
     const char* tmpl = llama_model_chat_template (model, nullptr);

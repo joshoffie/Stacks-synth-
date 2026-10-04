@@ -445,7 +445,7 @@ void SynthPanel::showAdvanced (Section& section)
 {
     auto content = std::make_unique<AdvancedBox> (apvts, section.title, section.colour, section.advanced);
     auto* top = getTopLevelComponent();
-    const auto area = top->getLocalArea (this, section.moreButton->getBounds());
+    const auto area = top->getLocalArea (section.moreButton.get(), section.moreButton->getLocalBounds());
     juce::CallOutBox::launchAsynchronously (std::move (content), area, top);
 }
 

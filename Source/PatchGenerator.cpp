@@ -552,9 +552,12 @@ namespace
         WaveSpec base;
         if (wave == kCustomWave && ! p.waves[0].isEmpty())
             base = p.waves[0];
-        else if (wave < WavetableBank::kNumBuiltIn)
-            base = analyseWave ([&] (float morph, float phase) { return bank.read (wave, 0, morph, phase >= 1.0f ? 0.999f : phase); },
-                                waveNames()[wave]);
+        else if (wave < WavetableBank::kNumBuiltIn || wave == kCustomWave)
+        {
+            const int source = wave == kCustomWave ? waveNames().indexOf ("Saw") : wave;   // Custom with no table: start from a saw
+            base = analyseWave ([&] (float morph, float phase) { return bank.read (source, 0, morph, phase >= 1.0f ? 0.999f : phase); },
+                                waveNames()[source]);
+        }
         else
             return;   // an imported file: leave it alone
         p.waves[0] = mutateWaveSpec (base, 0.2f + 0.8f * req.variation, rng);

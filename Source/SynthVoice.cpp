@@ -370,8 +370,8 @@ void SynthVoice::renderNextBlock (juce::AudioBuffer<float>& out, int startSample
                 l += s * gainL[u];
                 r += s * gainR[u];
 
-                phaseA[u] += incA[u]; if (phaseA[u] >= 1.0f) phaseA[u] -= 1.0f;
-                phaseB[u] += incB[u]; if (phaseB[u] >= 1.0f) phaseB[u] -= 1.0f;
+                phaseA[u] = wrap01 (phaseA[u] + incA[u]);
+                phaseB[u] = wrap01 (phaseB[u] + incB[u]);
             }
 
             const float mono = std::sin (twoPi * subPhase) * subLevel

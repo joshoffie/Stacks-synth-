@@ -151,7 +151,7 @@ inline bool isBipolarSource (int src) noexcept
  X(chorus_mix,     "Chorus Mix",   "CHORUS",     Float,   0,     1,     0,     0,     "",   nullptr,            "chorus amount") \
  X(chorus_voices,  "Voices",       "CHORUS",     Int,     1,     4,     2,     0,     "",   nullptr,            "number of chorus voices (advanced)") \
  X(chorus_feedback,"Chorus FB",    "CHORUS",     Float,  -0.9,   0.9,   0,     0,     "",   nullptr,            "chorus/flanger feedback, negative inverts (advanced)") \
- X(chorus_spread,  "Spread",       "CHORUS",     Float,   0,     1,     0.7,   0,     "",   nullptr,            "stereo width of the chorus (advanced)") \
+ X(chorus_spread,  "Chorus Spread","CHORUS",     Float,   0,     1,     0.7,   0,     "",   nullptr,            "stereo width of the chorus (advanced)") \
  X(chorus_tone,    "Tone",         "CHORUS",     Float,   1000,  20000, 12000, 4000,  "Hz", nullptr,            "low-pass on the chorus signal (advanced)") \
  X(delay_mode,     "Delay Mode",   "DELAY",      Choice,  0,     2,     0,     0,     "",   delayModeNames,  "Stereo = two taps, Ping-Pong = bounces left/right, Tape = dark with wow and saturation") \
  X(delay_sync,     "Sync",         "DELAY",      Choice,  0,     7,     0,     0,     "",   delaySyncNames,  "Free uses Delay Time; otherwise a note value locked to the host tempo") \

@@ -62,7 +62,7 @@ namespace
     const std::vector<const char*> kEnvTargets    { "Pitch", "Pitch B", "Cutoff", "A Morph", "B Morph", "FM B>A", "B Level", "Noise", "Resonance", "Drive" };
     const std::vector<const char*> kVelTargets    { "Cutoff", "Amp", "FM B>A", "A Morph", "Drive", "Resonance", "Decay", "Noise", "B Level" };
     const std::vector<const char*> kKeyTargets    { "Cutoff", "Pan", "A Morph", "Decay", "Release", "Detune" };
-    const std::vector<const char*> kPerfTargets   { "Cutoff", "FM B>A", "A Morph", "B Morph", "Resonance", "Drive", "Chorus Mix", "Reverb Mix", "Delay Mix", "LFO1 Rate", "Amp" };
+    const std::vector<const char*> kPerfTargets   { "Cutoff", "FM B>A", "A Morph", "B Morph", "Resonance", "Drive", "Chorus Mix", "Reverb Mix", "Delay Mix", "Amp" };
     const std::vector<const char*> kRandomTargets { "A Morph", "B Morph", "Cutoff", "Pan", "Detune", "Decay", "FM B>A" };
 
     juce::String joinNames (const std::vector<const char*>& names)
@@ -667,6 +667,9 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
 
         patch->set (P::master_gain, -6.0f);
         patch->origin = "AI";
+        for (const auto& parent : req.parents)   // the model copied the parent's blurb: describe the child instead
+            if (patch->description.length() > 20 && parent.description.startsWithIgnoreCase (patch->description))
+                patch->description.clear();
         if (patch->description.isEmpty())
             patch->description = describePatch (*patch);
         else if (patch->description.length() < 60)

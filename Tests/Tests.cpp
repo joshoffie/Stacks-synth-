@@ -130,6 +130,20 @@ static void testSpectralTables()
     CHECK_NEAR (twin.frames[2][1], builtInSaw.frames[2][1], 0.1);
 }
 
+static void testParameterTable()
+{
+    section ("parameter table");
+    // Connections are saved by target *name*, so every knob name must be unique.
+    std::set<juce::String> names;
+    for (const auto& spec : paramSpecs())
+    {
+        ++checks;
+        if (! names.insert (spec.name).second) { ++failures; std::printf ("  FAIL duplicate parameter name '%s'\n", spec.name); }
+    }
+    CHECK (modTargetNames().indexOf ("Chorus Spread") > 0 && modTargetNames().indexOf ("Spread") > 0);
+    CHECK (paramRange ((int) P::filter_cutoff).end > 10000.0f);
+}
+
 static void testPatchJson()
 {
     section ("Patch JSON");
@@ -493,6 +507,7 @@ int main (int argc, char** argv)
 
     testWaveSpecDigits();
     testSpectralTables();
+    testParameterTable();
     testPatchJson();
     testTuningGuard();
     testGrammarAndPrompt();

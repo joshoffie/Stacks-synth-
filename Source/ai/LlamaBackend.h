@@ -35,7 +35,7 @@ public:
     void unloadIfIdle (double idleSeconds);  // safe to call from the message thread
 
 private:
-    bool ensureLoaded (juce::String& error); // caller holds `lock`
+    bool ensureLoaded (juce::String& error, const std::function<bool()>& cancelled); // caller holds `lock`
     void unload();                           // caller holds `lock`
 
     juce::File modelFile;

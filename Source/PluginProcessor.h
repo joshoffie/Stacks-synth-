@@ -227,7 +227,7 @@ private:
     bool patchFavourite = false;
     Patch loadedSnapshot;                                  // values as loaded, to spot edits
     void writeFavouriteFlag (const juce::File&, bool);
-    int generationToken = 0;                               // bumps per request; stale callbacks are ignored
+    std::atomic<int> generationToken { 0 };                // bumps per request; stale callbacks are ignored (read from pool threads)
     std::atomic<bool> cancelRequested { false };
 
     JUCE_DECLARE_WEAK_REFERENCEABLE (StacksAudioProcessor)

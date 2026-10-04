@@ -310,7 +310,7 @@ std::optional<WaveSpec> WaveSpec::fromVar (const juce::var& v)
         if ((int) s.frames.size() >= kMaxFrames)
             break;
     }
-    if (s.frames.empty() || peak < 0.05f)   // nothing there, or silence
+    if (s.frames.empty() || peak < 0.002f)  // nothing there, or silence
         return std::nullopt;
     return s;
 }

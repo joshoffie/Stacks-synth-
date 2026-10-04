@@ -61,6 +61,7 @@ StacksAudioProcessor::StacksAudioProcessor()
 
     voiceContext.bank = &*bank;
     voiceContext.user = &userWaves;
+    paramRange (0);   // builds the range table now, not on the audio thread
     voiceContext.params = &params;
     voiceContext.lfoTables = &lfoTables;
     voiceContext.liveValues = liveValues.data();
@@ -98,7 +99,7 @@ StacksAudioProcessor::~StacksAudioProcessor()
         apvts.removeParameterListener (paramId (lfoShapeParam (k)), this);
     downloader.reset();
     cancelRequested = true;
-    pool.removeAllJobs (true, 8000);
+    pool.removeAllJobs (true, 30000);   // a model load can't be interrupted; give it time
 }
 
 //==============================================================================
@@ -140,7 +141,7 @@ void StacksAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     voiceContext.bpm = currentBpm;
 
     // Free-running LFOs: phase and value at the start of this block, shared by
-    // every voice and by the effects, then advanced past the block.
+    // every voice and by the effects.
     for (int k = 0; k < kNumLfos; ++k)
     {
         const float beats = lfoSyncBeats (params.geti (lfoSyncParam (k)));
@@ -152,7 +153,19 @@ void StacksAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         voiceContext.lfoGlobalValue[k] = shape == ShapeRandom ? lfoHeld[k]
                                                               : lfoTables.get (k).at (lfoPhase[k] + params.get (lfoPhaseParam (k)));
         lfoPhaseForDisplay[k].store (lfoPhase[k]);
+    }
 
+    // Global modulation first so the markers fall back to it when no note is
+    // sounding; the newest voice then overwrites the live values while it plays.
+    applyGlobalModulation();
+
+    // Advance the phases by the *modulated* rate (fxParams), so a connection to
+    // an LFO's Rate knob actually speeds it up or slows it down.
+    for (int k = 0; k < kNumLfos; ++k)
+    {
+        const float beats = lfoSyncBeats (params.geti (lfoSyncParam (k)));
+        const float rate = beats > 0.0f ? (float) (currentBpm / 60.0) / beats : fxParams.get (lfoRateParam (k));
+        voiceContext.lfoRateHz[k] = rate;
         lfoPhase[k] += rate * (float) numSamples / (float) currentSampleRate;
         if (lfoPhase[k] >= 1.0f)
         {
@@ -161,9 +174,6 @@ void StacksAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         }
     }
 
-    // Global modulation first so the markers fall back to it when no note is
-    // sounding; the newest voice then overwrites the live values while it plays.
-    applyGlobalModulation();
     synth.renderNextBlock (buffer, midi, 0, numSamples);
     processEffects (buffer);
 }
@@ -314,6 +324,7 @@ void StacksAudioProcessor::setStateInformation (const void* data, int sizeInByte
         auto lab = root.getChildWithName ("Lab");
         if (lab.isValid())
             labFromJson (lab["json"].toString());
+        loadedSnapshot = currentPatch();   // what was restored counts as unedited
     }
     else if (root.hasType (apvts.state.getType()))
     {
@@ -781,6 +792,8 @@ void StacksAudioProcessor::requestEvolveFrom (const Patch& parent, const juce::S
     req.count = kBatchSize;
     req.generation = labState.generation + 1;
     req.parents = { parent };
+    if (labState.generating)
+        return;
     applyPatch (parent); // the planted leaf becomes the seed you hear
     startGeneration (std::move (req));
 }

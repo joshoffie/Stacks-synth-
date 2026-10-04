@@ -420,7 +420,8 @@ void LabPanel::layoutCards()
         aiHeader.set (title, false, true, colours::accent);
         aiHeader.setBounds (0, y, width, SectionHeader::kHeight);
         y += SectionHeader::kHeight;
-        for (int i = 0; i < (int) cards.size(); ++i)
+        const int shown = (int) juce::jmin (cards.size(), lab.candidates.size());
+        for (int i = 0; i < shown; ++i)
         {
             if (lab.candidates[(size_t) i].origin != "AI") continue;
             cards[(size_t) i]->setVisible (true);
@@ -437,7 +438,7 @@ void LabPanel::layoutCards()
         randomHeader.setBounds (0, y, width, SectionHeader::kHeight);
         y += SectionHeader::kHeight;
     }
-    for (int i = 0; i < (int) cards.size(); ++i)
+    for (int i = 0; i < (int) juce::jmin (cards.size(), lab.candidates.size()); ++i)
     {
         if (lab.candidates[(size_t) i].origin == "AI") continue;
         cards[(size_t) i]->setVisible (expanded);

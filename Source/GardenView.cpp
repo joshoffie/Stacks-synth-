@@ -68,8 +68,9 @@ public:
         if (e.mods.isPopupMenu())
         {
             juce::PopupMenu menu;
-            menu.addItem ("Plant: evolve from this", [this] { if (garden.onEvolveFrom) garden.onEvolveFrom (index); });
-            menu.addItem ((favourite ? "Un-favourite" : heart() + "  Favourite"), [this] { garden.processor.toggleFavourite (index); });
+            juce::Component::SafePointer<Leaf> safe (this);   // the leaf may be gone by the time the menu is used
+            menu.addItem ("Plant: evolve from this", [safe] { if (safe != nullptr && safe->garden.onEvolveFrom) safe->garden.onEvolveFrom (safe->index); });
+            menu.addItem ((favourite ? "Un-favourite" : heart() + "  Favourite"), [safe] { if (safe != nullptr) safe->garden.processor.toggleFavourite (safe->index); });
             menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this));
             return;
         }
@@ -179,8 +180,11 @@ void GardenView::layoutLeaves()
     for (const auto& c : lab.candidates) (c.origin == "AI" ? aiCount : randomCount)++;
     const int aiTotal = juce::jmax (aiCount, lab.generating ? StacksAudioProcessor::kAiPatchesPerBatch : aiCount);
 
+    // The leaves are re-synced in refresh(), which runs after the broadcast; a
+    // timer tick in between must not index a batch that has just been replaced.
+    const int shown = (int) juce::jmin (leaves.size(), lab.candidates.size(), appearedAt.size());
     int aiIndex = 0, randomIndex = 0;
-    for (int i = 0; i < (int) leaves.size(); ++i)
+    for (int i = 0; i < shown; ++i)
     {
         const auto& c = lab.candidates[(size_t) i];
         const bool ai = c.origin == "AI";
