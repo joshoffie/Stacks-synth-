@@ -13,6 +13,27 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(JUCE_DIR "/Applications/JUCE" CACHE PATH "Path to the JUCE source tree")
 add_subdirectory("${JUCE_DIR}" "${CMAKE_BINARY_DIR}/JUCE" EXCLUDE_FROM_ALL)
 
+# ---- llama.cpp: the on-board language model runtime -------------------------
+# Pinned release, built as static libraries and linked into the plug-in. Metal
+# shaders are embedded in the binary so nothing has to be shipped beside it.
+include(FetchContent)
+set(LLAMA_BUILD_TESTS     OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_EXAMPLES  OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_SERVER    OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_TOOLS     OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_COMMON    OFF CACHE BOOL "" FORCE)
+set(LLAMA_CURL            OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS     OFF CACHE BOOL "" FORCE)
+set(GGML_NATIVE           OFF CACHE BOOL "" FORCE)   # generic arm64 so M1..M4 all run it
+set(GGML_METAL            ON  CACHE BOOL "" FORCE)
+set(GGML_METAL_EMBED_LIBRARY ON CACHE BOOL "" FORCE)
+set(GGML_OPENMP           OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(llama
+    GIT_REPOSITORY https://github.com/ggml-org/llama.cpp.git
+    GIT_TAG        v0.5.0
+    GIT_SHALLOW    TRUE)
+FetchContent_MakeAvailable(llama)
+
 juce_add_plugin(Stacks
     PRODUCT_NAME "Stacks"
     COMPANY_NAME "Hoffman Audio"
@@ -38,6 +59,8 @@ target_sources(Stacks PRIVATE
     Source/Patch.cpp
     Source/PatchGenerator.cpp
     Source/ai/OllamaBackend.cpp
+    Source/ai/LlamaBackend.cpp
+    Source/ai/ModelManager.cpp
     Source/ai/LlmPatchGenerator.cpp
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
@@ -54,6 +77,7 @@ target_link_libraries(Stacks
     PRIVATE
         juce::juce_audio_utils
         juce::juce_dsp
+        llama
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags

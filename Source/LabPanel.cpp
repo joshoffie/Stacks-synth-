@@ -9,6 +9,12 @@ namespace
     constexpr int kRandomItemId = 1;
     constexpr int kOllamaItemBase = 100;
     constexpr int kOllamaUnavailableId = 99;
+    constexpr int kBuiltinItemBase = 200;
+
+    juce::String sizeText (juce::int64 bytes)
+    {
+        return juce::String ((double) bytes / 1.0e9, 1) + " GB";
+    }
 }
 
 //==============================================================================
@@ -124,6 +130,8 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p)
     {
         if (processor.lab().generating)
             processor.cancelGeneration();
+        else if (processor.isDownloading())
+            processor.cancelDownload();
         else
             processor.requestNewBatch (hint.getText(), (float) variation.getValue());
     };
@@ -241,17 +249,30 @@ void LabPanel::resized()
 void LabPanel::rebuildEngineMenu()
 {
     const auto choice = processor.engine();
-    const auto& models = processor.ollamaModels();
+    const auto& ollama = processor.ollamaModels();
+    const auto& builtins = processor.builtInModels();
 
     engineBox.clear (juce::dontSendNotification);
     engineMenuModels.clear();
+    engineMenuBuiltins.clear();
+
     engineBox.addItem ("Random (no AI)", kRandomItemId);
 
-    if (models.isEmpty())
+    engineBox.addSectionHeading ("Built-in AI (runs inside Stacks)");
+    for (const auto& m : builtins)
     {
-        engineBox.addItem ("Ollama: not running / no models", kOllamaUnavailableId);
+        juce::String label = m.label;
+        if (m.fromOllama)       label << " (Ollama's copy)";
+        if (! m.installed)      label << "  -  download " << sizeText (m.bytes);
+        engineMenuBuiltins.add (m.id);
+        engineBox.addItem (label, kBuiltinItemBase + engineMenuBuiltins.size() - 1);
+    }
+
+    engineBox.addSectionHeading ("Ollama app");
+    if (ollama.isEmpty())
+    {
+        engineBox.addItem ("Ollama isn't running", kOllamaUnavailableId);
         engineBox.setItemEnabled (kOllamaUnavailableId, false);
-        // Keep a configured-but-missing model selectable so the setting survives.
         if (choice.kind == EngineKind::Ollama && choice.model.isNotEmpty())
         {
             engineMenuModels.add (choice.model);
@@ -260,12 +281,12 @@ void LabPanel::rebuildEngineMenu()
     }
     else
     {
-        for (const auto& m : models)
+        for (const auto& m : ollama)
         {
             engineMenuModels.add (m);
             engineBox.addItem ("Ollama: " + m, kOllamaItemBase + engineMenuModels.size() - 1);
         }
-        if (choice.kind == EngineKind::Ollama && ! models.contains (choice.model) && choice.model.isNotEmpty())
+        if (choice.kind == EngineKind::Ollama && choice.model.isNotEmpty() && ! ollama.contains (choice.model))
         {
             engineMenuModels.add (choice.model);
             engineBox.addItem ("Ollama: " + choice.model + " (missing)", kOllamaItemBase + engineMenuModels.size() - 1);
@@ -276,8 +297,12 @@ void LabPanel::rebuildEngineMenu()
     if (choice.kind == EngineKind::Ollama)
     {
         const int idx = engineMenuModels.indexOf (choice.model);
-        if (idx >= 0)
-            selectedId = kOllamaItemBase + idx;
+        if (idx >= 0) selectedId = kOllamaItemBase + idx;
+    }
+    else if (choice.kind == EngineKind::Builtin)
+    {
+        const int idx = engineMenuBuiltins.indexOf (choice.model);
+        if (idx >= 0) selectedId = kBuiltinItemBase + idx;
     }
     engineBox.setSelectedId (selectedId, juce::dontSendNotification);
 }
@@ -286,11 +311,30 @@ void LabPanel::engineChosen()
 {
     const int id = engineBox.getSelectedId();
     EngineChoice choice;
-    if (id >= kOllamaItemBase && id - kOllamaItemBase < engineMenuModels.size())
+
+    if (id >= kBuiltinItemBase && id - kBuiltinItemBase < engineMenuBuiltins.size())
+    {
+        const auto modelId = engineMenuBuiltins[id - kBuiltinItemBase];
+        for (const auto& m : processor.builtInModels())
+        {
+            if (m.id != modelId) continue;
+            if (! m.installed)
+            {
+                // Not here yet: fetch it, the selection moves over once it has arrived.
+                processor.startModelDownload (modelId);
+                rebuildEngineMenu();
+                return;
+            }
+        }
+        choice.kind = EngineKind::Builtin;
+        choice.model = modelId;
+    }
+    else if (id >= kOllamaItemBase && id - kOllamaItemBase < engineMenuModels.size())
     {
         choice.kind = EngineKind::Ollama;
         choice.model = engineMenuModels[id - kOllamaItemBase];
     }
+
     if (! (choice == processor.engine()))
         processor.setEngine (choice);
 }
@@ -308,11 +352,13 @@ void LabPanel::refresh()
     const int favCount = (int) lab.favourites.size();
     evolveButton.setButtonText (favCount > 0 ? "Evolve from " + juce::String (favCount) + (favCount == 1 ? " favourite" : " favourites")
                                              : "Evolve current sound");
-    evolveButton.setEnabled (! lab.generating);
-    newBatchButton.setButtonText (lab.generating ? "Stop" : "New batch");
-    newBatchButton.setTooltip (lab.generating ? "Stop generating; keep what has arrived" : "Ten fresh patches from scratch");
-    backButton.setEnabled (! lab.generating && ! lab.history.empty());
-    engineBox.setEnabled (! lab.generating);
+    const bool busy = processor.isBusy();
+    evolveButton.setEnabled (! busy);
+    newBatchButton.setButtonText (busy ? "Stop" : "New batch");
+    newBatchButton.setTooltip (lab.generating ? "Stop generating; keep what has arrived"
+                             : processor.isDownloading() ? "Cancel the model download" : "Ten fresh patches from scratch");
+    backButton.setEnabled (! busy && ! lab.history.empty());
+    engineBox.setEnabled (! busy);
 
     favouritesLabel.setText (favCount > 0 ? "FAVOURITES" : "FAVOURITES  (click a card's heart to keep it)", juce::dontSendNotification);
 

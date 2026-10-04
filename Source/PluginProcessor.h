@@ -7,6 +7,8 @@
 #include "SynthVoice.h"
 #include "Patch.h"
 #include "PatchGenerator.h"
+#include "ai/ModelManager.h"
+#include "ai/LlamaBackend.h"
 
 namespace stacks
 {
@@ -23,16 +25,17 @@ struct LabState
     juce::String status;
 };
 
-enum class EngineKind { Random, Ollama };
+enum class EngineKind { Random, Ollama, Builtin };
 
 struct EngineChoice
 {
     EngineKind kind = EngineKind::Random;
-    juce::String model;                         // Ollama model name, e.g. "qwen3:8b"
+    juce::String model;                         // Ollama model name ("qwen3:8b") or built-in model id ("qwen3-4b")
     bool operator== (const EngineChoice& o) const { return kind == o.kind && model == o.model; }
 };
 
-class StacksAudioProcessor : public juce::AudioProcessor
+class StacksAudioProcessor : public juce::AudioProcessor,
+                             private juce::Timer
 {
 public:
     StacksAudioProcessor();
@@ -94,6 +97,14 @@ public:
     const juce::StringArray& ollamaModels() const          { return knownOllamaModels; }
     void refreshOllamaModels();                            // async; broadcasts when done
 
+    // Built-in models (run inside the plug-in with llama.cpp)
+    const std::vector<ModelInfo>& builtInModels() const    { return knownModels; }
+    void refreshModels();
+    bool startModelDownload (const juce::String& modelId); // false if one is already running
+    void cancelDownload();
+    bool isDownloading() const                             { return downloader != nullptr && downloader->isRunning(); }
+    bool isBusy() const                                    { return labState.generating || isDownloading(); }
+
     static constexpr int kBatchSize = 10;
     static constexpr int kAiPatchesPerBatch = 5;           // the rest are instant Random variations
 
@@ -104,6 +115,7 @@ private:
     void finishGeneration (int token);
     void loadEngineFromSettings();
     void rebuildGenerator();
+    void timerCallback() override;                         // frees an idle built-in model
     juce::String labToJson() const;
     void labFromJson (const juce::String&);
     void processEffects (juce::AudioBuffer<float>&);
@@ -130,6 +142,10 @@ private:
     std::shared_ptr<PatchGenerator> generator;             // what the buttons use (may be the random one)
     EngineChoice engineChoice;
     juce::StringArray knownOllamaModels;
+    std::vector<ModelInfo> knownModels;
+    std::shared_ptr<LlamaBackend> builtInBackend;          // kept across engine rebuilds so the model stays loaded
+    std::unique_ptr<ModelDownloader> downloader;
+    int lastDownloadPercent = -1;
     juce::ThreadPool pool { 2 };
     LabState labState;
     juce::String patchName { "Init" };

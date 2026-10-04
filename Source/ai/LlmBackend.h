@@ -22,8 +22,11 @@ public:
 
     // Streams the reply through onText (deltas, in order). Blocks until done.
     // Returns false and fills `error` on failure or cancellation.
+    // `grammar` is an optional GBNF grammar the reply must follow; backends
+    // that cannot enforce one ignore it.
     virtual bool chat (const juce::String& systemPrompt,
                        const juce::String& userPrompt,
+                       const juce::String& grammar,
                        const std::function<void (const juce::String&)>& onText,
                        const std::function<bool()>& shouldCancel,
                        juce::String& error) = 0;
@@ -39,7 +42,7 @@ public:
     juce::String name() const override       { return "Ollama"; }
     juce::String modelName() const override  { return model; }
     bool isAvailable (juce::String& reason) override;
-    bool chat (const juce::String& systemPrompt, const juce::String& userPrompt,
+    bool chat (const juce::String& systemPrompt, const juce::String& userPrompt, const juce::String& grammar,
                const std::function<void (const juce::String&)>& onText,
                const std::function<bool()>& shouldCancel, juce::String& error) override;
 

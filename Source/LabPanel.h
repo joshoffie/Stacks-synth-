@@ -64,7 +64,8 @@ private:
     std::vector<std::unique_ptr<juce::TextButton>> favouriteChips;
 
     std::unique_ptr<juce::FileChooser> chooser;
-    juce::StringArray engineMenuModels; // model name per Ollama menu entry
+    juce::StringArray engineMenuModels;   // Ollama model name per menu entry
+    juce::StringArray engineMenuBuiltins; // built-in model id per menu entry
     int shownGeneration = -1;
 };
 

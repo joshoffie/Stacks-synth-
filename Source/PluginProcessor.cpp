@@ -67,12 +67,16 @@ StacksAudioProcessor::StacksAudioProcessor()
     synth.addSound (new SynthSound());
     synth.setNoteStealingEnabled (true);
 
+    refreshModels();
     loadEngineFromSettings();
     refreshOllamaModels();
+    startTimer (30000);
 }
 
 StacksAudioProcessor::~StacksAudioProcessor()
 {
+    stopTimer();
+    downloader.reset();
     cancelRequested = true;
     pool.removeAllJobs (true, 8000);
 }
@@ -280,9 +284,10 @@ void StacksAudioProcessor::loadEngineFromSettings()
 {
     auto& s = settings();
     EngineChoice choice;
-    choice.kind  = s.getValue ("engine", "random") == "ollama" ? EngineKind::Ollama : EngineKind::Random;
+    const auto kind = s.getValue ("engine", "random");
+    choice.kind  = kind == "ollama" ? EngineKind::Ollama : kind == "builtin" ? EngineKind::Builtin : EngineKind::Random;
     choice.model = s.getValue ("model", "");
-    if (choice.kind == EngineKind::Ollama && choice.model.isEmpty())
+    if (choice.kind != EngineKind::Random && choice.model.isEmpty())
         choice.kind = EngineKind::Random;
     engineChoice = choice;
     rebuildGenerator();
@@ -294,7 +299,7 @@ void StacksAudioProcessor::setEngine (const EngineChoice& choice)
     rebuildGenerator();
 
     auto& s = settings();
-    s.setValue ("engine", choice.kind == EngineKind::Ollama ? "ollama" : "random");
+    s.setValue ("engine", choice.kind == EngineKind::Ollama ? "ollama" : choice.kind == EngineKind::Builtin ? "builtin" : "random");
     s.setValue ("model", choice.model);
     s.saveIfNeeded();
 
@@ -304,10 +309,97 @@ void StacksAudioProcessor::setEngine (const EngineChoice& choice)
 
 void StacksAudioProcessor::rebuildGenerator()
 {
+    generator = randomGenerator;
+
     if (engineChoice.kind == EngineKind::Ollama)
+    {
         generator = std::make_shared<LlmPatchGenerator> (std::make_shared<OllamaBackend> (engineChoice.model), randomGenerator);
-    else
-        generator = randomGenerator;
+    }
+    else if (engineChoice.kind == EngineKind::Builtin)
+    {
+        for (const auto& m : knownModels)
+        {
+            if (m.id != engineChoice.model || ! m.installed)
+                continue;
+            if (builtInBackend == nullptr || builtInBackend->file() != m.file)
+                builtInBackend = std::make_shared<LlamaBackend> (m.file, m.label);
+            generator = std::make_shared<LlmPatchGenerator> (builtInBackend, randomGenerator);
+            break;
+        }
+    }
+}
+
+void StacksAudioProcessor::timerCallback()
+{
+    if (builtInBackend != nullptr && ! labState.generating)
+        builtInBackend->unloadIfIdle (600.0); // ten minutes idle -> give the RAM back
+}
+
+void StacksAudioProcessor::refreshModels()
+{
+    knownModels = ModelManager::catalogue();
+}
+
+bool StacksAudioProcessor::startModelDownload (const juce::String& modelId)
+{
+    if (isDownloading())
+        return false;
+
+    auto info = ModelManager::find (modelId);
+    if (! info || info->installed)
+        return false;
+
+    downloader = std::make_unique<ModelDownloader>();
+    lastDownloadPercent = -1;
+    const auto label = info->label;
+
+    downloader->onProgress = [this, label] (juce::int64 done, juce::int64 total)
+    {
+        const int percent = total > 0 ? (int) (done * 100 / total) : 0;
+        if (percent == lastDownloadPercent)
+            return;
+        lastDownloadPercent = percent;
+        labState.status = "Downloading " + label + "... " + juce::String (percent) + "%  ("
+                        + juce::String (done / 1000000) + " of " + juce::String (total / 1000000) + " MB)";
+        labBroadcaster.sendChangeMessage();
+    };
+    downloader->onFinished = [this, label, modelId] (bool ok, const juce::String& error)
+    {
+        refreshModels();
+        if (ok)
+        {
+            setEngine ({ EngineKind::Builtin, modelId });
+            labState.status = label + " installed and selected";
+        }
+        else
+        {
+            labState.status = "Download of " + label + " failed: " + error;
+        }
+        labBroadcaster.sendChangeMessage();
+    };
+
+    juce::String error;
+    if (! downloader->start (*info, error))
+    {
+        labState.status = "Could not download " + label + ": " + error;
+        downloader.reset();
+        labBroadcaster.sendChangeMessage();
+        return false;
+    }
+
+    labState.status = "Downloading " + label + "...";
+    labBroadcaster.sendChangeMessage();
+    return true;
+}
+
+void StacksAudioProcessor::cancelDownload()
+{
+    if (! isDownloading())
+        return;
+    const auto label = downloader->model().label;
+    downloader.reset();
+    labState.status = "Download of " + label + " cancelled";
+    labBroadcaster.sendChangeMessage();
 }
 
 juce::String StacksAudioProcessor::engineName() const
@@ -317,6 +409,7 @@ juce::String StacksAudioProcessor::engineName() const
 
 void StacksAudioProcessor::refreshOllamaModels()
 {
+    refreshModels();
     juce::WeakReference<StacksAudioProcessor> weak (this);
     pool.addJob ([weak]
     {

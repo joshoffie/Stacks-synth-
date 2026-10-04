@@ -248,6 +248,71 @@ juce::String LlmPatchGenerator::userPrompt (const GenerationRequest& req)
     return s;
 }
 
+juce::String LlmPatchGenerator::grammar (int patchCount)
+{
+    patchCount = juce::jlimit (1, 20, patchCount);
+    auto lit = [] (const juce::String& text)
+    {
+        return "\"" + text.replace ("\\", "\\\\").replace ("\"", "\\\"") + "\"";
+    };
+    auto key = [&] (const juce::String& id) { return lit ("\"" + id + "\":"); };
+
+    juce::String g;
+    // Exactly patchCount entries: small models otherwise close the array early.
+    g << "root ::= " << lit ("{\"patches\":[") << " patch";
+    if (patchCount > 1)
+        g << " (" << lit (",") << " patch){" << (patchCount - 1) << "}";
+    g << " " << lit ("]}") << "\n"
+      << "patch ::= " << lit ("{\"name\":") << " name " << lit (",\"category\":") << " category "
+      << lit (",\"description\":") << " desc " << lit (",\"parent\":") << " int " << lit (",\"params\":{") << " params " << lit ("}}") << "\n"
+      << "params ::= param (" << lit (",") << " param)*\n";
+
+    // GBNF rule names may contain '-' but not '_', so "oscA_wave" becomes rule "p-oscA-wave".
+    auto ruleName = [] (const char* id) { return "p-" + juce::String (id).replaceCharacter ('_', '-'); };
+
+    juce::StringArray alternatives;
+    for (const auto& spec : paramSpecs())
+        if (std::string (spec.id) != "master_gain")
+            alternatives.add (ruleName (spec.id));
+    g << "param ::= " << alternatives.joinIntoString (" | ") << "\n";
+
+    for (const auto& spec : paramSpecs())
+    {
+        if (std::string (spec.id) == "master_gain")
+            continue;
+        g << ruleName (spec.id) << " ::= " << key (spec.id) << " ";
+        if (spec.kind == ParamKind::Choice)
+        {
+            juce::StringArray options;
+            for (const auto& c : *spec.choices)
+                options.add (lit ("\"" + c + "\""));
+            g << "(" << options.joinIntoString (" | ") << ")";
+        }
+        else if (spec.kind == ParamKind::Int)
+        {
+            g << "sint";
+        }
+        else
+        {
+            g << "num";
+        }
+        g << "\n";
+    }
+
+    juce::StringArray categories;
+    for (auto* c : { "Pad", "Pluck", "Bass", "Keys", "Lead", "Bell", "Texture", "Drone" })
+        categories.add (lit (juce::String ("\"") + c + "\""));
+    g << "category ::= " << categories.joinIntoString (" | ") << "\n"
+      << "name ::= \"\\\"\" nchar{2,30} \"\\\"\"\n"
+      << "desc ::= \"\\\"\" dchar{10,220} \"\\\"\"\n"
+      << "nchar ::= [A-Za-z0-9 '&-]\n"
+      << "dchar ::= [^\"\\\\\\x00-\\x1F]\n"
+      << "num ::= \"-\"? [0-9]{1,5} (\".\" [0-9]{1,4})?\n"
+      << "int ::= [0-9]{1,2}\n"
+      << "sint ::= \"-\"? [0-9]{1,2}\n";
+    return g;
+}
+
 std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& req, const GenerationProgress& progress)
 {
     juce::String reason;
@@ -259,11 +324,24 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& req, co
 
     progress.status ("Asking " + backend->modelName() + "...");
 
+    // Written up front so a failed run can still be inspected.
+    {
+        auto dir = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                       .getChildFile ("Application Support").getChildFile ("Stacks");
+        dir.createDirectory();
+        dir.getChildFile ("last-ai-prompt.txt").replaceWithText (systemPrompt() + "\n\n----- USER -----\n" + userPrompt (req));
+        dir.getChildFile ("grammar.gbnf").replaceWithText (grammar (req.count));
+    }
+
     std::vector<Patch> out;
     const Patch defaults;
 
     StreamingPatchParser parser ([&] (const juce::var& v)
     {
+        // Ignore stray objects (a model quoting the format in prose, for instance).
+        if (auto* obj = v.getDynamicObject(); obj == nullptr || ! (obj->hasProperty ("params") || obj->hasProperty ("name")))
+            return;
+
         // Pick the base this patch builds on: the named parent, else parent 1, else defaults.
         const Patch* base = &defaults;
         if (! req.parents.empty())
@@ -295,7 +373,7 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& req, co
     });
 
     juce::String error, rawReply;
-    const bool ok = backend->chat (systemPrompt(), userPrompt (req),
+    const bool ok = backend->chat (systemPrompt(), userPrompt (req), grammar (req.count),
                                    [&] (const juce::String& delta) { rawReply << delta; parser.feed (delta); },
                                    progress.shouldCancel, error);
     parser.finish();
@@ -305,7 +383,6 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& req, co
         auto dir = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
                        .getChildFile ("Application Support").getChildFile ("Stacks");
         dir.createDirectory();
-        dir.getChildFile ("last-ai-prompt.txt").replaceWithText (systemPrompt() + "\n\n----- USER -----\n" + userPrompt (req));
         dir.getChildFile ("last-ai-reply.txt").replaceWithText (rawReply + (error.isNotEmpty() ? "\n\n----- ERROR -----\n" + error : juce::String()));
     }
 

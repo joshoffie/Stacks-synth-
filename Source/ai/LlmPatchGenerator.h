@@ -23,6 +23,7 @@ public:
     // Exposed so the prompt can be inspected / tuned.
     static juce::String systemPrompt();
     static juce::String userPrompt (const GenerationRequest&);
+    static juce::String grammar (int patchCount); // GBNF for {"patches":[exactly patchCount]} built from the parameter table
 
 private:
     std::shared_ptr<LlmBackend> backend;

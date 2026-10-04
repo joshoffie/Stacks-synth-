@@ -9,6 +9,7 @@ like, and it breeds the next generation from your picks.
 - Xcode 26 (installed; the command line tools alone also work)
 - JUCE 8 at `/Applications/JUCE` (installed)
 - CMake ≥ 3.22 and Ninja: `brew install cmake ninja`
+- Internet on first configure: CMake fetches llama.cpp (pinned release) automatically
 
 ## Build
 
@@ -39,15 +40,33 @@ Every build copies the plug-in into `~/Library/Audio/Plug-Ins/Components`
 
 - *Random (no AI)* — archetype-based random patches, crossover and mutation.
   Instant, always available.
-- *Ollama: &lt;model&gt;* — a local language model served by the
-  [Ollama](https://ollama.com) app. Per batch the model designs 5 patches that
-  stream in at the top of the list (tagged ✦ AI) while the random breeder fills
-  the other 5 instantly. Needs Ollama running with a model pulled, e.g.
-  `ollama pull qwen3:4b`. On an M4 with 16 GB, `qwen3:8b` produces one patch
-  every ~40 s; `qwen3:4b` is roughly twice as fast.
+- *Built-in AI* — a Qwen3 language model running **inside the plug-in**
+  (llama.cpp on Metal, nothing else to install). Pick a model from the menu;
+  if it isn't on the Mac yet it downloads from Hugging Face into
+  `~/Library/Application Support/Stacks/models/` (1.7B ≈ 1.8 GB, 4B ≈ 2.5 GB,
+  8B ≈ 5 GB). If the Ollama app has already pulled a Qwen3 model, Stacks lists
+  it as "(Ollama's copy)" and uses that file directly, no second download.
+  Output is grammar-constrained, so the model can only produce valid patches.
+  On an M4 with 16 GB the 4B model runs at ~30 tokens/s: a fresh patch every
+  ~13 s, an evolved one every ~5 s. The model is unloaded after 10 idle minutes.
+- *Ollama app* — the same models served by a running [Ollama](https://ollama.com).
+  Handy for experiments; friends don't need it.
 
-The engine choice is stored in `~/Library/Application Support/Stacks/`.
-Patches are plain JSON (`Save…` / `Load…`, default folder `~/Documents/Stacks Patches`).
+Per batch the AI designs 5 patches that stream in at the top of the list
+(tagged ✦ AI) while the random breeder fills the other 5 instantly.
+
+The engine choice is stored in `~/Library/Application Support/Stacks/`, next to
+`llama.log` (runtime + speed stats), `last-ai-prompt.txt`, `last-ai-reply.txt`
+and `grammar.gbnf` for prompt tuning. Patches are plain JSON (`Save…` / `Load…`,
+default folder `~/Documents/Stacks Patches`).
+
+## Giving it to friends
+
+Build in Release, then zip `~/Library/Audio/Plug-Ins/Components/Stacks.component`
+(and the VST3 if wanted). They drop it into the same folder on their Mac and
+rescan in Logic. First AI use downloads a model (ask them to pick 4B). The
+plug-in is ad-hoc signed; Gatekeeper may need a right-click → Open on the
+standalone app, and Logic may ask once to allow the component.
 
 ## Layout
 
@@ -59,7 +78,9 @@ Source/
   Patch.*          a named set of parameter values; JSON in/out; apply/capture
   PatchGenerator.* generators: Random (archetypes + crossover/mutation)
   ai/LlmBackend.h  interface for "a model that streams a chat reply"; OllamaBackend.cpp speaks HTTP to Ollama
-  ai/LlmPatchGenerator.* prompt built from the parameter table, streaming JSON parser, fallback to Random
+  ai/LlamaBackend.* the same interface on top of llama.cpp (Metal), loads a GGUF inside the plug-in
+  ai/ModelManager.* model catalogue, Ollama-copy detection, background downloads
+  ai/LlmPatchGenerator.* prompt + GBNF grammar built from the parameter table, streaming JSON parser, fallback to Random
   PluginProcessor.* audio engine, master FX, lab state, engine selection, background generation
   PluginEditor.*   window: header, knob panel, AI lab, keyboard
   SynthPanel.*     knob/drop-down panel generated from the parameter table
