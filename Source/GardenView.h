@@ -30,6 +30,8 @@ public:
     std::function<float()> getVariation;
     std::function<void (float)> setVariation;
 
+    struct Branch { juce::Point<float> unit { 1.0f, 0.0f }; float baseLength = 1.0f, restT = 1.0f; };
+
 private:
     class Leaf;
     void timerCallback() override;
@@ -42,6 +44,7 @@ private:
     std::vector<double> appearedAt;             // per leaf, for the sprout animation
     int hoveredLeaf = -1;
     std::vector<float> stretch;                 // per leaf: where a drag left it (fraction of its branch), 0 = not dragged
+    std::vector<Branch> branches;               // per leaf, from the last layout: the line a drag moves along
     int shownGeneration = -1;
     double lastRefreshMs = 0.0;
 };

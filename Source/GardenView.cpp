@@ -82,43 +82,47 @@ public:
             return;
         }
         garden.processor.audition (index);
-        restCentre = getBounds().toFloat().getCentre();
-        restDistance = juce::jmax (1.0f, restCentre.getDistanceFrom (garden.seedCentre()));
+        // Anchor the drag: where the leaf rests on its branch, and where on it the mouse grabbed.
+        branch = index < (int) garden.branches.size() ? garden.branches[(size_t) index] : GardenView::Branch();
+        const auto grab = e.getEventRelativeTo (&garden).position - garden.seedCentre();
+        grabOffset = grab.getDotProduct (branch.unit) - branch.baseLength * branch.restT;
         dragging = false;
-        morphT = 1.0f;
+        dragT = branch.restT;
     }
 
     // Drag the leaf along its branch: toward the seed the sound blends back into
     // the seed, past its resting spot it gets exaggerated. The sound follows live.
     void mouseDrag (const juce::MouseEvent& e) override
     {
-        const auto pos = e.getEventRelativeTo (&garden).position;
         const auto centre = garden.seedCentre();
-        const auto dir = restCentre - centre;
-        const float len = juce::jmax (1.0f, dir.getDistanceFromOrigin());
-        const auto unit = dir / len;
-        // project the mouse onto the branch
-        const float along = (pos - centre).getDotProduct (unit);
-        morphT = juce::jlimit (0.05f, 1.6f, along / restDistance);
+        const auto pos = e.getEventRelativeTo (&garden).position;
+        // Project the mouse onto the branch, minus where it grabbed the leaf: no jump on the first pixel.
+        const float along = (pos - centre).getDotProduct (branch.unit) - grabOffset;
+        dragT = juce::jlimit (0.05f, 1.6f, along / juce::jmax (1.0f, branch.baseLength));
         dragging = true;
-        const auto newCentre = centre + unit * (restDistance * morphT);
-        setCentrePosition ((int) newCentre.x, (int) newCentre.y);
+        const auto newCentre = centre + branch.unit * (branch.baseLength * dragT);
+        setCentrePosition ((int) std::round (newCentre.x), (int) std::round (newCentre.y));
         garden.repaint();
 
         const double now = juce::Time::getMillisecondCounterHiRes();
         if (now - lastMorphMs > 40.0)
         {
             lastMorphMs = now;
-            garden.processor.morphCandidate (index, morphT);
+            garden.processor.morphCandidate (index, morphFraction());
         }
     }
+
+    // The candidate is the sound at the leaf's resting spot; the blend is relative to that.
+    float morphFraction() const noexcept { return dragT / juce::jmax (0.05f, branch.restT); }
 
     void mouseUp (const juce::MouseEvent&) override
     {
         if (! dragging) return;
         dragging = false;
-        if (index < (int) garden.stretch.size()) garden.stretch[(size_t) index] = morphT;   // stay where it was dropped
-        garden.processor.commitMorph (index, morphT);
+        const float fraction = morphFraction();
+        if (index < (int) garden.stretch.size()) garden.stretch[(size_t) index] = dragT;   // the layout keeps it here
+        if (index < (int) garden.branches.size()) garden.branches[(size_t) index].restT = dragT;
+        garden.processor.commitMorph (index, fraction);
     }
 
     std::unique_ptr<juce::AccessibilityHandler> createAccessibilityHandler() override
@@ -132,8 +136,8 @@ public:
     juce::String name;
     bool ai = false, auditioned = false, favourite = false, hovered = false;
     float growth = 1.0f;
-    juce::Point<float> restCentre;
-    float restDistance = 1.0f, morphT = 1.0f;
+    GardenView::Branch branch;
+    float grabOffset = 0.0f, dragT = 1.0f;
     bool dragging = false;
     double lastMorphMs = 0.0;
 };
@@ -176,6 +180,7 @@ void GardenView::refresh()
         appearedAt.push_back (now);
     appearedAt.resize (lab.candidates.size());
     stretch.resize (lab.candidates.size(), 0.0f);
+    branches.resize (lab.candidates.size());
 
     while (leaves.size() < lab.candidates.size())
     {
@@ -242,8 +247,13 @@ void GardenView::layoutLeaves()
         const int changes = lab.seedIsPatch ? countAudibleDifferences (c, lab.seed) : -1;
         const float closeness = changes < 0 ? 1.0f : juce::jlimit (0.72f, 1.12f, 0.72f + 0.4f * (float) changes / 14.0f);
         const float dragged = i < (int) stretch.size() ? stretch[(size_t) i] : 0.0f;
-        const float len = (ai ? length : length * 0.82f) * (dragged > 0.0f ? dragged : closeness) * eased;
-        const juce::Point<float> pos (centre.x + std::cos (angle) * len, centre.y - std::sin (angle) * len);
+        const float baseLength = ai ? length : length * 0.82f;
+        const float restT = dragged > 0.0f ? dragged : closeness;
+        const float len = baseLength * restT * eased;
+        const juce::Point<float> unit (std::cos (angle), -std::sin (angle));
+        const juce::Point<float> pos = centre + unit * len;
+        if (i < (int) branches.size())
+            branches[(size_t) i] = { unit, baseLength, restT };
 
         auto& leaf = *leaves[(size_t) i];
         const int size = (int) (kLeafRadius + 9.0f) * 2;
