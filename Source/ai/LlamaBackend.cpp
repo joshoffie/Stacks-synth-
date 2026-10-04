@@ -129,6 +129,7 @@ void LlamaBackend::unload()
     if (ctx != nullptr)   { llama_free (ctx); ctx = nullptr; }
     if (model != nullptr) { llama_model_free (model); model = nullptr; }
     vocab = nullptr;
+    kvTokens.clear();
     loaded = false;
 }
 
@@ -208,19 +209,38 @@ bool LlamaBackend::chat (const juce::String& systemPrompt, const juce::String& u
         return false;
     }
 
-    // ---- prefill ------------------------------------------------------------
+    // ---- prefill, reusing the prefix already in the KV cache -----------------
+    // The system prompt is long and identical from call to call; only the user
+    // part and the reply change. Whatever prefix matches the previous call is
+    // kept and only the rest is read, which turns ~12 s of reading into ~1 s.
     phase ("Reading your sound and the synth...");
     const double tStart = juce::Time::getMillisecondCounterHiRes();
-    llama_memory_clear (llama_get_memory (ctx), true);
-    for (int i = 0; i < count; i += kBatchTokens)
+    auto* memory = llama_get_memory (ctx);
+    int common = 0;
+    while (common < (int) kvTokens.size() && common < count - 1 && kvTokens[(size_t) common] == tokens[(size_t) common])
+        ++common;
+    if (common > 0 && llama_memory_seq_rm (memory, 0, common, -1))
     {
-        if (cancelled()) { error = "cancelled"; return false; }
+        kvTokens.resize ((size_t) common);
+    }
+    else
+    {
+        llama_memory_clear (memory, true);
+        kvTokens.clear();
+        common = 0;
+    }
+    auto forgetCache = [&] { llama_memory_clear (memory, true); kvTokens.clear(); };
+    for (int i = common; i < count; i += kBatchTokens)
+    {
+        if (cancelled()) { error = "cancelled"; forgetCache(); return false; }
         const int len = juce::jmin (kBatchTokens, count - i);
         if (llama_decode (ctx, llama_batch_get_one (tokens.data() + i, len)) != 0)
         {
             error = "decode failed while reading the prompt";
+            forgetCache();
             return false;
         }
+        kvTokens.insert (kvTokens.end(), tokens.begin() + i, tokens.begin() + i + len);
     }
 
     // ---- sampling -----------------------------------------------------------
@@ -279,8 +299,10 @@ bool LlamaBackend::chat (const juce::String& systemPrompt, const juce::String& u
         {
             error = "decode failed";
             ok = false;
+            forgetCache();
             break;
         }
+        kvTokens.push_back (next);
     }
 
     if (! pending.empty())
@@ -290,7 +312,7 @@ bool LlamaBackend::chat (const juce::String& systemPrompt, const juce::String& u
     lastUsedMs = juce::Time::getMillisecondCounterHiRes();
 
     const double promptSec = (tPrompt - tStart) / 1000.0, genSec = (lastUsedMs.load() - tPrompt) / 1000.0;
-    appendLog ("chat: prompt " + juce::String (count) + " tokens in " + juce::String (promptSec, 1) + " s ("
+    appendLog ("chat: prompt " + juce::String (count) + " tokens (" + juce::String (common) + " cached) in " + juce::String (promptSec, 1) + " s ("
                + juce::String (promptSec > 0 ? count / promptSec : 0.0, 0) + " tok/s), generated " + juce::String (generated)
                + " tokens in " + juce::String (genSec, 1) + " s (" + juce::String (genSec > 0 ? generated / genSec : 0.0, 1) + " tok/s)"
                + (ok ? "" : ", error: " + error));

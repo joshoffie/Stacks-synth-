@@ -158,6 +158,12 @@ static void testPatchJson()
     auto child = Patch::fromJson (R"json({"name":"Kid","params":{"filter_cutoff":500}})json", &p);
     CHECK (child && child->waves[0] == p.waves[0] && (int) child->get (P::oscA_wave) == kCustomWave);
     CHECK (describePatch (p).contains ("Neon"));
+
+    Patch m = p;
+    mutatePatch (m, 0.5f, 1234);
+    CHECK (! m.sameValuesAs (p));
+    const auto mw = mutateWave (p.waves[0], 0.5f, 1234);
+    CHECK (mw.frames.size() == p.waves[0].frames.size() && mw != p.waves[0]);
 }
 
 static void testTuningGuard()
@@ -259,6 +265,9 @@ static void testGrammarAndPrompt()
     CHECK (g.contains ("core ::="));
     CHECK (g.contains ("conn1 ::=") && g.contains ("conn6 ::=") && ! g.contains ("conn7 ::="));
     CHECK (g.contains ("lfo1-conn1 ::=") && g.contains ("menv-conn3 ::=") && g.contains ("perf-conn6 ::="));
+    CHECK (g.contains ("\nbase-conn1 ::=") && g.contains ("\nlfo-conn2 ::="));
+    CHECK (g.contains ("base-conn1 \",\" lfo-conn2"));                 // one performance/envelope connection, then one LFO
+    CHECK (! g.contains ("| conn2") && g.contains ("| conn3"));           // extras start at slot 3
     CHECK (g.contains ("\nwave ::=") && g.contains ("\nspectrum ::=") && g.contains ("digit ::= [0-9]"));
     CHECK (g.contains ("\\\"Custom\\\""));
     CHECK (! g.contains ("p-mod1-source") && ! g.contains ("p-lfo3-rate"));
@@ -398,7 +407,11 @@ static void testLlmGenerator()
     CHECK (fake->lastUser.contains ("waveA (its designed table)") && fake->lastUser.contains ("\"spectra\""));
     CHECK (kids.size() == 2);
     if (kids.size() == 2)
-        CHECK (kids[1].waves[0] == out[0].waves[0]);            // no waveA in the reply: the parent's table is inherited
+    {
+        CHECK (kids[1].waves[0] == out[0].waves[0]);          // no waveA in the reply: the parent's table is inherited
+        CHECK (! kids[0].sameValuesAs (out[0]));              // a verbatim copy of the parent is nudged into a relative
+        CHECK (kids[0].name.endsWith (" II"));
+    }
 
     GenerationRequest e2 = e;
     e2.parents = { out[1] };

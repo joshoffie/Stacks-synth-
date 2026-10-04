@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <mutex>
+#include <vector>
 
 #include "LlmBackend.h"
 
@@ -43,6 +44,7 @@ private:
     llama_context* ctx = nullptr;
     const llama_vocab* vocab = nullptr;
     std::mutex lock;
+    std::vector<int32_t> kvTokens;           // what the context's KV cache currently holds, for prefix reuse
     std::atomic<bool> loaded { false };
     std::atomic<double> lastUsedMs { 0.0 };
 };

@@ -622,6 +622,18 @@ namespace
     }
 } // namespace
 
+void mutatePatch (Patch& p, float amount, juce::int64 seed)
+{
+    Rng rng (seed);
+    mutate (p, amount, rng);
+}
+
+WaveSpec mutateWave (const WaveSpec& w, float amount, juce::int64 seed)
+{
+    Rng rng (seed);
+    return mutateWaveSpec (w, amount, rng);
+}
+
 std::vector<Patch> RandomPatchGenerator::generate (const GenerationRequest& req, const GenerationProgress& progress)
 {
     const auto ticks = (juce::uint64) juce::Time::getHighResolutionTicks();

@@ -44,6 +44,12 @@ public:
     virtual std::vector<Patch> generate (const GenerationRequest&, const GenerationProgress&) = 0;
 };
 
+// The breeder's mutation step on its own: nudges every parameter (amount 0..1,
+// 0.5 feels like a sibling). The AI generator uses it when a model hands back
+// a copy of a parent or of another patch in the batch.
+void mutatePatch (Patch&, float amount, juce::int64 seed);
+WaveSpec mutateWave (const WaveSpec&, float amount, juce::int64 seed);
+
 // No AI: archetype-based random patches, plus crossover + mutation of the
 // parents. Always available, also the fallback when a model is missing.
 class RandomPatchGenerator : public PatchGenerator

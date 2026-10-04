@@ -312,7 +312,7 @@ juce::String LlmPatchGenerator::systemPrompt (bool designWaves)
       << "a Sine at 4-7 Hz on Pitch at 0.02-0.03 is vibrato, on Amp at 0.2-0.4 tremolo; a Square or Random with lfoN_sync 1/8 or 1/16 on Cutoff, Pan or A Morph (0.3-0.5) chops rhythmically; "
       << "an LFO on Chorus Mix, Reverb Mix or Shimmer (0.2-0.4) makes the effects breathe. Never put a Square, Saw, Ramp or Random LFO on Pitch. "
       << "Velocity > Cutoff 0.2-0.5 makes playing dynamics matter; Mod Env (menv_decay 0.2-1, menv_sustain 0) > FM B>A or A Morph 0.3-0.6 gives an evolving attack; Mod Wheel > Cutoff 0.3-0.6 is live control. "
-      << "Every patch has at least one connection and most have two or three; each one should be clearly audible and musical.\n"
+      << "Every patch has connection 1 from a performance source or envelope and connection 2 from an LFO - pick the LFO's target, shape and rate to suit the sound (slow and smooth for pads, synced and stepped for rhythm, 4-7 Hz Sine on Pitch or Amp for vibrato or tremolo); add a third or fourth connection if the sound needs it. Every connection should be clearly audible and musical.\n"
       << "Effects: reverb_type Shimmer with reverb_shimmer 0.3-0.7 gives a glowing octave-up halo (pads, textures); Hall for long tails, Room for short; "
       << "chorus_mode Ensemble is a lush string-machine, Dimension is wide and subtle, Flanger needs chorus_feedback 0.4-0.8; "
       << "delay_mode Ping-Pong with delay_sync 1/8 or 1/8D suits plucks and leads, Tape is dark and wobbly.\n"
@@ -333,13 +333,15 @@ juce::String LlmPatchGenerator::systemPrompt (bool designWaves)
       << "\"filter_type\":\"<type>\",\"filter_cutoff\":<Hz>,\"filter_res\":<0-1>,\"filter_env\":<-5..5>,\"fenv_decay\":<seconds>,\"fenv_sustain\":<0-1>,"
       << "\"aenv_attack\":<seconds>,\"aenv_decay\":<seconds>,\"aenv_sustain\":<0-1>,\"aenv_release\":<seconds>,"
       << "\"unison_voices\":<1-4>,\"reverb_mix\":<0-1>,"
-      << "\"mod1_source\":\"<source>\",\"mod1_dest\":\"<a target that suits the source>\",\"mod1_amount\":<-1..1>,<any extra settings and connections>}";
+      << "\"mod1_source\":\"<Velocity|Key|Mod Wheel|Aftertouch|Filter Env|Mod Env|Random>\",\"mod1_dest\":\"<a target that suits it>\",\"mod1_amount\":<-1..1>,"
+      << "\"lfo1_shape\":\"<shape>\",\"lfo1_rate\":<Hz>,\"lfo1_sync\":\"<Free or a note value>\",\"mod2_source\":\"LFO 1\",\"mod2_dest\":\"<a target from the LFO list>\",\"mod2_amount\":<-1..1>,"
+      << "<any extra settings and connections>}";
     if (designWaves)
         s << ",\"waveA\":{\"name\":\"<two words>\",\"tail\":<0-9>,\"spectra\":[[<16 digits>],[<16 digits>],[<16 digits>]]}";
     s << "}]}\n"
       << "category is one of Pad, Pluck, Bass, Keys, Lead, Bell, Texture, Drone. "
       << "params always starts with these core settings in this exact order: " << juce::StringArray (coreParamIds().data(), (int) coreParamIds().size()).joinIntoString (", ")
-      << ", then the first connection, then any extra settings that define the sound "
+      << ", then connection 1 (Velocity, Key, Mod Wheel, Aftertouch, Filter Env, Mod Env or Random), then connection 2 (LFO 1 or LFO 2, with its shape, rate and sync), then any extra settings that define the sound "
       << "(more connections, oscA_coarse, noise, chorus and delay, effect details, glide, filter drive...). Every parameter you omit keeps its base value. ";
     if (designWaves)
         s << "\nWavetable design: every patch ends with \"waveA\", a brand-new wavetable for oscillator A (oscA_wave then becomes Custom). "
@@ -395,6 +397,7 @@ juce::String LlmPatchGenerator::userPrompt (const GenerationRequest& req)
           << "Give each descendant a fresh two-word name that shares one word with its parent.\n";
         if (req.designWaves)
             s << "Design each descendant's waveA as a relative of its parent's spectrum: keep the character, change the shape.\n";
+        s << "Never copy a parent: every descendant changes at least five settings (and its wavetable) so that it sounds recognisably different.\n";
         if (req.hint.trim().isNotEmpty())
             s << "Direction from the user: \"" << req.hint.trim() << "\". Follow it closely.\n";
         if (req.brief.isNotEmpty())
@@ -434,7 +437,8 @@ juce::String LlmPatchGenerator::grammar (int patchCount, bool designWaves)
     juce::StringArray coreRules;
     for (auto* id : coreParamIds())
         coreRules.add (ruleName (id));
-    coreRules.add ("conn1");
+    coreRules.add ("base-conn1");
+    coreRules.add ("lfo-conn2");
     g << "core ::= " << coreRules.joinIntoString (" " + lit (",") + " ") << "\n";
 
     // Connections are units: source, target and amount together, with a target
@@ -473,8 +477,9 @@ juce::String LlmPatchGenerator::grammar (int patchCount, bool designWaves)
         unit ("key-conn",  "", lit ("\"Key\""), "key-target");
         unit ("perf-conn", "", "(" + lit ("\"Mod Wheel\"") + " | " + lit ("\"Aftertouch\"") + ")", "perf-target");
         unit ("rnd-conn",  "", lit ("\"Random\""), "rnd-target");
-        g << "conn" << N << " ::= lfo1-conn" << N << " | lfo2-conn" << N << " | fenv-conn" << N << " | menv-conn" << N
-          << " | vel-conn" << N << " | key-conn" << N << " | perf-conn" << N << " | rnd-conn" << N << "\n";
+        g << "lfo-conn" << N << " ::= lfo1-conn" << N << " | lfo2-conn" << N << "\n"
+          << "base-conn" << N << " ::= fenv-conn" << N << " | menv-conn" << N << " | vel-conn" << N << " | key-conn" << N << " | perf-conn" << N << " | rnd-conn" << N << "\n"
+          << "conn" << N << " ::= base-conn" << N << " | lfo-conn" << N << "\n";
     }
 
     // Extras: anything that is not already part of the core, plus more connections.
@@ -482,7 +487,7 @@ juce::String LlmPatchGenerator::grammar (int patchCount, bool designWaves)
     for (const auto& spec : paramSpecs())
         if (isExtraParam (spec.id))
             alternatives.add (ruleName (spec.id));
-    for (int n = 2; n <= kAiSlots; ++n)
+    for (int n = 3; n <= kAiSlots; ++n)
         alternatives.add ("conn" + juce::String (n));
     g << "param ::= " << alternatives.joinIntoString (" | ") << "\n";
 
@@ -564,8 +569,9 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
         progress.progress (0.0f, "Thinking about what \"" + hint + "\" should sound like...");
         juce::String brief, briefError;
         const juce::String briefGrammar = "root ::= [\\x20-\\x7E\\n]{80,700}\n";
-        backend->chat ("You are an expert synthesizer sound designer with encyclopaedic knowledge of artists, songs and genres.",
-                       "In three or four short sentences, describe the synthesizer sound(s) for this request: \"" + hint + "\". "
+        // Same system prompt as the patch call, so the model's cache of it is reused.
+        backend->chat (systemPrompt (req.designWaves),
+                       "Before designing anything: in three or four short sentences, describe the synthesizer sound(s) for this request: \"" + hint + "\". "
                        "Be concrete: waveforms and layering, filter and envelope shape, movement (what the LFOs modulate and how fast), effects, and the vibe. "
                        "If it names an artist, song or genre, describe the synth sounds they are known for. No preamble. /no_think",
                        briefGrammar,
@@ -626,10 +632,10 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
                     patch->set (waveParam, 2.0f);
             }
 
-        // Small models sometimes repeat themselves; a duplicate helps nobody.
-        for (const auto& existing : out)
-            if (existing.sameValuesAs (*patch) || existing.name.equalsIgnoreCase (patch->name))
-                return;
+        patch->name = spaceOutCamelCase (patch->name).substring (0, 28);
+        // Small models sometimes copy the example patch's name straight from the prompt.
+        if (patch->name.equalsIgnoreCase ("Velvet Horizon") || patch->name.equalsIgnoreCase ("Two Words") || patch->name.isEmpty())
+            patch->name = patch->category + " " + juce::String ((int) out.size() + 1);
 
         // A child wearing its parent's exact name gets a suffix.
         for (const auto& parent : req.parents)
@@ -637,12 +643,30 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
                 patch->name << " II";
 
         keepPatchInTune (*patch);
+
+        // Small models repeat themselves - a parent verbatim, or a sibling. Rather
+        // than dropping the copy (and shorting the batch), nudge it into a relative.
+        auto isCopy = [&] (const Patch& other) { return other.sameValuesAs (*patch) || other.name.equalsIgnoreCase (patch->name); };
+        bool copy = false;
+        for (const auto& parent : req.parents) copy = copy || isCopy (parent);
+        for (const auto& sibling : out)        copy = copy || isCopy (sibling);
+        if (copy)
+        {
+            const auto seed = (juce::int64) juce::Time::getHighResolutionTicks() + (juce::int64) out.size();
+            mutatePatch (*patch, 0.25f + 0.5f * req.variation, seed);
+            if (! patch->waves[0].isEmpty())
+            {
+                patch->waves[0] = mutateWave (patch->waves[0], 0.25f + 0.5f * req.variation, seed);
+                patch->set (P::oscA_wave, (float) kCustomWave);
+            }
+            keepPatchInTune (*patch);
+            for (const auto& sibling : out)
+                if (sibling.name.equalsIgnoreCase (patch->name))
+                    patch->name << " II";
+        }
+
         patch->set (P::master_gain, -6.0f);
         patch->origin = "AI";
-        patch->name = spaceOutCamelCase (patch->name).substring (0, 28);
-        // Small models sometimes copy the example patch's name straight from the prompt.
-        if (patch->name.equalsIgnoreCase ("Velvet Horizon") || patch->name.equalsIgnoreCase ("Two Words"))
-            patch->name = patch->category + " " + juce::String ((int) out.size() + 1);
         if (patch->description.isEmpty())
             patch->description = describePatch (*patch);
         else if (patch->description.length() < 60)
