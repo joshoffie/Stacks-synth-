@@ -5,3 +5,4 @@ Run `StacksTests --bench <label>` after changing the prompt, grammar or guard. S
 | date | label | model | score | notes |
 |---|---|---|---|---|
 | 2026-10-04 15.47 | baseline: units + directions + 12k ctx | Qwen3 4B | 99.6 | fresh 3/3 3/3 3/3 3/3 3/3 |
+| 2026-10-04 18.24 | tags + explain era: 3 tags per patch, URL models | Qwen3 4B | 98.5 | fresh 3/3 3/3 3/3 3/3 3/3 |
