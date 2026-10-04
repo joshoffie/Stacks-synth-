@@ -41,6 +41,14 @@ juce::var Patch::toVar() const
         obj->setProperty ("origin", origin);
     if (favourite)
         obj->setProperty ("favourite", true);
+    if (! tags.isEmpty())
+    {
+        juce::Array<juce::var> t;
+        for (const auto& tag : tags) t.add (tag);
+        obj->setProperty ("tags", juce::var (t));
+    }
+    if (parentName.isNotEmpty()) obj->setProperty ("parentName", parentName);
+    if (prompt.isNotEmpty())     obj->setProperty ("prompt", prompt);
     obj->setProperty ("params", paramsToVar());
 
     bool anyWave = false;
@@ -123,6 +131,18 @@ std::optional<Patch> Patch::fromVar (const juce::var& v, const Patch* base)
         p.category = base->category;
     p.origin = obj->getProperty ("origin").toString().trim();
     p.favourite = (bool) obj->getProperty ("favourite");
+    p.parentName = obj->getProperty ("parentName").toString();
+    p.prompt = obj->getProperty ("prompt").toString();
+    if (base != nullptr) p.tags = base->tags;
+    if (auto* t = obj->getProperty ("tags").getArray())
+    {
+        p.tags.clear();
+        for (const auto& v : *t)
+        {
+            const auto tag = v.toString().trim().toLowerCase().retainCharacters ("abcdefghijklmnopqrstuvwxyz0123456789 -").trim();
+            if (tag.isNotEmpty() && ! p.tags.contains (tag) && p.tags.size() < 6) p.tags.add (tag);
+        }
+    }
     if (base != nullptr)
     {
         p.lfoShapes = base->lfoShapes;
@@ -403,6 +423,67 @@ namespace
             text << "(" << (st > 0 ? "+" : "") << st << ")";
         return text;
     }
+}
+
+juce::StringArray autoTags (const Patch& p)
+{
+    juce::StringArray t;
+    if (p.category.isNotEmpty()) t.add (p.category.toLowerCase());
+    const float cutoff = p.get (P::filter_cutoff);
+    if (cutoff < 600.0f) t.add ("dark"); else if (cutoff > 5000.0f) t.add ("bright");
+    if (p.get (P::aenv_attack) > 0.4f) t.add ("slow");
+    else if (p.get (P::aenv_decay) < 0.4f && p.get (P::aenv_sustain) < 0.2f) t.add ("plucky");
+    if (p.get (P::unison_voices) >= 3) t.add ("wide");
+    if (p.get (P::fm_amount) > 0.3f) t.add ("metallic");
+    if (p.get (P::noise_level) > 0.2f) t.add ("noisy");
+    if (p.get (P::sub_level) > 0.4f) t.add ("deep");
+    if (p.get (P::reverb_mix) > 0.4f) t.add ("spacious");
+    if (p.get (P::chorus_mix) > 0.3f) t.add ("lush");
+    for (int i = 0; i < kNumModSlots && ! t.contains ("moving"); ++i)
+    {
+        const int src = (int) p.get (modSourceParam (i));
+        if (src >= SrcLfo1 && src <= SrcLfo4 && (int) p.get (modDestParam (i)) != TargetOff) t.add ("moving");
+    }
+    while (t.size() > 4) t.remove (t.size() - 1);
+    return t;
+}
+
+juce::String patchTips (const Patch& p)
+{
+    juce::StringArray lines;
+    const float cutoff = p.get (P::filter_cutoff);
+    lines.add ("Cutoff (" + hzText (cutoff) + "): the brightness. Lower it for darker and softer, raise it to open up. "
+               + (p.get (P::filter_res) > 0.4f ? juce::String ("Resonance is up, so the cutoff point rings - back it off if it whistles.")
+                                               : juce::String ("Add Resonance to make the cutoff point sing.")));
+    const float att = p.get (P::aenv_attack), dec = p.get (P::aenv_decay), sus = p.get (P::aenv_sustain), rel = p.get (P::aenv_release);
+    if (att > 0.3f)      lines.add ("Attack (" + juce::String (att, 2) + " s) fades each note in. Shorten it under 0.05 s for an instant, keyboard-like start.");
+    else if (sus < 0.2f) lines.add ("Decay (" + juce::String (dec, 2) + " s) sets how fast each note dies away; Sustain is near zero so this is a plucky sound. Raise Sustain to hold notes.");
+    else                 lines.add ("Attack is quick and Sustain holds (" + juce::String (sus, 2) + "). Raise Attack toward 0.5 s for a pad-like swell, or lengthen Release (" + juce::String (rel, 2) + " s) for a longer tail.");
+    if (p.get (P::filter_env) > 0.5f)       lines.add ("Filt Env (+" + juce::String (p.get (P::filter_env), 1) + " oct) opens the filter at the start of each note; F Decay decides how fast it closes. More = a stronger 'wah' on every hit.");
+    else if (p.get (P::filter_env) < -0.5f) lines.add ("Filt Env is negative: the filter starts closed and opens into the note. Shorten F Decay for a snappier swell.");
+    else                                    lines.add ("Filt Env is near zero, so the filter stays put. Try +2 with a short F Decay for a plucky bite.");
+    bool anyLfo = false;
+    for (int i = 0; i < kNumModSlots; ++i)
+    {
+        const int src = (int) p.get (modSourceParam (i)), dst = (int) p.get (modDestParam (i));
+        if (src == SrcOff || dst == TargetOff) continue;
+        const auto target = modTargetNames()[juce::jlimit (0, modTargetNames().size() - 1, dst)];
+        if (src >= SrcLfo1 && src <= SrcLfo4)
+        {
+            anyLfo = true;
+            const int k = src - SrcLfo1;
+            lines.add ("LFO " + juce::String (k + 1) + " moves " + target + " at " + juce::String (p.get (lfoRateParam (k)), 2) + " Hz. Its Rate knob speeds the motion up; the depth slider in the LFO tab makes it bolder or subtler.");
+        }
+        else if (src == SrcVelocity) lines.add ("Velocity is wired to " + target + ": playing harder changes it. That is why the sound responds to touch.");
+        else if (src == SrcModEnv)   lines.add ("The Mod Env drives " + target + " for the first moments of each note - the attack character. ME Decay sets how long.");
+    }
+    if (! anyLfo) lines.add ("Nothing is moving on its own yet. In MODULATORS press Assign, click a knob (Cutoff, A Morph or Pan are good first picks) and the LFO will swing it.");
+    if (p.get (P::unison_voices) <= 1) lines.add ("Unison is off. 3 voices with Detune around 15 makes it wide and thick; Spread puts the copies left and right.");
+    else lines.add ("Unison (" + juce::String ((int) p.get (P::unison_voices)) + " voices, detune " + juce::String ((int) p.get (P::unison_detune)) + ") is what makes it wide. Pull Detune down for a cleaner, more in-tune centre.");
+    const float rev = p.get (P::reverb_mix), del = p.get (P::delay_mix);
+    if (rev < 0.15f && del < 0.1f) lines.add ("It is dry. Reverb Mix around 0.3 puts it in a room; Delay Mix with a synced 1/8 adds rhythm.");
+    else lines.add ("Space: Reverb Mix " + juce::String (rev, 2) + (del > 0.1f ? ", Delay Mix " + juce::String (del, 2) : juce::String()) + ". Reverb Size lengthens the tail, Delay FB adds more repeats.");
+    return lines.joinIntoString ("\n\n");
 }
 
 juce::String describePatch (const Patch& p)

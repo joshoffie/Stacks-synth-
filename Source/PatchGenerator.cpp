@@ -711,6 +711,9 @@ std::vector<Patch> RandomPatchGenerator::generate (const GenerationRequest& req,
         keepPatchInTune (p);
         p.set (P::master_gain, -6.0f);
         p.origin = "Random";
+        p.prompt = req.hint.trim();
+        p.parentName = req.parents.empty() ? juce::String() : req.parents.front().name;
+        p.tags = autoTags (p);
         p.description = describePatch (p);
         progress.patch (p);
         out.push_back (std::move (p));

@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "ai/PatchExplainer.h"
 #include "ai/LlmPatchGenerator.h"
 
 namespace stacks
@@ -525,6 +526,7 @@ Patch StacksAudioProcessor::currentPatch() const
     p.origin = patchOrigin;
     p.filePath = patchFile;
     p.favourite = patchFavourite;
+    p.tags = patchTags;
     p.description = describePatch (p);
     return p;
 }
@@ -537,6 +539,7 @@ void StacksAudioProcessor::applyPatch (const Patch& p)
     patchOrigin = p.origin;
     patchFile = p.filePath;
     patchFavourite = p.favourite;
+    patchTags = p.tags;
     loadedSnapshot = p;
 }
 
@@ -1052,6 +1055,104 @@ void StacksAudioProcessor::audition (int index)
     labBroadcaster.sendChangeMessage();
 }
 
+void StacksAudioProcessor::auditionFromTree (int generation, int candidate)
+{
+    const bool current = generation >= (int) labState.history.size();
+    if (generation < 0) return;
+    const auto& candidates = current ? labState.candidates : labState.history[(size_t) generation].candidates;
+    const auto& seed = current ? labState.seed : labState.history[(size_t) generation].seed;
+    const bool seedIsPatch = current ? labState.seedIsPatch : labState.history[(size_t) generation].seedIsPatch;
+    if (candidate < 0)
+    {
+        if (! seedIsPatch) return;
+        applyPatch (seed);
+        labState.auditioned = -1;
+    }
+    else
+    {
+        if (candidate >= (int) candidates.size()) return;
+        applyPatch (candidates[(size_t) candidate]);
+        labState.auditioned = current ? candidate : -1;
+    }
+    labBroadcaster.sendChangeMessage();
+}
+
+juce::String StacksAudioProcessor::currentExplanationKey() const
+{
+    const auto p = currentPatch();
+    return p.name + "|" + describePatch (p);
+}
+
+void StacksAudioProcessor::explainCurrentPatch()
+{
+    const auto patch = currentPatch();
+    const auto key = currentExplanationKey();
+    const int token = ++explainToken;
+    labState.explanationKey = key;
+    labState.explanation = patchTips (patch);
+    labState.modelExplanation.clear();
+    auto backend = activeBackend;
+    labState.explaining = backend != nullptr;
+    labBroadcaster.sendChangeMessage();
+    if (backend == nullptr)
+        return;
+
+    juce::WeakReference<StacksAudioProcessor> weak (this);
+    pool.addJob ([weak, token, backend, patch]
+    {
+        juce::String text, error;
+        double lastPush = 0.0;
+        auto push = [&] (bool force)
+        {
+            const double now = juce::Time::getMillisecondCounterHiRes();
+            if (! force && now - lastPush < 150.0) return;
+            lastPush = now;
+            juce::MessageManager::callAsync ([weak, token, text]
+            {
+                if (auto* self = weak.get())
+                    if (self->explainToken.load() == token)
+                    {
+                        self->labState.modelExplanation = text.trim();
+                        self->labBroadcaster.sendChangeMessage();
+                    }
+            });
+        };
+        PatchExplainer::explain (*backend, patch, [&] (const juce::String& t) { text += t; push (false); },
+                                 [weak, token] { auto* self = weak.get(); return self == nullptr || self->explainToken.load() != token; }, error);
+        push (true);
+        juce::MessageManager::callAsync ([weak, token]
+        {
+            if (auto* self = weak.get())
+                if (self->explainToken.load() == token)
+                {
+                    self->labState.explaining = false;
+                    self->labBroadcaster.sendChangeMessage();
+                }
+        });
+    });
+}
+
+void StacksAudioProcessor::setCurrentTags (const juce::StringArray& tags)
+{
+    patchTags = tags;
+    if (patchFile.isNotEmpty() && juce::File (patchFile).existsAsFile())
+        setFileTags (juce::File (patchFile), tags);
+    labBroadcaster.sendChangeMessage();
+}
+
+void StacksAudioProcessor::setFileTags (const juce::File& file, const juce::StringArray& tags)
+{
+    if (auto p = Patch::fromJson (file.loadFileAsString()))
+    {
+        p->tags = tags;
+        file.replaceWithText (p->toJson());
+        if (patchFile == file.getFullPathName()) patchTags = tags;
+        for (auto& c : labState.candidates)
+            if (c.filePath == file.getFullPathName()) c.tags = tags;
+    }
+    labBroadcaster.sendChangeMessage();
+}
+
 void StacksAudioProcessor::auditionSeed()
 {
     if (! labState.seedIsPatch)
@@ -1108,6 +1209,8 @@ juce::File StacksAudioProcessor::savePreset (const juce::String& name, const juc
 {
     auto p = currentPatch();
     p.name = name.trim().isEmpty() ? patchName : name.trim();
+    if (p.tags.isEmpty()) p.tags = autoTags (p);   // every saved preset is searchable
+    patchTags = p.tags;
     // Overwrite only the loaded file itself (same folder, same name) unless a new file was asked for.
     juce::File existing (p.filePath);
     if (asNewFile || ! (existing.existsAsFile() && existing.getParentDirectory() == folder
@@ -1212,6 +1315,21 @@ juce::String StacksAudioProcessor::labToJson() const
     obj->setProperty ("candidates", toArray (labState.candidates));
     obj->setProperty ("seed", labState.seed.toVar());
     obj->setProperty ("seedIsPatch", labState.seedIsPatch);
+    juce::Array<juce::var> tagArr;
+    for (const auto& t : patchTags) tagArr.add (t);
+    obj->setProperty ("patchTags", juce::var (tagArr));
+    juce::Array<juce::var> hist;   // the family tree, most recent 12 generations
+    for (size_t i = labState.history.size() > 12 ? labState.history.size() - 12 : 0; i < labState.history.size(); ++i)
+    {
+        const auto& gen = labState.history[i];
+        auto* h = new juce::DynamicObject();
+        h->setProperty ("candidates", toArray (gen.candidates));
+        h->setProperty ("seed", gen.seed.toVar());
+        h->setProperty ("seedIsPatch", gen.seedIsPatch);
+        h->setProperty ("generation", gen.generation);
+        hist.add (juce::var (h));
+    }
+    obj->setProperty ("history", juce::var (hist));
     obj->setProperty ("patchFile", patchFile);
     obj->setProperty ("patchFavourite", patchFavourite);
     return juce::JSON::toString (juce::var (obj), true);
@@ -1246,9 +1364,22 @@ void StacksAudioProcessor::labFromJson (const juce::String& json)
     labState.seed.name.clear();
     if (auto seed = Patch::fromVar (obj->getProperty ("seed"))) labState.seed = *seed;
     labState.seedIsPatch = (bool) obj->getProperty ("seedIsPatch");
+    patchTags.clear();
+    if (auto* t = obj->getProperty ("patchTags").getArray()) for (const auto& v : *t) patchTags.add (v.toString());
     patchFile = obj->getProperty ("patchFile").toString();
     patchFavourite = (bool) obj->getProperty ("patchFavourite");
     labState.history.clear();
+    if (auto* hist = obj->getProperty ("history").getArray())
+        for (const auto& hv : *hist)
+            if (auto* h = hv.getDynamicObject())
+            {
+                LabState::Generation gen;
+                gen.candidates = readArray (h->getProperty ("candidates"));
+                if (auto seed = Patch::fromVar (h->getProperty ("seed"))) gen.seed = *seed;
+                gen.seedIsPatch = (bool) h->getProperty ("seedIsPatch");
+                gen.generation = (int) h->getProperty ("generation");
+                labState.history.push_back (std::move (gen));
+            }
     labState.generating = false;
     labState.status = labState.generation > 0 ? "Generation " + juce::String (labState.generation) : juce::String();
 

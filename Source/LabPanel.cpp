@@ -194,7 +194,7 @@ void ProgressStrip::paint (juce::Graphics& g)
 }
 
 //==============================================================================
-LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garden (p)
+LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garden (p), tree (p), explain (p)
 {
     header.setFont (juce::Font (juce::FontOptions (15.0f, juce::Font::bold)));
     header.setColour (juce::Label::textColourId, colours::text);
@@ -269,7 +269,7 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
     viewport.setScrollBarsShown (true, false);
     addAndMakeVisible (viewport);
 
-    for (auto* tab : { &gardenTab, &ideasTab, &libraryTab })
+    for (auto* tab : { &gardenTab, &treeTab, &ideasTab, &libraryTab, &explainTab })
     {
         tab->setClickingTogglesState (false);
         tab->setColour (juce::TextButton::buttonOnColourId, colours::accentDim);
@@ -281,6 +281,14 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
     ideasTab.setTooltip ("The same candidates as a list with descriptions");
     ideasTab.onClick = [this] { showView (View::ideas); };
     libraryTab.onClick = [this] { showView (View::library); };
+    treeTab.setTooltip ("The family tree: every generation this session, click any node to hear it again");
+    treeTab.onClick = [this] { showView (View::tree); };
+    explainTab.setTooltip ("Why the playing sound sounds like this, and which knobs to try");
+    explainTab.onClick = [this] { showView (View::explain); };
+    treeViewport.setViewedComponent (&tree, false);
+    treeViewport.setScrollBarsShown (false, true);
+    addChildComponent (treeViewport);
+    addChildComponent (explain);
 
     garden.onEvolve = [this] { processor.requestEvolve (hint.getText(), (float) variation.getValue()); };
     garden.onFresh = [this] { processor.requestNewBatch (hint.getText(), (float) variation.getValue()); };
@@ -351,10 +359,12 @@ void LabPanel::resized()
     r.removeFromTop (2);
 
     auto tabs = r.removeFromTop (24);
-    const int tabW = tabs.getWidth() / 3;
+    const int tabW = tabs.getWidth() / 5;
     gardenTab.setBounds (tabs.removeFromLeft (tabW).reduced (1, 0));
+    treeTab.setBounds (tabs.removeFromLeft (tabW).reduced (1, 0));
     ideasTab.setBounds (tabs.removeFromLeft (tabW).reduced (1, 0));
-    libraryTab.setBounds (tabs.reduced (1, 0));
+    libraryTab.setBounds (tabs.removeFromLeft (tabW).reduced (1, 0));
+    explainTab.setBounds (tabs.reduced (1, 0));
     r.removeFromTop (6);
 
     status.setBounds (r.removeFromBottom (18));
@@ -363,6 +373,9 @@ void LabPanel::resized()
     viewport.setBounds (r);
     library.setBounds (r);
     garden.setBounds (r);
+    treeViewport.setBounds (r);
+    tree.setSize (juce::jmax (tree.preferredWidth(), r.getWidth()), r.getHeight());
+    explain.setBounds (r);
 
     layoutCards();
 }
@@ -492,6 +505,9 @@ void LabPanel::refresh()
     gardenTab.setToggleState (view == View::garden, juce::dontSendNotification);
     ideasTab.setToggleState (view == View::ideas, juce::dontSendNotification);
     libraryTab.setToggleState (view == View::library, juce::dontSendNotification);
+    treeTab.setToggleState (view == View::tree, juce::dontSendNotification);
+    explainTab.setToggleState (view == View::explain, juce::dontSendNotification);
+    if (view == View::tree) tree.refresh();
     if (view == View::library) library.refresh();
     garden.refresh();
 
@@ -575,6 +591,12 @@ void LabPanel::showView (View v)
     garden.setVisible (v == View::garden);
     viewport.setVisible (v == View::ideas);
     library.setVisible (v == View::library);
+    treeTab.setToggleState (v == View::tree, juce::dontSendNotification);
+    explainTab.setToggleState (v == View::explain, juce::dontSendNotification);
+    treeViewport.setVisible (v == View::tree);
+    explain.setVisible (v == View::explain);
+    if (v == View::tree) tree.refresh();
+    if (v == View::explain && processor.lab().explanationKey != processor.currentExplanationKey()) processor.explainCurrentPatch();
     if (v == View::library) library.refresh();
     if (v == View::garden)  garden.refresh();
 }

@@ -169,6 +169,15 @@ static void testPatchJson()
         CHECK_NEAR (q->get (P::filter_cutoff), 1234.0, 0.01);
         CHECK (q->sameValuesAs (p));
     }
+    p.tags = { "warm", "pad" };
+    p.parentName = "Mother";
+    p.prompt = "warm pad";
+    auto q2 = Patch::fromJson (p.toJson());
+    CHECK (q2 && q2->tags == p.tags && q2->parentName == "Mother" && q2->prompt == "warm pad");
+    auto tagged = Patch::fromJson (R"json({"name":"T","tags":["Bright ", "bright", "x y", "", "Z!"]})json");
+    CHECK (tagged && tagged->tags.size() == 3 && tagged->tags[0] == "bright" && tagged->tags[1] == "x y" && tagged->tags[2] == "z");
+    CHECK (autoTags (p).contains ("pad") || p.category.isEmpty());
+    CHECK (patchTips (p).contains ("Cutoff"));
     auto child = Patch::fromJson (R"json({"name":"Kid","params":{"filter_cutoff":500}})json", &p);
     CHECK (child && child->waves[0] == p.waves[0] && (int) child->get (P::oscA_wave) == kCustomWave);
     CHECK (describePatch (p).contains ("Neon"));
@@ -287,6 +296,7 @@ static void testGrammarAndPrompt()
     CHECK (g.contains ("conn1 ::=") && g.contains ("conn6 ::=") && ! g.contains ("conn7 ::="));
     CHECK (g.contains ("lfo1-conn1 ::=") && g.contains ("menv-conn3 ::=") && g.contains ("perf-conn6 ::="));
     CHECK (g.contains ("\nbase-conn1 ::=") && g.contains ("\nlfo-conn2 ::="));
+    CHECK (g.contains ("\ntag ::=") && g.contains ("\"tags\\\":[\""));
     CHECK (g.contains ("base-conn1 \",\" lfo-conn2"));                 // one performance/envelope connection, then one LFO
     CHECK (! g.contains ("| conn2") && g.contains ("| conn3"));           // extras start at slot 3
     CHECK (g.contains ("\nwave ::=") && g.contains ("\nspectrum ::=") && g.contains ("digit ::= [0-9]"));
@@ -426,6 +436,7 @@ static void testLlmGenerator()
         CHECK ((int) out[0].get (P::oscB_wave) == waveNames().indexOf ("Saw"));
         CHECK ((int) out[0].get (modDestParam (0)) == modTargetForParam ((int) P::filter_cutoff)); // square LFO off pitch
         CHECK (out[0].origin == "AI");
+        CHECK (out[0].prompt == "in the style of MGMT" && out[0].parentName.isEmpty() && ! out[0].tags.isEmpty());
         CHECK_NEAR (out[0].get (P::unison_detune), 22.0, 1.0e-4);
         CHECK ((int) out[1].get (P::oscA_wave) == waveNames().indexOf ("Glass"));
         CHECK (out[1].waves[0].isEmpty());
@@ -449,6 +460,7 @@ static void testLlmGenerator()
         CHECK (countAudibleDifferences (kids[1], out[0]) >= 6);
         CHECK (fake->lastUser.contains ("Descendant 1:") && fake->lastUser.contains ("Descendant 2:"));
         CHECK (kids[0].name.endsWith (" II"));
+        CHECK (kids[0].parentName == out[0].name);
     }
 
     GenerationRequest e2 = e;

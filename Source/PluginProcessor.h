@@ -28,6 +28,9 @@ struct LabState
     bool generating = false;
     juce::String status;
     float progress = -1.0f;                     // 0..1 toward the next AI patch, -1 = unknown/idle
+    juce::String explanation, modelExplanation; // quick tips, and the model's streamed explanation
+    juce::String explanationKey;                // which sound they describe
+    bool explaining = false;
     juce::String progressDetail;                // what the model is doing right now
 };
 
@@ -91,6 +94,16 @@ public:
     void goBackGeneration();
     void audition (int candidateIndex);
     void auditionSeed();                                   // hear the parent of this generation again
+    void auditionFromTree (int generation, int candidate); // any node of the family tree (candidate -1 = that generation's seed)
+
+    // Why it sounds like this: quick tips at once, then the model's explanation streams in.
+    void explainCurrentPatch();
+    juce::String currentExplanationKey() const;
+
+    // Tags on the playing sound and on saved files
+    const juce::StringArray& currentTags() const           { return patchTags; }
+    void setCurrentTags (const juce::StringArray&);
+    void setFileTags (const juce::File&, const juce::StringArray&);
 
     // Library: your saved patches, in your folders. The heart saves a sound
     // into the open folder (if it isn't saved yet) and marks it a favourite.
@@ -238,6 +251,8 @@ private:
     juce::File currentFolder;
     juce::String patchName { "Init" };
     juce::String patchCategory, patchOrigin, patchFile;    // of the loaded patch, for the Now Playing card
+    juce::StringArray patchTags;
+    std::atomic<int> explainToken { 0 };
     bool patchFavourite = false;
     Patch loadedSnapshot;                                  // values as loaded, to spot edits
     void writeFavouriteFlag (const juce::File&, bool);

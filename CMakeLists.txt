@@ -69,6 +69,9 @@ target_sources(Stacks PRIVATE
     Source/StacksLookAndFeel.cpp
     Source/Displays.cpp
     Source/SettingsPanel.cpp
+    Source/TreeView.cpp
+    Source/ExplainView.cpp
+    Source/ai/PatchExplainer.cpp
     Source/SynthPanel.cpp
     Source/ModulatorsPanel.cpp
     Source/LabPanel.cpp

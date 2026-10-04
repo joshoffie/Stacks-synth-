@@ -1,4 +1,5 @@
 #include "LibraryPanel.h"
+#include <map>
 #include "Controls.h"
 
 namespace stacks
@@ -25,6 +26,7 @@ public:
                 description = p->description;
                 category = p->category;
                 favourite = p->favourite;
+                tags = p->tags;
             }
             heartButton.setButtonText (heart());
             heartButton.setTitle ("Favourite " + name);
@@ -99,6 +101,20 @@ public:
             g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
             g.drawText (category.toUpperCase(), title.withTrimmedLeft (6), juce::Justification::centredLeft, true);
         }
+        // tags as small chips, right-aligned on the title row
+        float tx = (float) title.getRight();
+        g.setFont (juce::Font (juce::FontOptions (9.5f)));
+        for (int i = tags.size(); --i >= 0;)
+        {
+            const float w = (float) juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), tags[i]) + 10.0f;
+            tx -= w + 4.0f;
+            if (tx < (float) title.getX() + 70.0f) break;
+            juce::Rectangle<float> chip (tx, (float) title.getY() + 2.0f, w, 13.0f);
+            g.setColour (colours::panel.brighter (0.15f));
+            g.fillRoundedRectangle (chip, 6.5f);
+            g.setColour (colours::muted);
+            g.drawText (tags[i], chip.toNearestInt(), juce::Justification::centred, false);
+        }
         g.setColour (colours::muted);
         g.setFont (juce::Font (juce::FontOptions (11.0f)));
         g.drawText (description, area, juce::Justification::topLeft, true);
@@ -107,6 +123,7 @@ public:
     juce::File file;
     bool isFolder = false, favourite = false, loaded = false;
     juce::String name, description, category;
+    juce::StringArray tags;
     juce::TextButton heartButton, menuButton;
     std::function<void()> onOpen, onHeart, onMenu;
 };
@@ -226,9 +243,30 @@ void LibraryPanel::confirmDelete (const juce::File& file)
                                        });
 }
 
+void LibraryPanel::editTags (const juce::File& file)
+{
+    auto current = Patch::fromJson (file.loadFileAsString());
+    auto* w = new juce::AlertWindow ("Tags", "Words a producer would search for, separated by commas.", juce::MessageBoxIconType::NoIcon);
+    w->addTextEditor ("tags", current ? current->tags.joinIntoString (", ") : juce::String(), "Tags");
+    w->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([this, w, file] (int result)
+    {
+        if (result != 1) return;
+        juce::StringArray tags;
+        tags.addTokens (w->getTextEditorContents ("tags").toLowerCase(), ",", "");
+        tags.trim();
+        tags.removeEmptyStrings();
+        tags.removeDuplicates (true);
+        processor.setFileTags (file, tags);
+        refresh();
+    }), true);
+}
+
 void LibraryPanel::showMenuFor (const juce::File& file)
 {
     juce::PopupMenu menu;
+    menu.addItem ("Edit tags...", [this, file] { editTags (file); });
     juce::PopupMenu moveTo;
     const auto root = StacksAudioProcessor::libraryRoot();
     std::vector<juce::File> folders { root };
@@ -271,10 +309,38 @@ void LibraryPanel::refresh()
     auto files = folder.findChildFiles (juce::File::findFiles, false, "*.json");
     files.sort();
     const auto loadedPath = processor.currentPatch().filePath;
+
+    // Tag chips for this folder: the most common tags, click one to filter.
+    std::map<juce::String, int> counts;
+    std::vector<std::unique_ptr<Row>> patchRows;
     for (const auto& f : files)
     {
         auto row = std::make_unique<Row> (f, false);
+        for (const auto& t : row->tags) ++counts[t];
+        patchRows.push_back (std::move (row));
+    }
+    std::vector<std::pair<juce::String, int>> ranked (counts.begin(), counts.end());
+    std::sort (ranked.begin(), ranked.end(), [] (const auto& a, const auto& b) { return a.second != b.second ? a.second > b.second : a.first < b.first; });
+    tagButtons.clear();
+    if (activeTag.isNotEmpty() && counts.find (activeTag) == counts.end()) activeTag.clear();
+    for (size_t i = 0; i < ranked.size() && i < 8; ++i)
+    {
+        auto b = std::make_unique<juce::TextButton> (ranked[i].first);
+        b->setClickingTogglesState (false);
+        b->setToggleState (ranked[i].first == activeTag, juce::dontSendNotification);
+        b->setTooltip ("Show only presets tagged '" + ranked[i].first + "' (" + juce::String (ranked[i].second) + ")");
+        const auto tag = ranked[i].first;
+        b->onClick = [this, tag] { activeTag = activeTag == tag ? juce::String() : tag; refresh(); };
+        addAndMakeVisible (*b);
+        tagButtons.push_back (std::move (b));
+    }
+
+    for (auto& row : patchRows)
+    {
+        const auto f = row->file;
         if (showFavouritesOnly && ! row->favourite)
+            continue;
+        if (activeTag.isNotEmpty() && ! row->tags.contains (activeTag))
             continue;
         row->setLoaded (loadedPath == f.getFullPathName());
         row->onOpen  = [this, f] { processor.loadLibraryPatch (f); refresh(); };
@@ -304,7 +370,19 @@ void LibraryPanel::resized()
     favouritesOnly.setBounds (top.removeFromRight (28));
     top.removeFromRight (4);
     pathLabel.setBounds (top);
-    r.removeFromTop (6);
+    r.removeFromTop (4);
+    if (! tagButtons.empty())
+    {
+        auto chips = r.removeFromTop (20);
+        for (auto& b : tagButtons)
+        {
+            const int w = juce::jmin (110, juce::GlyphArrangement::getStringWidthInt (juce::Font (juce::FontOptions (11.0f)), b->getButtonText()) + 18);
+            if (chips.getWidth() < w) break;
+            b->setBounds (chips.removeFromLeft (w).reduced (1, 1));
+            chips.removeFromLeft (3);
+        }
+        r.removeFromTop (4);
+    }
     viewport.setBounds (r);
     emptyLabel.setBounds (r.reduced (10, 20));
 

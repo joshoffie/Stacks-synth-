@@ -5,6 +5,8 @@
 #include "PluginProcessor.h"
 #include "LibraryPanel.h"
 #include "GardenView.h"
+#include "TreeView.h"
+#include "ExplainView.h"
 
 namespace stacks
 {
@@ -86,7 +88,7 @@ private:
     void refresh();
     void refreshNowPlaying();
     void layoutCards();
-    enum class View { garden, ideas, library };
+    enum class View { garden, tree, ideas, library, explain };
     void showView (View);
     void savePresetDialog (bool markFavourite = false);   // folder + name; the favourite flavour also sets the heart
 
@@ -99,10 +101,13 @@ private:
     juce::ToggleButton designWavesToggle { "Design wavetables" };
     juce::TextButton favouriteButton;
     juce::TextButton newBatchButton { "Generate" }, evolveButton { "Evolve" }, backButton { "<" };
-    juce::TextButton gardenTab { "GARDEN" }, ideasTab { "LIST" }, libraryTab { "LIBRARY" };
+    juce::TextButton gardenTab { "GARDEN" }, treeTab { "TREE" }, ideasTab { "LIST" }, libraryTab { "LIBRARY" }, explainTab { "EXPLAIN" };
     View view = View::garden;
     LibraryPanel library;
     GardenView garden;
+    FamilyTree tree;
+    juce::Viewport treeViewport;
+    ExplainView explain;
 
     juce::Viewport viewport;
     juce::Component cardList;

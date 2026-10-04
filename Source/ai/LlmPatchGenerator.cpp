@@ -389,7 +389,7 @@ juce::String LlmPatchGenerator::systemPrompt (bool designWaves)
       << "Pitch is only modulated for vibrato (Sine LFO, amount up to 0.03) or an attack pitch drop (Mod Env with menv_sustain 0, amount up to 0.35); never Velocity, Key or Random to Pitch.\n"
       << "Avoid filter_res above 0.8 together with filter_drive above 4, and aenv_attack above 3.\n\n"
       << "Reply with JSON only, no prose. Shape (angle brackets are placeholders for your own choices, never copy them):\n"
-      << "{\"patches\":[{\"name\":\"<two words>\",\"category\":\"<Pad|Pluck|Bass|Keys|Lead|Bell|Texture|Drone>\",\"description\":\"<one vivid sentence about how it sounds>\",\"parent\":<1>,"
+      << "{\"patches\":[{\"name\":\"<two words>\",\"category\":\"<Pad|Pluck|Bass|Keys|Lead|Bell|Texture|Drone>\",\"tags\":[\"<word>\",\"<word>\",\"<word>\"],\"description\":\"<one vivid sentence about how it sounds>\",\"parent\":<1>,"
       << "\"params\":{\"oscA_wave\":\"<wave>\",\"oscA_morph\":<0-1>,\"oscA_level\":<0-1>,"
       << "\"oscB_wave\":\"<wave>\",\"oscB_coarse\":<semitones>,\"oscB_level\":<0-1>,\"fm_amount\":<0-1>,\"sub_level\":<0-1>,"
       << "\"filter_type\":\"<type>\",\"filter_cutoff\":<Hz>,\"filter_res\":<0-1>,\"filter_env\":<-5..5>,\"fenv_decay\":<seconds>,\"fenv_sustain\":<0-1>,"
@@ -401,7 +401,7 @@ juce::String LlmPatchGenerator::systemPrompt (bool designWaves)
     if (designWaves)
         s << ",\"waveA\":{\"name\":\"<two words>\",\"tail\":<0-9>,\"spectra\":[[<16 digits>],[<16 digits>],[<16 digits>]]}";
     s << "}]}\n"
-      << "category is one of Pad, Pluck, Bass, Keys, Lead, Bell, Texture, Drone. "
+      << "category is one of Pad, Pluck, Bass, Keys, Lead, Bell, Texture, Drone. tags are three lowercase words a producer would search for (mood, texture, use: warm, analog, intro). "
       << "params always starts with these core settings in this exact order: " << juce::StringArray (coreParamIds().data(), (int) coreParamIds().size()).joinIntoString (", ")
       << ", then connection 1 (Velocity, Key, Mod Wheel, Aftertouch, Filter Env, Mod Env or Random), then connection 2 (LFO 1 or LFO 2, with its shape, rate and sync), then any extra settings that define the sound "
       << "(more connections, oscA_coarse, noise, chorus and delay, effect details, glide, filter drive...). Every parameter you omit keeps its base value. ";
@@ -489,6 +489,7 @@ juce::String LlmPatchGenerator::grammar (int patchCount, bool designWaves)
         g << " (" << lit (",") << " patch){" << (patchCount - 1) << "}";
     g << " " << lit ("]}") << "\n"
       << "patch ::= " << lit ("{\"name\":") << " name " << lit (",\"category\":") << " category "
+      << lit (",\"tags\":[") << " tag " << lit (",") << " tag " << lit (",") << " tag " << lit ("]")
       << lit (",\"description\":") << " desc " << lit (",\"parent\":") << " int " << lit (",\"params\":{") << " params " << lit ("}")
       << (designWaves ? " " + lit (",\"waveA\":") + " wave (" + lit (",\"waveB\":") + " wave)?" : juce::String())
       << " " << lit ("}") << "\n"
@@ -599,6 +600,7 @@ juce::String LlmPatchGenerator::grammar (int patchCount, bool designWaves)
         categories.add (lit (juce::String ("\"") + c + "\""));
     g << "category ::= " << categories.joinIntoString (" | ") << "\n"
       << "name ::= \"\\\"\" nchar{2,30} \"\\\"\"\n"
+      << "tag ::= \"\\\"\" [a-z] [a-z0-9 -]{1,13} \"\\\"\"\n"
       << "desc ::= \"\\\"\" dchar{10,220} \"\\\"\"\n"
       << "nchar ::= [A-Za-z0-9 '&-]\n"
       << "dchar ::= [^\"\\\\\\x00-\\x1F]\n"
@@ -755,6 +757,9 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
 
         patch->set (P::master_gain, -6.0f);
         patch->origin = "AI";
+        patch->prompt = req.hint.trim();
+        patch->parentName = req.parents.empty() ? juce::String() : base->name;
+        if (patch->tags.isEmpty()) patch->tags = autoTags (*patch);
         for (const auto& parent : req.parents)   // the model copied the parent's blurb: describe the child instead
             if (patch->description.length() > 20 && parent.description.startsWithIgnoreCase (patch->description))
                 patch->description.clear();
@@ -795,7 +800,7 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
         }
         int keys = 0;
         for (size_t i = 0; (i = obj.find ("\":", i)) != std::string::npos; ++i) ++keys;
-        const int params = juce::jmax (0, keys - 5);
+        const int params = juce::jmax (0, keys - 6);
         const float fraction = juce::jlimit (0.03f, 0.96f, 0.08f + (float) params / 20.0f);
         juce::String detail = "Writing patch " + juce::String (done + 1) + " of " + juce::String (req.count);
         if (name.isNotEmpty()) detail << ":  \"" << name << "\"";

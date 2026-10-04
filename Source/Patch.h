@@ -25,6 +25,9 @@ struct Patch
     std::array<juce::String, kNumLfos> lfoShapes; // drawn LFO shapes as point JSON, empty = none
     std::array<juce::String, 4> userWaves;        // file names of the imported wavetables in User 1-4
     std::array<WaveSpec, 2> waves;                // designed tables behind "Custom" for osc A and osc B
+    juce::StringArray tags;                // lowercase words a producer would search for
+    juce::String parentName;               // the sound this one grew from (empty for fresh ideas)
+    juce::String prompt;                   // the direction it was designed to
     juce::String filePath;                 // library file this patch is saved as (not part of the JSON)
     bool favourite = false;                // the heart
 
@@ -60,6 +63,12 @@ struct Patch
 // octaves, an audible oscillator B only at octaves (classic FM ratios are
 // allowed when B is a silent modulator), fine detune and pitch-LFO depth capped.
 void keepPatchInTune (Patch&);
+
+// Tags from the sound itself (category, dark/bright, plucky, wide, moving...).
+juce::StringArray autoTags (const Patch&);
+
+// Plain-words tips: what the main knobs do for this sound and what to try. Instant, no model.
+juce::String patchTips (const Patch&);
 
 // A short, human-readable account of how a patch is built
 // ("Saw + Pulse(-12), 4-voice unison, LP24 @ 1.2 kHz, slow attack, big reverb").

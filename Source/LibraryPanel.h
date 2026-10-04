@@ -30,6 +30,9 @@ private:
     juce::Label pathLabel, emptyLabel;
     juce::TextButton upButton { "<" }, newFolderButton { "New folder" }, revealButton { "Finder" }, favouritesOnly, saveHereButton { "Save here" };
     bool showFavouritesOnly = false;
+    juce::String activeTag;
+    std::vector<std::unique_ptr<juce::TextButton>> tagButtons;
+    void editTags (const juce::File& file);
     juce::Viewport viewport;
     juce::Component list;
     std::vector<std::unique_ptr<Row>> rows;
