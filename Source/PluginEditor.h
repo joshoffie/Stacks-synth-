@@ -11,6 +11,7 @@ namespace stacks
 {
 
 class StacksAudioProcessorEditor : public juce::AudioProcessorEditor,
+                                    public juce::DragAndDropContainer,
                                     private juce::ChangeListener
 {
 public:

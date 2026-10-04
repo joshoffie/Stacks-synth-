@@ -65,9 +65,19 @@ right-click resets), shape presets, rate or tempo sync, phase, and Free /
 Note (retrigger) mode. To route a modulator: press **Assign >**, then click any
 knob - including effect knobs. The knob shows a ring in the modulator's colour;
 the modulator's tab lists its targets with depth sliders and an × to remove.
-"Pitch / Amp / Pan" adds the targets that aren't knobs.
+"Pitch / Amp / Pan" adds the targets that aren't knobs. You can also drag a
+modulator's tab straight onto a knob, and drag a knob's ring up or down to
+change that connection's depth.
 
 ## The AI Lab
+
+The **GARDEN** tab shows the loop as a plant: the sound you're playing is the
+seed in the middle; AI ideas grow above it, random variations below. Click a
+leaf to hear it, drag it outward for wilder children, double-click to plant it
+(it becomes the seed and a new generation grows), right-click for save/breed.
+Double-click the seed to evolve what you're hearing; right-click it for fresh
+ideas. The **LIST** tab is the same batch with full descriptions. Every finished
+generation is also saved under `Library/Generations/Gen N - HH.MM`.
 
 1. **Fresh ideas** — ten new patches from the direction text alone. **Evolve** —
    ten descendants of your ♥ favourites (or of the sound you're playing, if you

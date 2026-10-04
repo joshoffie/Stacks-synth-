@@ -82,6 +82,7 @@ public:
 
     void requestNewBatch (const juce::String& hint, float variation);
     void requestEvolve (const juce::String& hint, float variation);
+    void requestEvolveFrom (const Patch& parent, const juce::String& hint, float variation); // "plant" one candidate
     void cancelGeneration();
     void goBackGeneration();
     void audition (int candidateIndex);
@@ -127,8 +128,10 @@ public:
     int addModulation (int source, int target, float amount = 0.3f);
     void clearModulation (int slot);
     int findModulation (int source, int target) const;
+    struct Modulation { int slot, source; float amount; };
     std::vector<int> modulationsFor (int source) const;      // slots using this source
-    std::vector<std::pair<int, float>> modulationsOnParam (int paramIndex) const; // (source, amount)
+    std::vector<Modulation> modulationsOnParam (int paramIndex) const;
+    void setModulationAmount (int slot, float amount);       // from a ring drag
 
     // Imported wavetables ("User 1-4")
     static juce::File wavetablesDirectory();
@@ -146,6 +149,7 @@ public:
 
 private:
     void startGeneration (GenerationRequest);
+    void autoSaveGeneration();                             // every finished batch lands in Library/Generations
     void addCandidate (int token, Patch);
     void setStatus (int token, const juce::String&);
     void finishGeneration (int token);

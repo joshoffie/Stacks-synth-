@@ -244,6 +244,8 @@ SynthPanel::SynthPanel (StacksAudioProcessor& p) : processor (p), apvts (p.apvts
             auto knob = std::make_unique<ParamKnob> (apvts, spec);
             knob->setAccent (section->colour);
             knob->onAssignClick = [this] (int paramIndex) { knobClicked (paramIndex); };
+            knob->onModulatorDropped = [this] (int source, int paramIndex) { processor.addModulation (source, modTargetForParam (paramIndex)); };
+            knob->onRingDrag = [this] (int slot, float amount) { processor.setModulationAmount (slot, amount); };
             knobs.push_back (knob.get());
             control = std::move (knob);
         }
@@ -304,7 +306,12 @@ void SynthPanel::handleAsyncUpdate()
 void SynthPanel::refreshModulationDisplay()
 {
     for (auto* knob : knobs)
-        knob->setModulations (processor.modulationsOnParam (knob->parameterIndex()));
+    {
+        std::vector<KnobModulation> mods;
+        for (const auto& m : processor.modulationsOnParam (knob->parameterIndex()))
+            mods.push_back ({ m.slot, m.source, m.amount });
+        knob->setModulations (std::move (mods));
+    }
     if (modulators)
         modulators->refreshConnections();
 }

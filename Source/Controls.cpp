@@ -23,6 +23,62 @@ juce::Colour modSourceColour (int source)
 }
 
 //==============================================================================
+// Sits on top of the slider and only answers to the mouse within a ring band;
+// everywhere else it is transparent, so the knob still turns normally.
+class ParamKnob::RingOverlay : public juce::Component
+{
+public:
+    explicit RingOverlay (ParamKnob& k) : knob (k) { setInterceptsMouseClicks (true, false); }
+
+    bool hitTest (int x, int y) override
+    {
+        return ringAt ({ (float) x, (float) y }) >= 0;
+    }
+
+    int ringAt (juce::Point<float> p) const
+    {
+        if (knob.modulations.empty())
+            return -1;
+        const auto b = knob.knobBounds();
+        const auto local = p + getPosition().toFloat();          // overlay space -> knob space
+        const float d = local.getDistanceFrom (b.getCentre());
+        for (int i = 0; i < (int) knob.modulations.size(); ++i)
+            if (std::abs (d - knob.ringRadiusFor (i)) <= 3.5f)
+                return i;
+        return -1;
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        active = ringAt (e.position);
+        if (active >= 0)
+        {
+            startAmount = knob.modulations[(size_t) active].amount;
+            setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
+        }
+    }
+
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (active < 0 || active >= (int) knob.modulations.size() || ! knob.onRingDrag)
+            return;
+        const float amount = juce::jlimit (-1.0f, 1.0f, startAmount - (float) e.getDistanceFromDragStartY() / 150.0f);
+        knob.onRingDrag (knob.modulations[(size_t) active].slot, amount);
+    }
+
+    void mouseUp (const juce::MouseEvent&) override { active = -1; setMouseCursor (juce::MouseCursor::NormalCursor); }
+    void mouseMove (const juce::MouseEvent& e) override
+    {
+        setMouseCursor (ringAt (e.position) >= 0 ? juce::MouseCursor::UpDownResizeCursor : juce::MouseCursor::NormalCursor);
+    }
+
+private:
+    ParamKnob& knob;
+    int active = -1;
+    float startAmount = 0.0f;
+};
+
+//==============================================================================
 ParamKnob::ParamKnob (juce::AudioProcessorValueTreeState& apvts, const ParamSpec& spec, bool isCompact)
     : paramIndex (paramIndexForId (spec.id)), compact (isCompact)
 {
@@ -44,6 +100,53 @@ ParamKnob::ParamKnob (juce::AudioProcessorValueTreeState& apvts, const ParamSpec
     addAndMakeVisible (slider);
 
     attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (apvts, spec.id, slider);
+
+    overlay = std::make_unique<RingOverlay> (*this);
+    addAndMakeVisible (*overlay);
+    overlay->toFront (false);
+}
+
+ParamKnob::~ParamKnob() = default;
+
+juce::Rectangle<float> ParamKnob::knobBounds() const
+{
+    auto area = slider.getBounds();
+    if (! compact)
+        area.removeFromBottom (15);
+    const auto bounds = area.toFloat().reduced (10.0f);
+    const float radius = juce::jmin (bounds.getWidth(), bounds.getHeight()) * 0.5f;
+    return juce::Rectangle<float> (2.0f * radius, 2.0f * radius).withCentre (bounds.getCentre());
+}
+
+float ParamKnob::ringRadiusFor (int which) const
+{
+    return knobBounds().getWidth() * 0.5f + 2.5f + 3.2f * (float) which;
+}
+
+bool ParamKnob::isInterestedInDragSource (const SourceDetails& details)
+{
+    return details.description.isInt() && isModulatableParam (paramIndex);
+}
+
+void ParamKnob::itemDragEnter (const SourceDetails& details)
+{
+    dragOver = true;
+    dragColour = modSourceColour ((int) details.description);
+    repaint();
+}
+
+void ParamKnob::itemDragExit (const SourceDetails&)
+{
+    dragOver = false;
+    repaint();
+}
+
+void ParamKnob::itemDropped (const SourceDetails& details)
+{
+    dragOver = false;
+    repaint();
+    if (onModulatorDropped)
+        onModulatorDropped ((int) details.description, paramIndex);
 }
 
 void ParamKnob::setAccent (juce::Colour c)
@@ -51,9 +154,9 @@ void ParamKnob::setAccent (juce::Colour c)
     slider.setColour (juce::Slider::rotarySliderFillColourId, c);
 }
 
-void ParamKnob::setModulations (std::vector<std::pair<int, float>> sourceAndAmount)
+void ParamKnob::setModulations (std::vector<KnobModulation> mods)
 {
-    modulations = std::move (sourceAndAmount);
+    modulations = std::move (mods);
     repaint();
 }
 
@@ -98,15 +201,17 @@ void ParamKnob::resized()
     auto r = getLocalBounds();
     label.setBounds (r.removeFromTop (14));
     slider.setBounds (r);
+    if (overlay) overlay->setBounds (r);
 }
 
 void ParamKnob::paint (juce::Graphics& g)
 {
-    if (assignMode)
+    if (assignMode || dragOver)
     {
-        g.setColour (assignColour.withAlpha (0.18f));
+        const auto c = dragOver ? dragColour : assignColour;
+        g.setColour (c.withAlpha (dragOver ? 0.3f : 0.18f));
         g.fillRoundedRectangle (getLocalBounds().toFloat().reduced (1.0f), 5.0f);
-        g.setColour (assignColour);
+        g.setColour (c);
         g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (1.0f), 5.0f, 1.5f);
     }
 
@@ -114,19 +219,18 @@ void ParamKnob::paint (juce::Graphics& g)
         return;
 
     // Mirror LookAndFeel_V4's rotary geometry so the rings sit just outside the knob arc.
-    auto area = slider.getBounds();
-    if (! compact)
-        area.removeFromBottom (15);
-    const auto bounds = area.toFloat().reduced (10.0f);
-    const float radius = juce::jmin (bounds.getWidth(), bounds.getHeight()) * 0.5f;
-    const auto centre = bounds.getCentre();
+    const auto kb = knobBounds();
+    const auto centre = kb.getCentre();
     const auto rotary = slider.getRotaryParameters();
     const float span = rotary.endAngleRadians - rotary.startAngleRadians;
     const float v0 = (float) slider.valueToProportionOfLength (slider.getValue());
 
-    float ringRadius = radius + 2.5f;
-    for (const auto& [source, amount] : modulations)
+    int which = 0;
+    for (const auto& m : modulations)
     {
+        const int source = m.source;
+        const float amount = m.amount;
+        const float ringRadius = ringRadiusFor (which++);
         float from = v0, to = v0;
         if (isBipolarSource (source)) { from = v0 - std::abs (amount); to = v0 + std::abs (amount); }
         else                          { to = v0 + amount; }
@@ -143,7 +247,6 @@ void ParamKnob::paint (juce::Graphics& g)
         // a dot at the knob's own value, so the ring reads as "around here"
         const float a = rotary.startAngleRadians + v0 * span;
         g.fillEllipse (centre.x + ringRadius * std::sin (a) - 1.8f, centre.y - ringRadius * std::cos (a) - 1.8f, 3.6f, 3.6f);
-        ringRadius += 3.2f;
     }
 }
 

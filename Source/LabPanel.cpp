@@ -130,7 +130,7 @@ void SectionHeader::paint (juce::Graphics& g)
 }
 
 //==============================================================================
-LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p)
+LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garden (p)
 {
     header.setFont (juce::Font (juce::FontOptions (15.0f, juce::Font::bold)));
     header.setColour (juce::Label::textColourId, colours::text);
@@ -215,15 +215,30 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p)
     viewport.setScrollBarsShown (true, false);
     addAndMakeVisible (viewport);
 
-    for (auto* tab : { &ideasTab, &libraryTab })
+    for (auto* tab : { &gardenTab, &ideasTab, &libraryTab })
     {
         tab->setClickingTogglesState (false);
         tab->setColour (juce::TextButton::buttonOnColourId, colours::accentDim);
         tab->setColour (juce::TextButton::textColourOnId, colours::text);
         addAndMakeVisible (*tab);
     }
-    ideasTab.onClick = [this] { showLibrary (false); };
-    libraryTab.onClick = [this] { showLibrary (true); };
+    gardenTab.setTooltip ("The breeding view: your sound is the seed, candidates are leaves");
+    gardenTab.onClick = [this] { showView (View::garden); };
+    ideasTab.setTooltip ("The same candidates as a list with descriptions");
+    ideasTab.onClick = [this] { showView (View::ideas); };
+    libraryTab.onClick = [this] { showView (View::library); };
+
+    garden.onEvolve = [this] { processor.requestEvolve (hint.getText(), (float) variation.getValue()); };
+    garden.onFresh = [this] { processor.requestNewBatch (hint.getText(), (float) variation.getValue()); };
+    garden.onEvolveFrom = [this] (int index)
+    {
+        const auto& lab = processor.lab();
+        if (index >= 0 && index < (int) lab.candidates.size())
+            processor.requestEvolveFrom (lab.candidates[(size_t) index], hint.getText(), (float) variation.getValue());
+    };
+    garden.getVariation = [this] { return (float) variation.getValue(); };
+    garden.setVariation = [this] (float v) { variation.setValue (v, juce::sendNotificationSync); };
+    addChildComponent (garden);
     libraryTab.setTooltip (juce::String::fromUTF8 ("Your saved patches, in folders. The \xe2\x99\xa5 on any card saves it into the open folder."));
     addChildComponent (library);
 
@@ -235,6 +250,7 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p)
 
     processor.labBroadcaster.addChangeListener (this);
     rebuildEngineMenu();
+    showView (View::garden);
     refresh();
     startTimer (1000);
 }
@@ -286,7 +302,9 @@ void LabPanel::resized()
     r.removeFromTop (8);
 
     auto tabs = r.removeFromTop (24);
-    ideasTab.setBounds (tabs.removeFromLeft (tabs.getWidth() / 2).reduced (1, 0));
+    const int tabW = tabs.getWidth() / 3;
+    gardenTab.setBounds (tabs.removeFromLeft (tabW).reduced (1, 0));
+    ideasTab.setBounds (tabs.removeFromLeft (tabW).reduced (1, 0));
     libraryTab.setBounds (tabs.reduced (1, 0));
     r.removeFromTop (6);
 
@@ -295,6 +313,7 @@ void LabPanel::resized()
 
     viewport.setBounds (r);
     library.setBounds (r);
+    garden.setBounds (r);
 
     // Favourite chips flow left to right.
     int x = 0;
@@ -535,10 +554,11 @@ void LabPanel::refresh()
 
     shownNowPlaying.clear();
     refreshNowPlaying();
-    ideasTab.setToggleState (! showingLibrary, juce::dontSendNotification);
-    libraryTab.setToggleState (showingLibrary, juce::dontSendNotification);
-    if (showingLibrary)
-        library.refresh();
+    gardenTab.setToggleState (view == View::garden, juce::dontSendNotification);
+    ideasTab.setToggleState (view == View::ideas, juce::dontSendNotification);
+    libraryTab.setToggleState (view == View::library, juce::dontSendNotification);
+    if (view == View::library) library.refresh();
+    garden.refresh();
 
     // A new batch starts at the top of the list.
     if (lab.generation != shownGeneration)
@@ -554,15 +574,17 @@ void LabPanel::refresh()
     resized();
 }
 
-void LabPanel::showLibrary (bool show)
+void LabPanel::showView (View v)
 {
-    showingLibrary = show;
-    ideasTab.setToggleState (! show, juce::dontSendNotification);
-    libraryTab.setToggleState (show, juce::dontSendNotification);
-    viewport.setVisible (! show);
-    library.setVisible (show);
-    if (show)
-        library.refresh();
+    view = v;
+    gardenTab.setToggleState (v == View::garden, juce::dontSendNotification);
+    ideasTab.setToggleState (v == View::ideas, juce::dontSendNotification);
+    libraryTab.setToggleState (v == View::library, juce::dontSendNotification);
+    garden.setVisible (v == View::garden);
+    viewport.setVisible (v == View::ideas);
+    library.setVisible (v == View::library);
+    if (v == View::library) library.refresh();
+    if (v == View::garden)  garden.refresh();
 }
 
 } // namespace stacks

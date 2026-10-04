@@ -180,6 +180,8 @@ ModulatorsPanel::ModulatorsPanel (StacksAudioProcessor& p) : processor (p)
     {
         auto& b = tabButtons[t];
         b.setButtonText (names[t]);
+        b.source = sourceForTab (t);
+        b.setTooltip (t == TabSources ? "Velocity, key, wheel, aftertouch, random" : "Click to edit. Drag onto any knob to connect it.");
         b.setClickingTogglesState (false);
         b.setColour (juce::TextButton::buttonOnColourId, modSourceColour (sourceForTab (t)).withAlpha (0.35f));
         b.setColour (juce::TextButton::textColourOnId, colours::text);

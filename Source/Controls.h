@@ -21,15 +21,21 @@ namespace colours
 // One colour per modulation source, used for rings, editors and tabs.
 juce::Colour modSourceColour (int source);
 
-// A labelled rotary knob bound to one parameter. Shows modulation rings and
-// can be clicked as a target while a modulator is being assigned.
-class ParamKnob : public juce::Component
+// One connection shown on a knob.
+struct KnobModulation { int slot, source; float amount; };
+
+// A labelled rotary knob bound to one parameter. Shows modulation rings (drag
+// a ring to change its depth), accepts a modulator dropped on it, and can be
+// clicked as a target while a modulator is being assigned.
+class ParamKnob : public juce::Component,
+                  public juce::DragAndDropTarget
 {
 public:
     // compact = no value read-out underneath (used in the header)
     ParamKnob (juce::AudioProcessorValueTreeState&, const ParamSpec&, bool compact = false);
+    ~ParamKnob() override;
     void setAccent (juce::Colour);
-    void setModulations (std::vector<std::pair<int, float>> sourceAndAmount); // repaints the rings
+    void setModulations (std::vector<KnobModulation>); // repaints the rings
     void setAssignMode (bool on, juce::Colour sourceColour);
     int parameterIndex() const { return paramIndex; }
 
@@ -38,16 +44,28 @@ public:
     void mouseDown (const juce::MouseEvent&) override;
     std::unique_ptr<juce::AccessibilityHandler> createAccessibilityHandler() override;
 
+    bool isInterestedInDragSource (const SourceDetails&) override;
+    void itemDragEnter (const SourceDetails&) override;
+    void itemDragExit (const SourceDetails&) override;
+    void itemDropped (const SourceDetails&) override;
+
     std::function<void (int paramIndex)> onAssignClick;
+    std::function<void (int source, int paramIndex)> onModulatorDropped;
+    std::function<void (int slot, float amount)> onRingDrag;
 
 private:
+    class RingOverlay;
+    juce::Rectangle<float> knobBounds() const;      // the rotary's own square
+    float ringRadiusFor (int which) const;
+
     juce::Label label;
     juce::Slider slider;
+    std::unique_ptr<RingOverlay> overlay;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
-    std::vector<std::pair<int, float>> modulations;
+    std::vector<KnobModulation> modulations;
     int paramIndex = -1;
-    bool compact = false, assignMode = false;
-    juce::Colour assignColour;
+    bool compact = false, assignMode = false, dragOver = false;
+    juce::Colour assignColour, dragColour;
 };
 
 // A labelled drop-down bound to one Choice parameter.

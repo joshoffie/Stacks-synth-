@@ -69,7 +69,8 @@ target_sources(Stacks PRIVATE
     Source/SynthPanel.cpp
     Source/ModulatorsPanel.cpp
     Source/LabPanel.cpp
-    Source/LibraryPanel.cpp)
+    Source/LibraryPanel.cpp
+    Source/GardenView.cpp)
 
 target_compile_definitions(Stacks PUBLIC
     JUCE_WEB_BROWSER=0

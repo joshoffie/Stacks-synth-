@@ -64,8 +64,28 @@ private:
     void showTab (int tab);
     void addVirtualTargetMenu();
 
+    // A tab you can also drag onto a knob to connect its modulator.
+    class DragTab : public juce::TextButton
+    {
+    public:
+        int source = 0;
+        void mouseDrag (const juce::MouseEvent& e) override
+        {
+            if (! dragging && e.getDistanceFromDragStart() > 6)
+                if (auto* container = juce::DragAndDropContainer::findParentDragContainerFor (this))
+                {
+                    dragging = true;
+                    container->startDragging (juce::var (source), this, juce::ScaledImage(), true);
+                }
+            juce::TextButton::mouseDrag (e);
+        }
+        void mouseUp (const juce::MouseEvent& e) override { dragging = false; juce::TextButton::mouseUp (e); }
+    private:
+        bool dragging = false;
+    };
+
     StacksAudioProcessor& processor;
-    juce::TextButton tabButtons[kNumTabs];
+    DragTab tabButtons[kNumTabs];
     int currentTab = TabLfo1;
     int assigningSource = -1;
 

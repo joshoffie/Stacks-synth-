@@ -4,6 +4,7 @@
 
 #include "PluginProcessor.h"
 #include "LibraryPanel.h"
+#include "GardenView.h"
 
 namespace stacks
 {
@@ -68,7 +69,8 @@ private:
     void layoutCards();
     void rebuildEngineMenu();
     void engineChosen();
-    void showLibrary (bool);
+    enum class View { garden, ideas, library };
+    void showView (View);
 
     StacksAudioProcessor& processor;
 
@@ -78,9 +80,10 @@ private:
     juce::TextEditor hint;
     juce::Slider variation;
     juce::TextButton newBatchButton { "Fresh ideas" }, evolveButton { "Evolve" }, backButton { "<" };
-    juce::TextButton ideasTab { "IDEAS" }, libraryTab { "LIBRARY" };
-    bool showingLibrary = false;
+    juce::TextButton gardenTab { "GARDEN" }, ideasTab { "LIST" }, libraryTab { "LIBRARY" };
+    View view = View::garden;
     LibraryPanel library;
+    GardenView garden;
 
     juce::Viewport viewport;
     juce::Component cardList;

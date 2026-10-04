@@ -433,9 +433,9 @@ std::vector<int> StacksAudioProcessor::modulationsFor (int source) const
     return slots;
 }
 
-std::vector<std::pair<int, float>> StacksAudioProcessor::modulationsOnParam (int paramIndex) const
+std::vector<StacksAudioProcessor::Modulation> StacksAudioProcessor::modulationsOnParam (int paramIndex) const
 {
-    std::vector<std::pair<int, float>> out;
+    std::vector<Modulation> out;
     const int target = modTargetForParam (paramIndex);
     if (target <= 0)
         return out;
@@ -443,9 +443,32 @@ std::vector<std::pair<int, float>> StacksAudioProcessor::modulationsOnParam (int
     {
         const int src = (int) rawParams[(size_t) modSourceParam (i)]->load();
         if (src != SrcOff && (int) rawParams[(size_t) modDestParam (i)]->load() == target)
-            out.emplace_back (src, rawParams[(size_t) modAmountParam (i)]->load());
+            out.push_back ({ i, src, rawParams[(size_t) modAmountParam (i)]->load() });
     }
     return out;
+}
+
+void StacksAudioProcessor::setModulationAmount (int slot, float amount)
+{
+    if (slot < 0 || slot >= kNumModSlots)
+        return;
+    if (auto* p = apvts.getParameter (paramId (modAmountParam (slot))))
+        p->setValueNotifyingHost (p->convertTo0to1 (juce::jlimit (-1.0f, 1.0f, amount)));
+}
+
+// Nothing a generation produced is ever lost: Library/Generations/Gen N - HH.MM
+void StacksAudioProcessor::autoSaveGeneration()
+{
+    if (labState.candidates.empty())
+        return;
+    const auto stamp = juce::Time::getCurrentTime().formatted ("%H.%M");
+    auto folder = libraryRoot().getChildFile ("Generations").getChildFile ("Gen " + juce::String (labState.generation) + " - " + stamp);
+    folder.createDirectory();
+    for (const auto& c : labState.candidates)
+    {
+        auto file = folder.getNonexistentChildFile (juce::File::createLegalFileName (c.name.isEmpty() ? "Patch" : c.name), ".json", false);
+        file.replaceWithText (c.toJson());
+    }
 }
 
 //==============================================================================
@@ -700,6 +723,18 @@ void StacksAudioProcessor::requestEvolve (const juce::String& hint, float variat
     startGeneration (std::move (req));
 }
 
+void StacksAudioProcessor::requestEvolveFrom (const Patch& parent, const juce::String& hint, float variation)
+{
+    GenerationRequest req;
+    req.hint = hint;
+    req.variation = variation;
+    req.count = kBatchSize;
+    req.generation = labState.generation + 1;
+    req.parents = { parent };
+    applyPatch (parent); // the planted leaf becomes the seed you hear
+    startGeneration (std::move (req));
+}
+
 void StacksAudioProcessor::cancelGeneration()
 {
     if (labState.generating)
@@ -824,8 +859,11 @@ void StacksAudioProcessor::finishGeneration (int token)
     if (labState.candidates.empty())
         labState.status = wasCancelled ? "Stopped" : "Generation failed";
     else
+    {
         labState.status = "Generation " + juce::String (labState.generation) + kDot + engineName()
                         + (wasCancelled ? " (stopped early)" : "");
+        autoSaveGeneration();
+    }
 
     labBroadcaster.sendChangeMessage();
 }
