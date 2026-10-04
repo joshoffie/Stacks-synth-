@@ -52,6 +52,11 @@ juce_add_plugin(Stacks
 
 juce_generate_juce_header(Stacks)
 
+# The factory presets travel inside every bundle and are installed into the library on first run.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Factory")
+    juce_add_bundle_resources_directory(Stacks Factory)
+endif()
+
 target_sources(Stacks PRIVATE
     Source/Parameters.cpp
     Source/Wavetable.cpp
@@ -105,6 +110,7 @@ target_sources(StacksTests PRIVATE
     Source/Wavetable.cpp
     Source/Patch.cpp
     Source/PatchGenerator.cpp
+    Source/Arpeggiator.cpp
     Source/ai/LlmPatchGenerator.cpp
     Source/ai/LlamaBackend.cpp
     Source/ai/OllamaBackend.cpp

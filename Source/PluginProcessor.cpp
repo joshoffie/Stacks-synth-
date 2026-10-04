@@ -63,6 +63,7 @@ StacksAudioProcessor::StacksAudioProcessor()
     voiceContext.bank = &*bank;
     voiceContext.user = &userWaves;
     paramRange (0);   // builds the range table now, not on the audio thread
+    installFactoryPresets();
     for (auto* param : getParameters())
         param->addListener (this);
     voiceContext.params = &params;
@@ -1416,6 +1417,19 @@ juce::File StacksAudioProcessor::libraryRoot()
 juce::File StacksAudioProcessor::historyRoot()
 {
     return ModelManager::appDataDirectory().getChildFile ("history");
+}
+
+// The factory presets ship inside the bundle (Contents/Resources/Factory) and
+// are copied into the library the first time, so they behave like any folder.
+static void installFactoryPresets()
+{
+    const auto target = StacksAudioProcessor::libraryRoot().getChildFile ("Factory");
+    if (target.isDirectory())
+        return;
+    const auto bundle = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getParentDirectory().getParentDirectory();
+    const auto source = bundle.getChildFile ("Resources").getChildFile ("Factory");
+    if (source.isDirectory())
+        source.copyDirectoryTo (target);
 }
 
 void StacksAudioProcessor::setLibraryFolder (const juce::File& folder)

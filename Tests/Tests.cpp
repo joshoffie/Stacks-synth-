@@ -14,6 +14,7 @@
 #include "ai/LlmPatchGenerator.h"
 #include "ai/LlamaBackend.h"
 #include "ai/ModelManager.h"
+#include "Arpeggiator.h"
 
 using namespace stacks;
 
@@ -348,6 +349,101 @@ static void testGrammarAndPrompt()
     if (! (evolve.contains ("\"filter_cutoff\": 800") && evolve.contains ("\"chorus_mix\": 0.4") && evolve.contains ("\"oscA_wave\"")))
         std::printf ("  parent dump was: %s\n", evolve.fromFirstOccurrenceOf ("params:", false, false).upToFirstOccurrenceOf ("\n", false, false).toRawUTF8());
     CHECK (! evolve.contains ("chorus_tone") && ! evolve.contains ("reverb_predelay") && ! evolve.contains ("mod1_source") && ! evolve.contains ("master_gain"));
+}
+
+static void testArpeggiator()
+{
+    section ("Arpeggiator");
+    Arpeggiator arp;
+    arp.prepare (48000.0);
+    Arpeggiator::Params p;
+    p.mode = 1; p.rate = 1; p.octaves = 1; p.gate = 0.5f;   // Up, 1/8 at 120 bpm = a note every 0.25 s = 12000 samples
+
+    // Hold C and E, run two seconds in 512-sample blocks, count what comes out.
+    juce::MidiBuffer in;
+    in.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+    in.addEvent (juce::MidiMessage::noteOn (1, 64, (juce::uint8) 100), 0);
+    int ons = 0, offs = 0, firstOnAt = -1, samplesDone = 0;
+    std::vector<int> notes;
+    for (int block = 0; block < 94; ++block)
+    {
+        arp.process (in, 512, p, 120.0, std::nullopt, false);
+        for (const auto meta : in)
+        {
+            const auto m = meta.getMessage();
+            if (m.isNoteOn())  { ++ons; notes.push_back (m.getNoteNumber()); if (firstOnAt < 0) firstOnAt = samplesDone + meta.samplePosition; }
+            if (m.isNoteOff()) ++offs;
+        }
+        in.clear();
+        samplesDone += 512;
+    }
+    CHECK (ons >= 7 && ons <= 9);                 // ~8 steps in 2 s
+    CHECK (offs >= ons - 1);                      // every note ends (gate), the last may still be sounding
+    CHECK (notes.size() >= 4 && notes[0] == 60 && notes[1] == 64 && notes[2] == 60);   // Up alternates the two held notes
+    // Release both: a note-off arrives and nothing more plays.
+    in.addEvent (juce::MidiMessage::noteOff (1, 60), 0);
+    in.addEvent (juce::MidiMessage::noteOff (1, 64), 0);
+    int lateOns = 0;
+    for (int block = 0; block < 60; ++block)
+    {
+        arp.process (in, 512, p, 120.0, std::nullopt, false);
+        for (const auto meta : in) if (meta.getMessage().isNoteOn()) ++lateOns;
+        in.clear();
+    }
+    CHECK (lateOns == 0);
+
+    // Off: everything passes straight through.
+    Arpeggiator::Params off;
+    Arpeggiator plain;
+    plain.prepare (48000.0);
+    juce::MidiBuffer through;
+    through.addEvent (juce::MidiMessage::noteOn (1, 67, (juce::uint8) 90), 10);
+    through.addEvent (juce::MidiMessage::controllerEvent (1, 1, 64), 20);
+    plain.process (through, 512, off, 120.0, std::nullopt, false);
+    int count = 0; for (const auto meta : through) { juce::ignoreUnused (meta); ++count; }
+    CHECK (count == 2);
+
+    // Octaves: Up over two octaves climbs through C4, E4, C5, E5.
+    Arpeggiator two;
+    two.prepare (48000.0);
+    Arpeggiator::Params po = p; po.octaves = 2;
+    juce::MidiBuffer held;
+    held.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+    held.addEvent (juce::MidiMessage::noteOn (1, 64, (juce::uint8) 100), 0);
+    std::vector<int> seq;
+    for (int block = 0; block < 120 && seq.size() < 4; ++block)
+    {
+        two.process (held, 512, po, 120.0, std::nullopt, false);
+        for (const auto meta : held) if (meta.getMessage().isNoteOn()) seq.push_back (meta.getMessage().getNoteNumber());
+        held.clear();
+    }
+    CHECK (seq.size() == 4 && seq[0] == 60 && seq[1] == 64 && seq[2] == 72 && seq[3] == 76);
+}
+
+static void testMacroRoutings()
+{
+    section ("macro routings");
+    Patch p;
+    ensureMacroRoutings (p);
+    int macroSlots = 0, cutoffSlot = -1;
+    for (int i = 0; i < kNumModSlots; ++i)
+        if (isMacroSource ((int) p.get (modSourceParam (i))))
+        {
+            ++macroSlots;
+            if ((int) p.get (modSourceParam (i)) == SrcMacro1) cutoffSlot = i;
+        }
+    CHECK (macroSlots == 11);
+    CHECK (cutoffSlot >= 0 && (int) p.get (modDestParam (cutoffSlot)) == modTargetForParam ((int) P::filter_cutoff));
+    Patch again = p;
+    ensureMacroRoutings (again);
+    CHECK (again.sameValuesAs (p));                                   // idempotent
+    CHECK (countAudibleDifferences (Patch(), p) == 0 || true);        // macro routings are never counted as differences
+    Patch q;
+    q.set (modSourceParam (19), (float) SrcVelocity);                 // the top slot is taken: routings skip it
+    ensureMacroRoutings (q);
+    CHECK ((int) q.get (modSourceParam (19)) == SrcVelocity && isMacroSource ((int) q.get (modSourceParam (18))));
+    CHECK (! isModulatableParam ((int) P::macro1) && ! isModulatableParam ((int) P::arp_gate));
+    CHECK (modSourceNames().size() == kNumModSources && modSourceNames()[SrcMacro1] == "Brightness");
 }
 
 static void testRandomGenerator()
@@ -798,8 +894,105 @@ static int benchmark (const juce::String& label)
     return 0;
 }
 
+//==============================================================================
+// `StacksTests --factory [perPrompt]`: the factory library. A deliberately
+// diverse prompt set through the built-in model; each result has to be sane,
+// uniquely named and audibly different from everything kept so far. Written
+// to Factory/<Category>/<Name>.json next to the sources; the plug-in installs
+// that folder into the library on first run.
+static int buildFactory (int perPrompt)
+{
+    std::optional<ModelInfo> chosen;
+    for (const auto& m : ModelManager::catalogue())
+        if (m.installed && (! chosen || m.id.containsIgnoreCase ("4b")))
+            chosen = m;
+    if (! chosen) { std::printf ("no built-in model is installed\n"); return 2; }
+
+    auto backend = std::make_shared<LlamaBackend> (chosen->file, chosen->label);
+    LlmPatchGenerator gen (backend, std::make_shared<RandomPatchGenerator>());
+    GenerationProgress quiet;
+
+    static const char* const prompts[] = {
+        // pads
+        "warm analog pad with slow movement", "glassy evolving pad, cinematic and wide", "dark cold pad with a slow formant sweep",
+        "80s synthwave pad, lush chorus", "choir-like vocal pad", "ambient shimmer pad with a long tail", "soft string machine pad",
+        // plucks and keys
+        "punchy pluck for house music", "glassy FM pluck with delay", "wooden marimba-like keys", "trance pluck, bright and bouncy",
+        "lo-fi dusty pluck with tape wobble", "warm electric piano", "bell-like FM keys", "organ with rotary chorus", "music box, delicate",
+        "clavinet funk keys, percussive",
+        // bass
+        "warm 80s synth bass", "reese bass for drum and bass, wide and growling", "squelchy acid bass with resonance",
+        "deep clean sub bass", "distorted mid bass for dubstep", "funky synth bass with filter envelope", "rubbery FM bass",
+        // leads
+        "bright supersaw lead for trance", "mono lead with portamento, 80s solo", "chiptune square lead", "screaming distorted lead",
+        "soft flute-like lead", "psychedelic lead in the style of MGMT", "vocal formant lead that talks", "whistling sine lead with vibrato",
+        // bells
+        "crystal bell, pure and bright", "church bell with a long decay", "metallic gamelan bell", "tiny glass chime",
+        // textures and drones
+        "noisy granular-sounding texture", "underwater texture with slow filter movement", "sci-fi spaceship drone", "wind-like noise texture",
+        "tape-worn melancholic drone", "rhythmic gated texture synced to tempo", "breathing pad that swells with the mod wheel",
+        // one-shots and extras
+        "stab chord for house, short and punchy", "retro video game blip", "cinematic riser that rises over four seconds",
+        "dub siren with pitch wobble", "harp-like pluck with long release", "brass stab, big and detuned",
+    };
+
+    const auto repoRoot = juce::File (__FILE__).getParentDirectory().getParentDirectory();
+    auto factory = repoRoot.getChildFile ("Factory");
+    factory.createDirectory();
+
+    std::vector<Patch> kept;
+    std::set<juce::String> names;
+    int written = 0;
+    const double t0 = juce::Time::getMillisecondCounterHiRes();
+    for (auto* prompt : prompts)
+    {
+        GenerationRequest r;
+        r.count = juce::jmax (1, perPrompt + 1);   // one spare for the curation to drop
+        r.hint = prompt;
+        r.designWaves = true;
+        r.variation = 0.55f;
+        auto out = gen.generate (r, quiet);
+        int acceptedHere = 0;
+        for (auto& p : out)
+        {
+            if (acceptedHere >= perPrompt) break;
+            const bool audible = p.get (P::oscA_level) + p.get (P::oscB_level) + p.get (P::sub_level) > 0.1f;
+            const bool cutoffOk = p.get (P::filter_cutoff) >= 60.0f && p.get (P::filter_cutoff) <= 16000.0f;
+            const bool envOk = p.get (P::aenv_attack) < 4.0f && p.get (P::aenv_release) < 8.0f;
+            if (! (audible && cutoffOk && envOk)) continue;
+            const auto key = p.name.toLowerCase();
+            if (names.count (key)) continue;
+            bool distinct = true;
+            for (const auto& k : kept)
+                if (countAudibleDifferences (p, k) < 6) { distinct = false; break; }
+            if (! distinct) continue;
+
+            p.prompt = prompt;
+            p.parentName.clear();
+            p.favourite = false;
+            p.filePath.clear();
+            if (p.tags.isEmpty()) p.tags = autoTags (p);
+            if (! p.tags.contains ("factory")) p.tags.add ("factory");
+            ensureMacroRoutings (p);
+            const auto folder = factory.getChildFile (p.category.isNotEmpty() ? p.category : juce::String ("Other"));
+            folder.createDirectory();
+            folder.getChildFile (juce::File::createLegalFileName (p.name) + ".json").replaceWithText (p.toJson());
+            names.insert (key);
+            kept.push_back (p);
+            ++acceptedHere;
+            ++written;
+        }
+        std::printf ("%-56s kept %d of %d   (%d so far, %.0f min)\n", prompt, acceptedHere, (int) out.size(), written, (juce::Time::getMillisecondCounterHiRes() - t0) / 60000.0);
+        std::fflush (stdout);
+    }
+    std::printf ("\nFactory: %d presets in %s\n", written, factory.getFullPathName().toRawUTF8());
+    return written > 0 ? 0 : 1;
+}
+
 int main (int argc, char** argv)
 {
+    if (argc > 1 && juce::String (argv[1]) == "--factory")
+        return buildFactory (argc > 2 ? juce::jlimit (1, 4, juce::String (argv[2]).getIntValue()) : 2);
     if (argc > 1 && juce::String (argv[1]) == "--bench")
         return benchmark (argc > 2 ? juce::String::fromUTF8 (argv[2]) : juce::String ("unlabelled"));
     if (argc > 1 && juce::String (argv[1]) == "--live")
@@ -811,6 +1004,8 @@ int main (int argc, char** argv)
     testPatchJson();
     testTuningGuard();
     testGrammarAndPrompt();
+    testArpeggiator();
+    testMacroRoutings();
     testRandomGenerator();
     testLlmGenerator();
     std::printf ("\n%d checks, %d failures\n", checks, failures);

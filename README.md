@@ -32,16 +32,23 @@ Every build copies the plug-in into `~/Library/Audio/Plug-Ins/Components`
 ## The panel
 
 Controls sit in fixed rows that follow the signal path, each row captioned and
-colour-coded (knob colour = row). The tabs above them switch between **ALL**
-(every row at once) and one row at a time, enlarged to fill the panel:
+colour-coded (knob colour = row). The tabs above them switch between
+**MACROS** (six big knobs every sound answers: Brightness, Movement, Grit,
+Space, Width, Length, each wired per patch by the model or by sensible
+defaults), **ALL** (every row at once, scaled to fit) and one row at a time,
+enlarged to fill the panel:
 
 1. **SOUND** — Osc A, Osc B (morphing wavetables, importable "User 1-4"
    tables via each oscillator's Shape cell, and **Custom**: a table the AI or
    the random breeder designed for this patch), Mix (sub, noise, FM B→A)
-2. **FILTER** — ladder filter, its envelope, the amp envelope
-3. **MODULATORS** — LFO 1-4 with drawable shapes, the Mod Env, Assign, plus
-   Voice (unison, glide). See *Modulators* below.
-4. **SPACE** — effects. Core knobs on the panel, the rest behind each
+2. **FILTER** — ladder filter (LP/HP/BP, 12 or 24 dB) plus Notch, Comb and
+   Formant modes, its envelope, the amp envelope
+3. **MODULATORS** — LFO 1-4 with drawable shapes, the Mod Env, Assign, Voice
+   (unison, glide) and the **Arp** (up/down/up-down/random/as-played, synced
+   rates, octaves, gate, swing). See *Modulators* below.
+4. **SHAPE** — oversampled distortion (soft, hard, tube, fold, crush), a
+   three-band EQ, and a compressor at the end of the chain (parallel mix).
+5. **SPACE** — effects. Core knobs on the panel, the rest behind each
    section's **more** button:
    - *Chorus*: Chorus / Ensemble (string machine) / Flanger / Dimension modes;
      more: voices, feedback, stereo spread, tone.
@@ -61,6 +68,9 @@ the filter's response curve and both envelopes, live. A help line under the
 rows names the control under the mouse and says in plain words what it does;
 with nothing under the mouse it describes the current screen. Every control
 also has a tooltip.
+
+Undo and redo (the arrows in the header, Cmd+Z and Shift+Cmd+Z) step through
+whole sounds: every load, leaf drag and knob gesture leaves a snapshot.
 
 Every generated patch (random or AI) passes a tuning guard: oscillator A only at
 octaves, an audible oscillator B only at octaves, fine detune and pitch
@@ -145,8 +155,11 @@ Per batch the AI designs 5 patches that stream into the **✦ AI IDEAS** section
 as they arrive, while the random breeder's 5 land in a folded **RANDOM
 VARIATIONS** section underneath.
 
-**Library**: the LIBRARY tab browses `~/Music/Stacks Patches`: only your own
-saved presets and the folders you made. **Save** asks for a folder and a name
+**Library**: the LIBRARY tab browses `~/Music/Stacks Patches`: your saved
+presets and folders, plus a **Factory** folder installed on first run
+(generated with the Lab from a deliberately diverse prompt set and curated
+for sanity, unique names and audible difference; `StacksTests --factory`
+rebuilds it). **Save** asks for a folder and a name
 and stores the sound exactly as it is; if you edited a preset you loaded, it
 offers *Save as new* or *Overwrite*. The ♥ on a library row is the only
 favourite: a flag on that saved preset, which the ♥ filter shows. To grow from
