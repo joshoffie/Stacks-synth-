@@ -29,6 +29,33 @@ namespace
         return juce::JSON::toString (v, true);
     }
 
+    // Settings every patch must state, in this order (the grammar enforces it), followed by one
+    // real connection in slot 1. Without this, small models write 4-5 values and no modulation.
+    const std::vector<const char*>& coreParamIds()
+    {
+        static const std::vector<const char*> ids {
+            "oscA_wave", "oscA_morph", "oscA_coarse", "oscA_level",
+            "oscB_wave", "oscB_morph", "oscB_coarse", "oscB_level",
+            "sub_level", "noise_level", "fm_amount",
+            "filter_type", "filter_cutoff", "filter_res", "filter_env", "fenv_decay",
+            "aenv_attack", "aenv_decay", "aenv_sustain", "aenv_release",
+            "lfo1_shape", "lfo1_rate",
+            "unison_voices", "chorus_mix", "delay_mix", "reverb_mix"
+        };
+        return ids;
+    }
+
+    bool isCoreParam (const char* id)
+    {
+        const std::string s (id);
+        if (s == "mod1_source" || s == "mod1_dest" || s == "mod1_amount")
+            return true;
+        for (auto* c : coreParamIds())
+            if (s == c)
+                return true;
+        return false;
+    }
+
     // "EchoingPad" -> "Echoing Pad"; models often drop the space.
     juce::String spaceOutCamelCase (const juce::String& name)
     {
@@ -187,7 +214,7 @@ juce::String LlmPatchGenerator::systemPrompt()
     s << "You are an expert sound designer programming Stacks, a polyphonic hybrid wavetable/FM synthesizer.\n"
       << "Signal path: oscillators A and B (morphing wavetables; B can frequency-modulate A), plus a sub oscillator and noise, "
       << "into a ladder filter with its own envelope, then the amplitude envelope, then chorus, delay and reverb. "
-      << "Two LFOs each modulate one destination. Unison stacks detuned copies of a note for width.\n\n"
+      << "Four LFOs, a mod envelope, velocity, key, mod wheel, aftertouch and per-note random are wired to targets through twelve connections. Unison stacks detuned copies of a note for width.\n\n"
       << "Parameters (id: range [unit] - meaning):\n";
 
     // The four LFOs and twelve connections are described once each as families.
@@ -244,10 +271,18 @@ juce::String LlmPatchGenerator::systemPrompt()
       << "a slot to Pitch is only for vibrato (LFO, amount up to 0.08) or an attack pitch drop (Mod Env, amount up to 0.35); never Velocity, Key or Random to Pitch.\n"
       << "Avoid filter_res above 0.8 together with filter_drive above 4, and aenv_attack above 3.\n\n"
       << "Reply with JSON only, no prose, in exactly this shape:\n"
-      << "{\"patches\": [{\"name\": \"Two Words\", \"category\": \"Pad\", \"description\": \"one vivid sentence about how it sounds\", "
-      << "\"parent\": 1, \"params\": {\"oscA_wave\": \"Saw\", \"filter_cutoff\": 1200}}]}\n"
-      << "category is one of Pad, Pluck, Bass, Keys, Lead, Bell, Texture, Drone. "
-      << "In params list only the parameters that define the sound (usually 12 to 25); every parameter you omit keeps its base value. "
+      << "{\"patches\":[{\"name\":\"Velvet Horizon\",\"category\":\"Pad\",\"description\":\"one vivid sentence about how it sounds\",\"parent\":1,"
+      << "\"params\":{\"oscA_wave\":\"Saw\",\"oscA_morph\":0.4,\"oscA_coarse\":0,\"oscA_level\":0.8,"
+      << "\"oscB_wave\":\"Triangle\",\"oscB_morph\":0.2,\"oscB_coarse\":-12,\"oscB_level\":0.4,\"sub_level\":0.2,\"noise_level\":0,\"fm_amount\":0,"
+      << "\"filter_type\":\"LP24\",\"filter_cutoff\":1800,\"filter_res\":0.2,\"filter_env\":1.5,\"fenv_decay\":0.8,"
+      << "\"aenv_attack\":0.6,\"aenv_decay\":1,\"aenv_sustain\":0.8,\"aenv_release\":1.5,\"lfo1_shape\":\"Sine\",\"lfo1_rate\":0.2,"
+      << "\"unison_voices\":3,\"chorus_mix\":0.3,\"delay_mix\":0.1,\"reverb_mix\":0.35,"
+      << "\"mod1_source\":\"LFO 1\",\"mod1_dest\":\"A Morph\",\"mod1_amount\":0.3,"
+      << "\"mod2_source\":\"Velocity\",\"mod2_dest\":\"Cutoff\",\"mod2_amount\":0.4,\"reverb_type\":\"Hall\",\"unison_detune\":18}}]}\n"
+      << "The example shows the shape only - never reuse its name or values. category is one of Pad, Pluck, Bass, Keys, Lead, Bell, Texture, Drone. "
+      << "params always starts with these core settings in this exact order: " << juce::StringArray (coreParamIds().data(), (int) coreParamIds().size()).joinIntoString (", ")
+      << ", then the first connection (mod1_source, mod1_dest, mod1_amount - never Off), then any extra settings that define the sound "
+      << "(a second or third connection, LFO 2, effect details, glide, filter drive...). Every parameter you omit keeps its base value. "
       << "Use plain numbers without units and the exact option names for choice parameters. "
       << "Make every patch in a batch clearly different from the others. "
       << "Write compact JSON on a single line with no indentation, no newlines, no markdown fences and nothing before or after it.";
@@ -310,14 +345,34 @@ juce::String LlmPatchGenerator::grammar (int patchCount)
     g << " " << lit ("]}") << "\n"
       << "patch ::= " << lit ("{\"name\":") << " name " << lit (",\"category\":") << " category "
       << lit (",\"description\":") << " desc " << lit (",\"parent\":") << " int " << lit (",\"params\":{") << " params " << lit ("}}") << "\n"
-      << "params ::= param (" << lit (",") << " param)*\n";
+      << "params ::= core (" << lit (",") << " param)*\n";
 
     // GBNF rule names may contain '-' but not '_', so "oscA_wave" becomes rule "p-oscA-wave".
     auto ruleName = [] (const char* id) { return "p-" + juce::String (id).replaceCharacter ('_', '-'); };
 
+    // The mandatory prefix: every core setting in order, then connection 1 with a live source and target.
+    juce::StringArray coreRules;
+    for (auto* id : coreParamIds())
+        coreRules.add (ruleName (id));
+    coreRules.add ("conn1");
+    g << "core ::= " << coreRules.joinIntoString (" " + lit (",") + " ") << "\n";
+
+    auto choicesWithoutOff = [&] (const ParamSpec& spec)
+    {
+        juce::StringArray options;
+        for (const auto& c : spec.choices())
+            if (c != "Off")
+                options.add (lit ("\"" + c + "\""));
+        return "(" + options.joinIntoString (" | ") + ")";
+    };
+    g << "conn1 ::= " << key ("mod1_source") << " " << choicesWithoutOff (spec (modSourceParam (0)))
+      << " " << lit (",") << " " << key ("mod1_dest") << " " << choicesWithoutOff (spec (modDestParam (0)))
+      << " " << lit (",") << " " << key ("mod1_amount") << " num\n";
+
+    // Extras: anything that is not already part of the core.
     juce::StringArray alternatives;
     for (const auto& spec : paramSpecs())
-        if (std::string (spec.id) != "master_gain")
+        if (std::string (spec.id) != "master_gain" && ! isCoreParam (spec.id))
             alternatives.add (ruleName (spec.id));
     g << "param ::= " << alternatives.joinIntoString (" | ") << "\n";
 
@@ -426,6 +481,9 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& req, co
         patch->set (P::master_gain, -6.0f);
         patch->origin = "AI";
         patch->name = spaceOutCamelCase (patch->name).substring (0, 28);
+        // Small models sometimes copy the example patch's name straight from the prompt.
+        if (patch->name.equalsIgnoreCase ("Velvet Horizon") || patch->name.equalsIgnoreCase ("Two Words"))
+            patch->name = patch->category + " " + juce::String ((int) out.size() + 1);
         if (patch->description.isEmpty())
             patch->description = describePatch (*patch);
         else if (patch->description.length() < 60)

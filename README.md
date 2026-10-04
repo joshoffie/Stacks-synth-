@@ -32,16 +32,15 @@ Every build copies the plug-in into `~/Library/Audio/Plug-Ins/Components`
 ## The panel
 
 Controls sit in fixed rows that follow the signal path, each row captioned and
-colour-coded (knob colour = row):
+colour-coded (knob colour = row). The tabs above them switch between **ALL**
+(every row at once) and one row at a time, enlarged to fill the panel:
 
-1. **SOUND** — Osc A, Osc B (morphing wavetables), Mix (sub, noise, FM B→A)
+1. **SOUND** — Osc A, Osc B (morphing wavetables, importable "User 1-4"
+   tables via each oscillator's Shape cell), Mix (sub, noise, FM B→A)
 2. **FILTER** — ladder filter, its envelope, the amp envelope
-3. **MOVEMENT** — Mod Env (a free third ADSR), LFO 1, LFO 2, Voice (unison, glide)
-4. **MATRIX** — six modulation slots: source → destination × amount. Sources:
-   LFO 1/2, Filter Env, Mod Env, Velocity, Key, Mod Wheel, Aftertouch, per-note
-   Random. Destinations: Pitch, Pitch B, Filter, Resonance, Morph A/B, FM, Amp,
-   Pan, LFO rates, B Level, Noise.
-5. **SPACE** — effects. Core knobs on the panel, the rest behind each
+3. **MODULATORS** — LFO 1-4 with drawable shapes, the Mod Env, Assign, plus
+   Voice (unison, glide). See *Modulators* below.
+4. **SPACE** — effects. Core knobs on the panel, the rest behind each
    section's **more** button:
    - *Chorus*: Chorus / Ensemble (string machine) / Flanger / Dimension modes;
      more: voices, feedback, stereo spread, tone.
@@ -51,6 +50,10 @@ colour-coded (knob colour = row):
    - *Reverb*: Dattorro-style plate tank with Room / Plate / Hall / Shimmer
      types; more: pre-delay, low cut, high cut, tail modulation, octave-up
      shimmer amount, width.
+
+Knobs that a modulator drives show a ring in the modulator's colour and a live
+marker that follows the most recently played note, so you can see an LFO
+moving a parameter while you hold a key.
 
 Every generated patch (random or AI) passes a tuning guard: oscillator A only at
 octaves, an audible oscillator B only at octaves, fine detune and pitch
@@ -73,11 +76,15 @@ change that connection's depth.
 
 The **GARDEN** tab shows the loop as a plant: the sound you're playing is the
 seed in the middle; AI ideas grow above it, random variations below. Click a
-leaf to hear it, drag it outward for wilder children, double-click to plant it
-(it becomes the seed and a new generation grows), right-click for save/breed.
-Double-click the seed to evolve what you're hearing; right-click it for fresh
-ideas. The **LIST** tab is the same batch with full descriptions. Every finished
-generation is also saved under `Library/Generations/Gen N - HH.MM`.
+leaf to hear it, drag it outward for wilder children, right-click it to plant
+it (it becomes the seed and a new generation grows) or to favourite it.
+Right-click the seed for fresh ideas or to favourite what you're hearing.
+The **LIST** tab is the same batch with full descriptions. Every finished
+generation is also saved under `~/Library/Application Support/Stacks/history`.
+
+While a batch is being written, a progress bar above the tabs shows which patch
+the model is on, its name as soon as it is known, and how many settings it has
+written so far; the Garden draws the same progress as a ring around the seed.
 
 1. **Fresh ideas** — ten new patches from the direction text alone. **Evolve** —
    ten descendants of your ♥ favourites (or of the sound you're playing, if you
@@ -96,9 +103,11 @@ generation is also saved under `Library/Generations/Gen N - HH.MM`.
   `~/Library/Application Support/Stacks/models/` (1.7B ≈ 1.8 GB, 4B ≈ 2.5 GB,
   8B ≈ 5 GB). If the Ollama app has already pulled a Qwen3 model, Stacks lists
   it as "(Ollama's copy)" and uses that file directly, no second download.
-  Output is grammar-constrained, so the model can only produce valid patches.
-  On an M4 with 16 GB the 4B model runs at ~30 tokens/s: a fresh patch every
-  ~13 s, an evolved one every ~5 s. The model is unloaded after 10 idle minutes.
+  Output is grammar-constrained, so the model can only produce valid patches;
+  the grammar also makes every patch state a core set of ~26 settings and at
+  least one modulation connection, so AI sounds always have real movement.
+  On an M4 with 16 GB the 4B model runs at ~23-30 tokens/s: a batch of five
+  patches takes about a minute. The model is unloaded after 10 idle minutes.
 - *Ollama app* — the same models served by a running [Ollama](https://ollama.com).
   Handy for experiments; friends don't need it.
 
@@ -106,10 +115,13 @@ Per batch the AI designs 5 patches that stream into the **✦ AI IDEAS** section
 as they arrive, while the random breeder's 5 land in a folded **RANDOM
 VARIATIONS** section underneath.
 
-**Library**: the LIBRARY tab browses `~/Music/Stacks Patches`. Make folders,
-open them, click a patch to load it. The ♥ on any card (or on Now Playing)
-saves that patch into the open folder *and* adds it to "Breeding from", the
-set Evolve works from. A patch's "..." moves it to another folder or trashes it.
+**Library**: the LIBRARY tab browses `~/Music/Stacks Patches`: only your own
+saved presets and the folders you made. **Save** on the Now Playing card asks
+for a folder and a name and stores the sound exactly as it is; if you edited a
+preset you loaded, it offers *Save as new* or *Overwrite*. The ♥ on a card or
+in the library is just a favourite flag (the ♥ filter in the library shows only
+those); to grow from a favourite, select it and press Evolve. A patch's "..."
+moves it to another folder or trashes it.
 
 The engine choice is stored in `~/Library/Application Support/Stacks/`, next to
 `llama.log` (runtime + speed stats), `last-ai-prompt.txt`, `last-ai-reply.txt`
@@ -129,8 +141,10 @@ standalone app, and Logic may ask once to allow the component.
 ```
 Source/
   Parameters.*     the parameter table: ids, ranges, defaults, groups, AI hints
-  Wavetable.*      10 band-limited morphing wavetables, built at startup
-  SynthVoice.*     one voice: 2 wavetable oscs (B can FM A), sub, noise, ladder filter, 2 env, 2 LFO, unison
+  Wavetable.*      10 band-limited morphing wavetables plus 4 user slots (WAV import), built at startup
+  LfoTable.h       drawable LFO shapes (points -> 512-sample tables)
+  SynthVoice.*     one voice: 2 wavetable oscs (B can FM A), sub, noise, ladder filter, 3 env, 4 LFO, 12 connections, unison
+  Effects.*        chorus/ensemble/flanger/dimension, stereo/ping-pong/tape delay, Dattorro reverb with shimmer
   Patch.*          a named set of parameter values; JSON in/out; apply/capture
   PatchGenerator.* generators: Random (archetypes + crossover/mutation)
   ai/LlmBackend.h  interface for "a model that streams a chat reply"; OllamaBackend.cpp speaks HTTP to Ollama
@@ -139,6 +153,10 @@ Source/
   ai/LlmPatchGenerator.* prompt + GBNF grammar built from the parameter table, streaming JSON parser, fallback to Random
   PluginProcessor.* audio engine, master FX, lab state, engine selection, background generation
   PluginEditor.*   window: header, knob panel, AI lab, keyboard
-  SynthPanel.*     knob/drop-down panel generated from the parameter table
-  LabPanel.*       generate → audition → ♥ → evolve UI
+  Controls.*       ParamKnob (rings, live marker, assign/drag target), ParamChoice
+  SynthPanel.*     the fixed rows, ALL/row view tabs, advanced callouts, wave display
+  ModulatorsPanel.* LFO editor tabs, Assign, connection list
+  LabPanel.*       Fresh ideas / Evolve, progress strip, Now Playing, cards
+  GardenView.*     seed-and-leaves view of a generation
+  LibraryPanel.*   folder browser for saved presets
 ```
