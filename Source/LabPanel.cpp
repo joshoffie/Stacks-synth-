@@ -143,6 +143,61 @@ void SectionHeader::paint (juce::Graphics& g)
 }
 
 //==============================================================================
+ProgressStrip::ProgressStrip() {}
+
+void ProgressStrip::set (bool isActive, float f, const juce::String& text, int d, int t)
+{
+    active = isActive; fraction = f; detail = text; done = d; total = t;
+    if (active && ! isTimerRunning()) startTimerHz (30);
+    if (! active && isTimerRunning()) stopTimer();
+    repaint();
+}
+
+void ProgressStrip::paint (juce::Graphics& g)
+{
+    if (! active)
+        return;
+    auto r = getLocalBounds().toFloat();
+    auto bar = r.removeFromTop (8.0f).reduced (0.0f, 1.0f);
+    g.setColour (colours::card);
+    g.fillRoundedRectangle (bar, 3.0f);
+
+    // Completed patches as segments, the current one filling up.
+    const int segments = juce::jmax (1, total);
+    const float segW = bar.getWidth() / (float) segments;
+    for (int i = 0; i < segments; ++i)
+    {
+        auto seg = juce::Rectangle<float> (bar.getX() + segW * (float) i, bar.getY(), segW - 2.0f, bar.getHeight());
+        if (i < done)
+        {
+            g.setColour (colours::accent);
+            g.fillRoundedRectangle (seg, 3.0f);
+        }
+        else if (i == done)
+        {
+            if (fraction >= 0.0f)
+            {
+                g.setColour (colours::accent.withAlpha (0.9f));
+                g.fillRoundedRectangle (seg.withWidth (seg.getWidth() * juce::jlimit (0.0f, 1.0f, fraction)), 3.0f);
+            }
+            else
+            {
+                // indeterminate sweep
+                const float t = (float) std::fmod (juce::Time::getMillisecondCounterHiRes() / 900.0, 1.0);
+                const float w = seg.getWidth() * 0.3f;
+                const float x = seg.getX() + (seg.getWidth() - w) * (0.5f - 0.5f * std::cos (t * juce::MathConstants<float>::twoPi));
+                g.setColour (colours::accent.withAlpha (0.7f));
+                g.fillRoundedRectangle (x, seg.getY(), w, seg.getHeight(), 3.0f);
+            }
+        }
+    }
+
+    g.setColour (colours::text);
+    g.setFont (juce::Font (juce::FontOptions (11.0f)));
+    g.drawFittedText (detail, r.toNearestInt().withTrimmedTop (2), juce::Justification::centredLeft, 1);
+}
+
+//==============================================================================
 LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garden (p)
 {
     header.setFont (juce::Font (juce::FontOptions (15.0f, juce::Font::bold)));
@@ -252,6 +307,7 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
     status.setFont (juce::Font (juce::FontOptions (11.0f)));
     status.setColour (juce::Label::textColourId, colours::muted);
     addAndMakeVisible (status);
+    addAndMakeVisible (progressStrip);
 
     processor.labBroadcaster.addChangeListener (this);
     rebuildEngineMenu();
@@ -300,7 +356,9 @@ void LabPanel::resized()
     newBatchButton.setBounds (buttons.removeFromLeft (104));
     buttons.removeFromLeft (6);
     evolveButton.setBounds (buttons);
-    r.removeFromTop (10);
+    r.removeFromTop (4);
+    progressStrip.setBounds (r.removeFromTop (26));
+    r.removeFromTop (2);
 
     auto tabs = r.removeFromTop (24);
     const int tabW = tabs.getWidth() / 3;
@@ -472,8 +530,11 @@ void LabPanel::engineChosen()
 
 void LabPanel::refreshNowPlaying()
 {
-    const auto current = processor.currentPatch();
-    const auto key = current.name + "|" + current.description + "|" + (current.favourite ? "1" : "0");
+    auto current = processor.currentPatch();
+    const bool edited = juce::File (current.filePath).existsAsFile() && processor.currentIsEdited();
+    if (edited)
+        current.category = (current.category.isNotEmpty() ? current.category + "  " : juce::String()) + "edited";
+    const auto key = current.name + "|" + current.description + "|" + (current.favourite ? "1" : "0") + (edited ? "e" : "");
     if (key == shownNowPlaying)
         return;
     shownNowPlaying = key;
@@ -543,6 +604,13 @@ void LabPanel::refresh()
         viewport.setViewPosition (0, 0);
     }
 
+    {
+        int aiDone = 0;
+        for (const auto& c : lab.candidates) if (c.origin == "AI") ++aiDone;
+        const bool aiEngine = processor.engine().kind != EngineKind::Random;
+        progressStrip.set (lab.generating && aiEngine, lab.progress, lab.progressDetail, aiDone, StacksAudioProcessor::kAiPatchesPerBatch);
+    }
+
     status.setText (lab.status.isNotEmpty() ? lab.status
                                             : "Engine: " + processor.engineName() + juce::String (juce::CharPointer_UTF8 ("  \xc2\xb7  press Fresh ideas to start")),
                     juce::dontSendNotification);
@@ -562,18 +630,34 @@ void LabPanel::savePresetDialog()
         if (folders[(size_t) i] == processor.libraryFolder()) selected = i;
     }
 
-    auto* w = new juce::AlertWindow ("Save preset", "Saves exactly what you're hearing, knob tweaks included.", juce::MessageBoxIconType::NoIcon);
-    w->addTextEditor ("name", processor.currentPatchName(), "Name");
+    // Loaded from a preset? Then the choice is explicit: a new preset, or overwrite the original.
+    const auto current = processor.currentPatch();
+    const juce::File original (current.filePath);
+    const bool fromPreset = original.existsAsFile();
+    const auto originalName = original.getFileNameWithoutExtension();
+
+    auto* w = new juce::AlertWindow ("Save preset",
+                                     fromPreset ? "This sound came from \"" + originalName + "\"" + (processor.currentIsEdited() ? " and you've changed it." : ".")
+                                                : juce::String ("Saves exactly what you're hearing, knob tweaks included."),
+                                     juce::MessageBoxIconType::NoIcon);
+    w->addTextEditor ("name", fromPreset ? originalName + " 2" : processor.currentPatchName(), "Name for the new preset");
     w->addComboBox ("folder", names, "Folder");
     w->getComboBoxComponent ("folder")->setSelectedItemIndex (selected, juce::dontSendNotification);
-    w->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    w->addButton (fromPreset ? "Save as new" : "Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    if (fromPreset)
+        w->addButton ("Overwrite \"" + originalName + "\"", 2);
     w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
-    w->enterModalState (true, juce::ModalCallbackFunction::create ([this, w, folders] (int result)
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([this, w, folders, original, originalName] (int result)
     {
+        if (result == 2)
+        {
+            processor.savePreset (originalName, original.getParentDirectory(), false);
+            return;
+        }
         if (result != 1) return;
         const int idx = w->getComboBoxComponent ("folder")->getSelectedItemIndex();
         const auto folder = idx >= 0 && idx < (int) folders.size() ? folders[(size_t) idx] : StacksAudioProcessor::libraryRoot();
-        processor.savePreset (w->getTextEditorContents ("name"), folder);
+        processor.savePreset (w->getTextEditorContents ("name"), folder, true);
         processor.setLibraryFolder (folder);
     }), true);
 }

@@ -56,8 +56,10 @@ public:
 
     void beginAssign (int source);
     void endAssign();
+    void setView (int rowIndex);                              // -1 = all rows
 
 private:
+    class RowContainer;
     struct Section
     {
         juce::String title;
@@ -74,7 +76,9 @@ private:
         juce::Colour colour;
         int height = 0;
         std::vector<Section*> sections;
-        juce::Rectangle<int> bounds;
+        juce::Rectangle<int> bounds;          // within its container
+        int naturalWidth = 0;
+        std::unique_ptr<RowContainer> container;
     };
 
     void parameterChanged (const juce::String&, float) override { triggerAsyncUpdate(); }
@@ -92,6 +96,8 @@ private:
     std::vector<std::unique_ptr<Section>> sections;
     std::vector<Row> rows;
     std::unique_ptr<ModulatorsPanel> modulators;
+    std::vector<std::unique_ptr<juce::TextButton>> viewButtons;
+    int viewMode = -1;                                        // -1 = all
     int assigningSource = -1;
 };
 

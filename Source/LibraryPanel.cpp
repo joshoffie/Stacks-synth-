@@ -187,17 +187,24 @@ void LibraryPanel::newFolder()
 
 void LibraryPanel::saveHere()
 {
+    const auto current = processor.currentPatch();
+    const juce::File original (current.filePath);
+    const bool fromPreset = original.existsAsFile();
+    const auto originalName = original.getFileNameWithoutExtension();
+
     auto* w = new juce::AlertWindow ("Save preset here", "Into " + (processor.libraryFolder() == StacksAudioProcessor::libraryRoot() ? juce::String ("the library") : processor.libraryFolder().getFileName()), juce::MessageBoxIconType::NoIcon);
-    w->addTextEditor ("name", processor.currentPatchName(), "Name");
-    w->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    w->addTextEditor ("name", fromPreset ? originalName + " 2" : processor.currentPatchName(), "Name");
+    w->addButton (fromPreset ? "Save as new" : "Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    if (fromPreset)
+        w->addButton ("Overwrite \"" + originalName + "\"", 2);
     w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
-    w->enterModalState (true, juce::ModalCallbackFunction::create ([this, w] (int result)
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([this, w, original, originalName] (int result)
     {
-        if (result == 1)
-        {
-            processor.savePreset (w->getTextEditorContents ("name"), processor.libraryFolder());
-            refresh();
-        }
+        if (result == 2)
+            processor.savePreset (originalName, original.getParentDirectory(), false);
+        else if (result == 1)
+            processor.savePreset (w->getTextEditorContents ("name"), processor.libraryFolder(), true);
+        refresh();
     }), true);
 }
 

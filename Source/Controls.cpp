@@ -165,8 +165,7 @@ void ParamKnob::setLiveValue (float realValue)
 {
     if (modulations.empty() || paramIndex < 0)
         return;
-    const auto& range = paramRange (paramIndex);
-    const float norm = range.convertTo0to1 (juce::jlimit (range.start, range.end, realValue));
+    const float norm = (float) slider.valueToProportionOfLength (juce::jlimit (slider.getMinimum(), slider.getMaximum(), (double) realValue));
     if (std::abs (norm - liveNorm) > 0.002f)
     {
         liveNorm = norm;

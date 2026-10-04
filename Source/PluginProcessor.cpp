@@ -63,6 +63,7 @@ StacksAudioProcessor::StacksAudioProcessor()
     voiceContext.user = &userWaves;
     voiceContext.params = &params;
     voiceContext.lfoTables = &lfoTables;
+    voiceContext.liveValues = liveValues.data();
 
     for (int i = 0; i < kNumVoices; ++i)
         synth.addVoice (new SynthVoice (voiceContext));
@@ -159,8 +160,10 @@ void StacksAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         }
     }
 
-    synth.renderNextBlock (buffer, midi, 0, numSamples);
+    // Global modulation first so the markers fall back to it when no note is
+    // sounding; the newest voice then overwrites the live values while it plays.
     applyGlobalModulation();
+    synth.renderNextBlock (buffer, midi, 0, numSamples);
     processEffects (buffer);
 }
 
@@ -494,6 +497,12 @@ void StacksAudioProcessor::applyPatch (const Patch& p)
     patchOrigin = p.origin;
     patchFile = p.filePath;
     patchFavourite = p.favourite;
+    loadedSnapshot = p;
+}
+
+bool StacksAudioProcessor::currentIsEdited() const
+{
+    return ! Patch::capture (apvts).sameValuesAs (loadedSnapshot);
 }
 
 void StacksAudioProcessor::setCurrentPatchName (const juce::String& name)
@@ -770,6 +779,8 @@ void StacksAudioProcessor::startGeneration (GenerationRequest req)
     labState.status = "Generating with " + engineName() + "...";
 
     const bool usingAi = generator != randomGenerator;
+    labState.progress = -1.0f;
+    labState.progressDetail = usingAi ? "Starting " + engineName() + "..." : juce::String();
     juce::WeakReference<StacksAudioProcessor> weak (this);
 
     auto makeProgress = [weak, token, this]
@@ -789,6 +800,14 @@ void StacksAudioProcessor::startGeneration (GenerationRequest req)
             {
                 if (auto* self = weak.get())
                     self->setStatus (token, s);
+            });
+        };
+        progress.onProgress = [weak, token] (float fraction, const juce::String& detail)
+        {
+            juce::MessageManager::callAsync ([weak, token, fraction, detail]
+            {
+                if (auto* self = weak.get())
+                    self->setProgress (token, fraction, detail);
             });
         };
         progress.shouldCancel = [this, token] { return cancelRequested.load() || generationToken != token; };
@@ -854,12 +873,23 @@ void StacksAudioProcessor::setStatus (int token, const juce::String& s)
     labBroadcaster.sendChangeMessage();
 }
 
+void StacksAudioProcessor::setProgress (int token, float fraction, const juce::String& detail)
+{
+    if (token != generationToken)
+        return;
+    labState.progress = fraction;
+    labState.progressDetail = detail;
+    labBroadcaster.sendChangeMessage();
+}
+
 void StacksAudioProcessor::finishGeneration (int token)
 {
     if (token != generationToken)
         return;
 
     labState.generating = false;
+    labState.progress = -1.0f;
+    labState.progressDetail.clear();
     const bool wasCancelled = cancelRequested.exchange (false);
 
     if (labState.candidates.empty())
@@ -940,17 +970,19 @@ void StacksAudioProcessor::writeFavouriteFlag (const juce::File& file, bool favo
     }
 }
 
-juce::File StacksAudioProcessor::savePreset (const juce::String& name, const juce::File& folder)
+juce::File StacksAudioProcessor::savePreset (const juce::String& name, const juce::File& folder, bool asNewFile)
 {
     auto p = currentPatch();
     p.name = name.trim().isEmpty() ? patchName : name.trim();
-    // Same name in the same folder as the loaded file: overwrite it. Otherwise a new file.
+    // Overwrite only the loaded file itself (same folder, same name) unless a new file was asked for.
     juce::File existing (p.filePath);
-    if (! (existing.existsAsFile() && existing.getParentDirectory() == folder && existing.getFileNameWithoutExtension() == juce::File::createLegalFileName (p.name)))
+    if (asNewFile || ! (existing.existsAsFile() && existing.getParentDirectory() == folder
+                        && existing.getFileNameWithoutExtension() == juce::File::createLegalFileName (p.name)))
         p.filePath.clear();
     const auto file = savePatchToLibrary (p, folder);
     patchName = p.name;
     patchFile = p.filePath;
+    loadedSnapshot = p;
     if (labState.auditioned >= 0 && labState.auditioned < (int) labState.candidates.size())
         labState.candidates[(size_t) labState.auditioned].filePath = p.filePath;
     labState.status = "Saved \"" + p.name + "\" to " + (folder == libraryRoot() ? juce::String ("the library") : folder.getFileName());

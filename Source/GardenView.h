@@ -9,8 +9,8 @@ namespace stacks
 
 // The breeding loop as a plant: the sound you're playing is the seed in the
 // middle, the candidates are leaves around it (AI above, random below).
-// Click a leaf to hear it, double-click to plant it (it becomes the seed and
-// a new generation grows from it), right-click for more.
+// Click a leaf to hear it, drag it outward for wilder children, right-click
+// to plant it (it becomes the seed and a new generation grows from it).
 class GardenView : public juce::Component,
                    private juce::Timer
 {
@@ -22,7 +22,6 @@ public:
     void resized() override;
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;
-    void mouseDoubleClick (const juce::MouseEvent&) override;
 
     std::function<void()> onEvolve;             // plant the seed: evolve from current / favourites
     std::function<void()> onFresh;              // fresh ideas

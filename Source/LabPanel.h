@@ -50,6 +50,23 @@ private:
     juce::Colour colour;
 };
 
+// A slim bar that shows how far the model is toward the next patch, with a
+// sweeping segment while it is loading or reading.
+class ProgressStrip : public juce::Component,
+                      private juce::Timer
+{
+public:
+    ProgressStrip();
+    void set (bool active, float fraction, const juce::String& detail, int done, int total);
+    void paint (juce::Graphics&) override;
+private:
+    void timerCallback() override { repaint(); }
+    bool active = false;
+    float fraction = -1.0f;
+    juce::String detail;
+    int done = 0, total = 0;
+};
+
 // The generate -> audition -> pick -> evolve workflow.
 class LabPanel : public juce::Component,
                  private juce::ChangeListener,
@@ -77,6 +94,7 @@ private:
     StacksAudioProcessor& processor;
 
     juce::Label header, engineLabel, variationLabel, status;
+    ProgressStrip progressStrip;
     juce::ComboBox engineBox;
     juce::TextButton refreshEnginesButton;
     juce::TextEditor hint;

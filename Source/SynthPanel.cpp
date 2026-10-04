@@ -183,6 +183,43 @@ void WaveDisplay::importWavetable()
 }
 
 //==============================================================================
+// One row of sections, drawn with its caption band. In the single-row views
+// the whole container is scaled up to fill the panel.
+class SynthPanel::RowContainer : public juce::Component
+{
+public:
+    explicit RowContainer (Row& r) : row (r) {}
+
+    void paint (juce::Graphics& g) override
+    {
+        auto band = juce::Rectangle<float> (0.0f, 0.0f, (float) kBand, (float) getHeight());
+        g.setColour (row.colour.withAlpha (0.18f));
+        g.fillRoundedRectangle (band.reduced (2.0f, 0.0f), 4.0f);
+        g.setColour (row.colour);
+        g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
+        g.saveState();
+        g.addTransform (juce::AffineTransform::rotation (-juce::MathConstants<float>::halfPi, band.getCentreX(), band.getCentreY()));
+        g.drawText (row.caption, juce::Rectangle<float> (band.getCentreX() - band.getHeight() * 0.5f, band.getCentreY() - band.getWidth() * 0.5f,
+                                                         band.getHeight(), band.getWidth()),
+                    juce::Justification::centred, false);
+        g.restoreState();
+
+        for (const auto* section : row.sections)
+        {
+            g.setColour (colours::panel);
+            g.fillRoundedRectangle (section->bounds.toFloat(), 6.0f);
+            g.setColour (section->colour);
+            g.setFont (juce::Font (juce::FontOptions (10.5f, juce::Font::bold)));
+            const auto title = section->title == kModulatorsGroup ? juce::String ("MODULATORS   -   pick one, press Assign, click a knob") : section->title;
+            g.drawText (title, section->bounds.withHeight (kTitleH).reduced (kPad, 0), juce::Justification::centredLeft);
+        }
+    }
+
+private:
+    Row& row;
+};
+
+//==============================================================================
 SynthPanel::SynthPanel (StacksAudioProcessor& p) : processor (p), apvts (p.apvts)
 {
     setWantsKeyboardFocus (true);
@@ -277,6 +314,42 @@ SynthPanel::SynthPanel (StacksAudioProcessor& p) : processor (p), apvts (p.apvts
         if (! row.sections.empty())
             rows.push_back (std::move (row));
     }
+
+    for (auto& row : rows)
+    {
+        row.container = std::make_unique<RowContainer> (row);
+        addAndMakeVisible (*row.container);
+        int w = kBand + kPad;
+        for (auto* section : row.sections)
+        {
+            int sw = 2 * kPad;
+            for (const auto& [component, cellWidth] : section->controls)
+            {
+                row.container->addAndMakeVisible (*component);   // re-parent into the row
+                sw += cellWidth;
+            }
+            if (section->moreButton != nullptr)
+                row.container->addAndMakeVisible (*section->moreButton);
+            w += sw + kGap;
+        }
+        row.naturalWidth = w;
+    }
+
+    // View tabs: everything, or one row filling the panel.
+    auto addViewButton = [this] (const juce::String& text, int mode, juce::Colour colour)
+    {
+        auto b = std::make_unique<juce::TextButton> (text);
+        b->setClickingTogglesState (false);
+        b->setColour (juce::TextButton::buttonOnColourId, colour.withAlpha (0.35f));
+        b->setColour (juce::TextButton::textColourOnId, colours::text);
+        b->onClick = [this, mode] { setView (mode); };
+        addAndMakeVisible (*b);
+        viewButtons.push_back (std::move (b));
+    };
+    addViewButton ("ALL", -1, colours::accent);
+    for (int i = 0; i < (int) rows.size(); ++i)
+        addViewButton (rows[(size_t) i].caption, i, rows[(size_t) i].colour);
+    setView (-1);
 
     for (int i = 0; i < kNumModSlots; ++i)
     {
@@ -381,9 +454,20 @@ SynthPanel::Section* SynthPanel::findSection (const juce::String& title)
     return nullptr;
 }
 
+void SynthPanel::setView (int rowIndex)
+{
+    viewMode = rowIndex;
+    for (int i = 0; i < (int) viewButtons.size(); ++i)
+        viewButtons[(size_t) i]->setToggleState (i - 1 == rowIndex, juce::dontSendNotification);
+    for (int i = 0; i < (int) rows.size(); ++i)
+        rows[(size_t) i].container->setVisible (viewMode < 0 || viewMode == i);
+    resized();
+    repaint();
+}
+
 int SynthPanel::preferredHeight() const
 {
-    int h = 2 * kPad;
+    int h = 24 + 4 + 2 * kPad;
     for (const auto& row : rows)
         h += row.height + kGap;
     return h - kGap;
@@ -391,70 +475,71 @@ int SynthPanel::preferredHeight() const
 
 void SynthPanel::resized()
 {
-    const int normalH = kTitleH + kCellH + kPad;
-    int y = kPad;
+    auto area = getLocalBounds();
+    auto tabs = area.removeFromTop (22);
+    const int tabW = juce::jmin (120, (tabs.getWidth() - kBand) / juce::jmax (1, (int) viewButtons.size()));
+    tabs.removeFromLeft (kBand);
+    for (auto& b : viewButtons)
+        b->setBounds (tabs.removeFromLeft (tabW).reduced (1, 0));
+    area.removeFromTop (6);
 
+    const int normalH = kTitleH + kCellH + kPad;
+
+    // Lay every row out in its own container at natural size...
     for (auto& row : rows)
     {
-        row.bounds = { 0, y, getWidth(), row.height };
         int x = kBand + kPad;
         for (auto* section : row.sections)
         {
             int w = 2 * kPad;
             for (const auto& [component, cellWidth] : section->controls)
                 w += cellWidth;
-
             const int h = section->tall ? row.height : normalH;
-            section->bounds = { x, y, w, h };
+            section->bounds = { x, 0, w, h };
             if (section->moreButton != nullptr)
                 section->moreButton->setBounds (section->bounds.withHeight (kTitleH).removeFromRight (40).reduced (3, 1));
-
             int cx = x + kPad;
             for (const auto& [component, cellWidth] : section->controls)
             {
-                component->setBounds (cx, y + kTitleH, cellWidth, section->tall ? h - kTitleH - kPad : kCellH);
+                component->setBounds (cx, kTitleH, cellWidth, section->tall ? h - kTitleH - kPad : kCellH);
                 cx += cellWidth;
             }
             x += w + kGap;
         }
-        y += row.height + kGap;
+        row.container->setSize (row.naturalWidth, row.height);
+    }
+
+    // ...then place them: stacked for ALL, or one row scaled to fill.
+    if (viewMode < 0)
+    {
+        int y = area.getY() + kPad;
+        for (auto& row : rows)
+        {
+            row.container->setTransform ({});
+            row.container->setTopLeftPosition (0, y);
+            y += row.height + kGap;
+        }
+    }
+    else if (viewMode < (int) rows.size())
+    {
+        auto& row = rows[(size_t) viewMode];
+        const float scale = juce::jlimit (1.0f, 2.2f, juce::jmin ((float) (area.getWidth() - 8) / (float) row.naturalWidth,
+                                                                   (float) (area.getHeight() - 8) / (float) row.height));
+        const float px = (float) area.getX() + ((float) area.getWidth() - row.naturalWidth * scale) * 0.5f;
+        const float py = (float) area.getY() + juce::jmax (4.0f, ((float) area.getHeight() - row.height * scale) * 0.35f);
+        row.container->setTopLeftPosition (0, 0);
+        row.container->setTransform (juce::AffineTransform::scale (scale).translated (px, py));
     }
 }
 
 void SynthPanel::paint (juce::Graphics& g)
 {
-    for (const auto& row : rows)
-    {
-        // Caption band on the left, rotated to save width.
-        auto band = row.bounds.withWidth (kBand).toFloat();
-        g.setColour (row.colour.withAlpha (0.18f));
-        g.fillRoundedRectangle (band.reduced (2.0f, 0.0f), 4.0f);
-        g.setColour (row.colour);
-        g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
-        g.saveState();
-        g.addTransform (juce::AffineTransform::rotation (-juce::MathConstants<float>::halfPi, band.getCentreX(), band.getCentreY()));
-        g.drawText (row.caption, juce::Rectangle<float> (band.getCentreX() - band.getHeight() * 0.5f, band.getCentreY() - band.getWidth() * 0.5f,
-                                                         band.getHeight(), band.getWidth()),
-                    juce::Justification::centred, false);
-        g.restoreState();
-
-        for (const auto* section : row.sections)
-        {
-            g.setColour (colours::panel);
-            g.fillRoundedRectangle (section->bounds.toFloat(), 6.0f);
-            g.setColour (section->colour);
-            g.setFont (juce::Font (juce::FontOptions (10.5f, juce::Font::bold)));
-            const auto title = section->title == kModulatorsGroup ? juce::String ("MODULATORS   -   pick one, press Assign, click a knob") : section->title;
-            g.drawText (title, section->bounds.withHeight (kTitleH).reduced (kPad, 0), juce::Justification::centredLeft);
-        }
-    }
-
     if (assigningSource >= 0)
     {
         g.setColour (modSourceColour (assigningSource));
         g.setFont (juce::Font (juce::FontOptions (12.0f, juce::Font::bold)));
         g.drawText ("Click a knob to modulate it with " + modSourceNames()[assigningSource] + "   (Esc cancels)",
-                    getLocalBounds().removeFromTop (16).withTrimmedLeft (kBand + 8), juce::Justification::centredLeft);
+                    getLocalBounds().removeFromTop (22).withTrimmedLeft (kBand + (int) viewButtons.size() * 120 + 12), juce::Justification::centredLeft);
     }
 }
 

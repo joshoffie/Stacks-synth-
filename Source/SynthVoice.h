@@ -26,6 +26,9 @@ struct VoiceContext
     std::atomic<float> lastNote { -1.0f };    // most recent note, for glide
     std::atomic<float> modWheel { 0.0f };     // CC1, 0..1, shared by all voices
     std::atomic<float> aftertouch { 0.0f };   // last channel pressure, for global targets
+    std::atomic<float>* liveValues = nullptr;  // kNumParams, what the UI's markers show
+    std::atomic<int> voiceCounter { 0 };       // hands out serial numbers at note-on
+    std::atomic<int> displayVoice { -1 };      // the newest voice publishes its values
     double bpm = 120.0;
     float lfoRateHz[kNumLfos] {};             // effective rate (sync applied) for free-running LFOs
     float lfoBlockPhase[kNumLfos] {};         // free-running phase at the start of this block
@@ -77,6 +80,7 @@ private:
     juce::AudioBuffer<float> scratch { 2, kSub };
     juce::Random rng;
 
+    int serial = -1;               // this note's serial, see VoiceContext::displayVoice
     float velocity = 1.0f, velocityGain = 1.0f;
     float pitchBendSemis = 0.0f;
     float aftertouch = 0.0f;       // 0..1

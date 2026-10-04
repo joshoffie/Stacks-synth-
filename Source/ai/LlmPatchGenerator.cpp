@@ -98,6 +98,13 @@ namespace
 
         int count() const { return emitted; }
 
+        // The object being written right now (empty between patches).
+        std::string currentObject() const
+        {
+            if (objectStart == std::string::npos || objectStart >= buffer.size()) return {};
+            return buffer.substr (objectStart);
+        }
+
     private:
         void emitOne (const juce::var& v)
         {
@@ -429,11 +436,48 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& req, co
         progress.status (juce::String (out.size()) + " of " + juce::String (req.count) + " from " + backend->modelName() + "...");
     });
 
+    // Progress toward the next patch, read off the half-written JSON: the name
+    // appears early, then each parameter is one more step toward ~18.
+    double lastProgressMs = 0.0;
+    auto reportProgress = [&] (bool force)
+    {
+        const double now = juce::Time::getMillisecondCounterHiRes();
+        if (! force && now - lastProgressMs < 120.0)
+            return;
+        lastProgressMs = now;
+        const auto obj = parser.currentObject();
+        const int done = (int) out.size();
+        if (obj.empty())
+        {
+            progress.progress (0.0f, done == 0 ? "Thinking about the first patch..." : "Thinking about patch " + juce::String (done + 1) + "...");
+            return;
+        }
+        juce::String name;
+        const auto nameAt = obj.find ("\"name\":\"");
+        if (nameAt != std::string::npos)
+        {
+            const auto start = nameAt + 8;
+            const auto end = obj.find ('"', start);
+            if (end != std::string::npos)
+                name = spaceOutCamelCase (juce::String::fromUTF8 (obj.data() + start, (int) (end - start)));
+        }
+        int keys = 0;
+        for (size_t i = 0; (i = obj.find ("\":", i)) != std::string::npos; ++i) ++keys;
+        const int params = juce::jmax (0, keys - 5);
+        const float fraction = juce::jlimit (0.03f, 0.96f, 0.08f + (float) params / 20.0f);
+        juce::String detail = "Writing patch " + juce::String (done + 1) + " of " + juce::String (req.count);
+        if (name.isNotEmpty()) detail << ":  \"" << name << "\"";
+        if (params > 0) detail << "  -  " << params << " settings so far";
+        progress.progress (fraction, detail);
+    };
+
     juce::String error, rawReply;
     const bool ok = backend->chat (systemPrompt(), userPrompt (req), grammar (req.count),
-                                   [&] (const juce::String& delta) { rawReply << delta; parser.feed (delta); },
+                                   [&] (const juce::String& delta) { rawReply << delta; parser.feed (delta); reportProgress (false); },
+                                   [&] (const juce::String& phaseText) { progress.progress (-1.0f, phaseText); },
                                    progress.shouldCancel, error);
     parser.finish();
+    progress.progress (-1.0f, {});
 
     // Keep the last exchange on disk: invaluable when tuning the prompt.
     {

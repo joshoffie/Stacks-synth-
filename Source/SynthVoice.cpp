@@ -70,6 +70,8 @@ void SynthVoice::startNote (int midiNoteNumber, float vel, juce::SynthesiserSoun
     velocity = vel;
     velocityGain = 0.25f + 0.75f * vel;
     noteRandom = rng.nextFloat() * 2.0f - 1.0f;
+    serial = ++ctx.voiceCounter;
+    ctx.displayVoice.store (serial);
     pitchWheelMoved (currentPitchWheelPosition);
 
     // Glide starts from whatever note was played last, on any voice.
@@ -289,6 +291,9 @@ void SynthVoice::renderNextBlock (juce::AudioBuffer<float>& out, int startSample
             }
         }
         const auto& p = local;
+        if (ctx.liveValues != nullptr && ctx.displayVoice.load (std::memory_order_relaxed) == serial)
+            for (int i = 0; i < kNumParams; ++i)
+                ctx.liveValues[i].store (local.v[i], std::memory_order_relaxed);
         pitchMod  = juce::jlimit (-24.0f, 24.0f, pitchMod);
         pitchBMod = juce::jlimit (-24.0f, 24.0f, pitchBMod);
         pan = juce::jlimit (-1.0f, 1.0f, pan);

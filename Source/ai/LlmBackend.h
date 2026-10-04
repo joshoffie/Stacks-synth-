@@ -24,10 +24,12 @@ public:
     // Returns false and fills `error` on failure or cancellation.
     // `grammar` is an optional GBNF grammar the reply must follow; backends
     // that cannot enforce one ignore it.
+    // `onPhase` reports coarse stages ("Loading model", "Reading your sound").
     virtual bool chat (const juce::String& systemPrompt,
                        const juce::String& userPrompt,
                        const juce::String& grammar,
                        const std::function<void (const juce::String&)>& onText,
+                       const std::function<void (const juce::String&)>& onPhase,
                        const std::function<bool()>& shouldCancel,
                        juce::String& error) = 0;
 };
@@ -44,6 +46,7 @@ public:
     bool isAvailable (juce::String& reason) override;
     bool chat (const juce::String& systemPrompt, const juce::String& userPrompt, const juce::String& grammar,
                const std::function<void (const juce::String&)>& onText,
+               const std::function<void (const juce::String&)>& onPhase,
                const std::function<bool()>& shouldCancel, juce::String& error) override;
 
     // Names of the models the server has installed; empty when unreachable.

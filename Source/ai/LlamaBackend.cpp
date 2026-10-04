@@ -143,11 +143,15 @@ void LlamaBackend::unloadIfIdle (double idleSeconds)
 
 bool LlamaBackend::chat (const juce::String& systemPrompt, const juce::String& userPrompt, const juce::String& grammar,
                          const std::function<void (const juce::String&)>& onText,
+                         const std::function<void (const juce::String&)>& onPhase,
                          const std::function<bool()>& shouldCancel, juce::String& error)
 {
     std::lock_guard<std::mutex> guard (lock);
     lastUsedMs = juce::Time::getMillisecondCounterHiRes();
 
+    auto phase = [&] (const juce::String& text) { if (onPhase) onPhase (text); };
+    if (model == nullptr)
+        phase ("Loading " + displayName + " into memory...");
     if (! ensureLoaded (error))
         return false;
 
@@ -205,6 +209,7 @@ bool LlamaBackend::chat (const juce::String& systemPrompt, const juce::String& u
     }
 
     // ---- prefill ------------------------------------------------------------
+    phase ("Reading your sound and the synth...");
     const double tStart = juce::Time::getMillisecondCounterHiRes();
     llama_memory_clear (llama_get_memory (ctx), true);
     for (int i = 0; i < count; i += kBatchTokens)
@@ -238,6 +243,7 @@ bool LlamaBackend::chat (const juce::String& systemPrompt, const juce::String& u
     llama_sampler_chain_add (sampler, llama_sampler_init_dist ((uint32_t) juce::Time::getHighResolutionTicks()));
 
     const double tPrompt = juce::Time::getMillisecondCounterHiRes();
+    phase ("Writing...");
     std::string pending;
     int position = count;
     int generated = 0;

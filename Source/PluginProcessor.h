@@ -24,6 +24,8 @@ struct LabState
     int auditioned = -1;                        // index into candidates currently loaded
     bool generating = false;
     juce::String status;
+    float progress = -1.0f;                     // 0..1 toward the next AI patch, -1 = unknown/idle
+    juce::String progressDetail;                // what the model is doing right now
 };
 
 enum class EngineKind { Random, Ollama, Builtin };
@@ -93,7 +95,8 @@ public:
     juce::File libraryFolder() const                       { return currentFolder; }
     void setLibraryFolder (const juce::File&);
     juce::File savePatchToLibrary (Patch&, const juce::File& folder); // sets patch.filePath, returns the file
-    juce::File savePreset (const juce::String& name, const juce::File& folder); // the playing sound, exactly as it is
+    juce::File savePreset (const juce::String& name, const juce::File& folder, bool asNewFile = false); // the playing sound, exactly as it is
+    bool currentIsEdited() const;                          // knobs differ from the loaded preset file
     std::vector<juce::File> libraryFolders() const;        // root first, then every subfolder
     void toggleFavourite (int candidateIndex);             // flip the heart on a candidate
     void favouriteCurrent();                               // flip the heart on the playing sound
@@ -155,6 +158,7 @@ private:
     void autoSaveGeneration();                             // every finished batch lands in Library/Generations
     void addCandidate (int token, Patch);
     void setStatus (int token, const juce::String&);
+    void setProgress (int token, float fraction, const juce::String& detail);
     void finishGeneration (int token);
     void loadEngineFromSettings();
     void rebuildGenerator();
@@ -209,6 +213,7 @@ private:
     juce::String patchName { "Init" };
     juce::String patchCategory, patchOrigin, patchFile;    // of the loaded patch, for the Now Playing card
     bool patchFavourite = false;
+    Patch loadedSnapshot;                                  // values as loaded, to spot edits
     void writeFavouriteFlag (const juce::File&, bool);
     int generationToken = 0;                               // bumps per request; stale callbacks are ignored
     std::atomic<bool> cancelRequested { false };

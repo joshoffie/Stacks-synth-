@@ -29,7 +29,7 @@ public:
         favourite = isFavourite;
         growth = grow;
         setTooltip (p.name + (p.category.isNotEmpty() ? "  (" + p.category + ")" : "") + "\n" + p.description
-                    + "\n\nclick: hear   double-click: plant (evolve from it)   right-click: more");
+                    + "\n\nclick: hear   drag outward: wilder   right-click: plant / favourite");
         setTitle ("Audition " + name);
         repaint();
     }
@@ -87,11 +87,6 @@ public:
         const float d0 = dragStart.getDistanceFrom (centre), d1 = pos.getDistanceFrom (centre);
         garden.setVariation (juce::jlimit (0.0f, 1.0f, dragVariation + (d1 - d0) / 120.0f));
         garden.layoutLeaves();
-    }
-
-    void mouseDoubleClick (const juce::MouseEvent&) override
-    {
-        if (garden.onEvolveFrom) garden.onEvolveFrom (index);
     }
 
     std::unique_ptr<juce::AccessibilityHandler> createAccessibilityHandler() override
@@ -235,11 +230,6 @@ void GardenView::mouseDown (const juce::MouseEvent& e)
     }
 }
 
-void GardenView::mouseDoubleClick (const juce::MouseEvent& e)
-{
-    if (e.position.getDistanceFrom (seedCentre()) <= kSeedRadius && onEvolve)
-        onEvolve();
-}
 
 void GardenView::paint (juce::Graphics& g)
 {
@@ -268,6 +258,28 @@ void GardenView::paint (juce::Graphics& g)
     g.fillEllipse (centre.x - kSeedRadius, centre.y - kSeedRadius, 2.0f * kSeedRadius, 2.0f * kSeedRadius);
     g.setColour (colours::accent);
     g.drawEllipse (centre.x - kSeedRadius, centre.y - kSeedRadius, 2.0f * kSeedRadius, 2.0f * kSeedRadius, 1.6f);
+
+    // Progress ring while a generation grows: completed leaves plus the one being written.
+    if (generating && processor.engine().kind != EngineKind::Random)
+    {
+        int aiDone = 0;
+        for (const auto& c : lab.candidates) if (c.origin == "AI") ++aiDone;
+        const float total = (float) StacksAudioProcessor::kAiPatchesPerBatch;
+        const float frac = juce::jlimit (0.0f, 1.0f, ((float) aiDone + juce::jmax (0.0f, lab.progress)) / total);
+        const float rr = kSeedRadius + 5.0f;
+        juce::Path ring;
+        ring.addCentredArc (centre.x, centre.y, rr, rr, 0.0f, 0.0f, juce::MathConstants<float>::twoPi * frac, true);
+        g.setColour (colours::accent.withAlpha (0.9f));
+        g.strokePath (ring, juce::PathStrokeType (3.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        if (lab.progress < 0.0f)
+        {
+            const float t = (float) std::fmod (juce::Time::getMillisecondCounterHiRes() / 1200.0, 1.0) * juce::MathConstants<float>::twoPi;
+            juce::Path sweep;
+            sweep.addCentredArc (centre.x, centre.y, rr, rr, 0.0f, t, t + 0.9f, true);
+            g.setColour (colours::text.withAlpha (0.6f));
+            g.strokePath (sweep, juce::PathStrokeType (3.0f));
+        }
+    }
     g.setColour (colours::text);
     g.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
     g.drawFittedText (processor.currentPatchName(), juce::Rectangle<float> (centre.x - kSeedRadius + 4.0f, centre.y - kSeedRadius + 6.0f,
@@ -298,11 +310,11 @@ void GardenView::paint (juce::Graphics& g)
     if (hoveredLeaf >= 0 && hoveredLeaf < (int) lab.candidates.size())
         text = lab.candidates[(size_t) hoveredLeaf].description;
     else if (generating)
-        text = "growing...";
+        text = lab.progressDetail.isNotEmpty() ? lab.progressDetail : "growing...";
     else if (lab.candidates.empty())
-        text = "Right-click the seed for fresh ideas. Click a leaf to hear it, double-click to plant it, drag it outward for wilder children.";
+        text = "Press Fresh ideas to grow the first leaves. Click a leaf to hear it, drag it outward for wilder children.";
     else
-        text = "click a leaf: hear   -   double-click: plant & regrow   -   drag outward: wilder   -   double-click the seed: evolve";
+        text = "click a leaf: hear   -   drag outward: wilder   -   right-click a leaf: plant it   -   Evolve grows from the seed";
     g.drawFittedText (text, footer, juce::Justification::centred, 2, 0.9f);
 
     if (lab.generation > 0)

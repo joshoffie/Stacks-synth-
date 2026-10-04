@@ -23,10 +23,12 @@ struct GenerationProgress
 {
     std::function<void (const Patch&)> onPatch;          // one more candidate is ready
     std::function<void (const juce::String&)> onStatus;  // short progress text for the UI
+    std::function<void (float, const juce::String&)> onProgress; // 0..1 toward the next patch (-1 = unknown), with detail
     std::function<bool()> shouldCancel;                  // polled; true = stop as soon as possible
 
     void patch (const Patch& p) const        { if (onPatch) onPatch (p); }
     void status (const juce::String& s) const { if (onStatus) onStatus (s); }
+    void progress (float f, const juce::String& detail) const { if (onProgress) onProgress (f, detail); }
     bool cancelled() const                   { return shouldCancel && shouldCancel(); }
 };
 
