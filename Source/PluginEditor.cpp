@@ -62,8 +62,8 @@ StacksAudioProcessorEditor::StacksAudioProcessorEditor (StacksAudioProcessor& p)
     changeListenerCallback (nullptr);
 
     setResizable (true, true);
-    setResizeLimits (1300, 640, 2200, 1400);
-    setSize (1420, 700);
+    setResizeLimits (1340, 640, 2200, 1400);
+    setSize (1460, 700);
 }
 
 StacksAudioProcessorEditor::~StacksAudioProcessorEditor()

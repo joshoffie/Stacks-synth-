@@ -44,6 +44,7 @@ void PatchCard::set (const Patch& p, Style s, bool isAuditioned, bool isFavourit
     favourite = isFavourite;
     favButton.setColour (juce::TextButton::buttonColourId, favourite ? colours::accent : colours::panel);
     favButton.setTooltip (favourite ? "Stop breeding from this (it stays saved in the library)" : "Save into the open library folder and breed from it");
+    setTitle ((style == Style::nowPlaying ? "Now playing " : "Audition ") + name);
     repaint();
 }
 
@@ -56,6 +57,12 @@ void PatchCard::mouseDown (const juce::MouseEvent&)
 {
     if (onAudition)
         onAudition();
+}
+
+std::unique_ptr<juce::AccessibilityHandler> PatchCard::createAccessibilityHandler()
+{
+    return std::make_unique<juce::AccessibilityHandler> (*this, juce::AccessibilityRole::button,
+        juce::AccessibilityActions().addAction (juce::AccessibilityActionType::press, [this] { if (onAudition) onAudition(); }));
 }
 
 void PatchCard::paint (juce::Graphics& g)

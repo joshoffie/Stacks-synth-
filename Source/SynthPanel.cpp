@@ -89,6 +89,100 @@ private:
 };
 
 //==============================================================================
+WaveDisplay::WaveDisplay (StacksAudioProcessor& p, bool b, juce::Colour c) : processor (p), oscB (b), colour (c)
+{
+    setTooltip ("The oscillator's wave at its morph position. Click to import a wavetable (.wav, 2048-sample frames) into a User slot.");
+    setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    startTimerHz (12);
+}
+
+WaveDisplay::~WaveDisplay()
+{
+    stopTimer();
+}
+
+void WaveDisplay::timerCallback()
+{
+    const int wave = (int) processor.apvts.getRawParameterValue (paramId (oscB ? P::oscB_wave : P::oscA_wave))->load();
+    const float morph = processor.apvts.getRawParameterValue (paramId (oscB ? P::oscB_morph : P::oscA_morph))->load();
+    const auto name = wave >= WavetableBank::kNumBuiltIn ? processor.userWaveName (wave - WavetableBank::kNumBuiltIn) : juce::String();
+    if (wave != shownWave || std::abs (morph - shownMorph) > 0.002f || name != shownName)
+    {
+        shownWave = wave;
+        shownMorph = morph;
+        shownName = name;
+        repaint();
+    }
+}
+
+void WaveDisplay::paint (juce::Graphics& g)
+{
+    auto r = getLocalBounds().toFloat().reduced (1.0f, 15.0f).withTrimmedBottom (2.0f);
+    g.setColour (colours::background);
+    g.fillRoundedRectangle (r, 4.0f);
+
+    const int wave = juce::jmax (0, shownWave);
+    const float morph = juce::jlimit (0.0f, 1.0f, shownMorph);
+    const int user = wave - WavetableBank::kNumBuiltIn;
+    const UserTable* table = user >= 0 ? processor.userWavetables().active (user) : nullptr;
+
+    juce::Path path;
+    const int steps = 48;
+    for (int i = 0; i <= steps; ++i)
+    {
+        const float phase = (float) i / (float) steps;
+        float y = 0.0f;
+        if (user < 0)           y = processor.builtInWavetables().read (wave, 0, morph, phase >= 1.0f ? 0.999f : phase);
+        else if (table != nullptr) y = table->read (0, morph, phase >= 1.0f ? 0.999f : phase);
+        else                    y = std::sin (juce::MathConstants<float>::twoPi * phase);
+        const float px = r.getX() + 2.0f + phase * (r.getWidth() - 4.0f);
+        const float py = r.getCentreY() - y * (r.getHeight() * 0.5f - 3.0f);
+        if (i == 0) path.startNewSubPath (px, py); else path.lineTo (px, py);
+    }
+    g.setColour (user >= 0 && table == nullptr ? colours::muted : colour);
+    g.strokePath (path, juce::PathStrokeType (1.6f));
+
+    g.setColour (colours::muted);
+    g.setFont (juce::Font (juce::FontOptions (9.5f)));
+    const auto caption = user >= 0 ? (table != nullptr ? shownName.upToLastOccurrenceOf (".", false, false) : juce::String ("click to import"))
+                                   : juce::String ("import...");
+    g.drawText (caption, getLocalBounds().removeFromBottom (14), juce::Justification::centred, true);
+    g.drawText ("Shape", getLocalBounds().removeFromTop (14), juce::Justification::centred, true);
+}
+
+void WaveDisplay::mouseDown (const juce::MouseEvent&)
+{
+    importWavetable();
+}
+
+void WaveDisplay::importWavetable()
+{
+    const int wave = (int) processor.apvts.getRawParameterValue (paramId (oscB ? P::oscB_wave : P::oscA_wave))->load();
+    const int slot = wave >= WavetableBank::kNumBuiltIn ? wave - WavetableBank::kNumBuiltIn : processor.firstFreeUserSlot();
+
+    chooser = std::make_unique<juce::FileChooser> ("Import a wavetable (.wav with 2048-sample frames, Serum style)",
+                                                   juce::File::getSpecialLocation (juce::File::userHomeDirectory), "*.wav;*.aif;*.aiff");
+    chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                          [this, slot] (const juce::FileChooser& fc)
+                          {
+                              auto file = fc.getResult();
+                              if (! file.existsAsFile())
+                                  return;
+                              juce::String error;
+                              if (processor.importWavetable (file, slot, error))
+                              {
+                                  if (auto* param = processor.apvts.getParameter (paramId (oscB ? P::oscB_wave : P::oscA_wave)))
+                                      param->setValueNotifyingHost (param->convertTo0to1 ((float) (WavetableBank::kNumBuiltIn + slot)));
+                              }
+                              else
+                              {
+                                  juce::NativeMessageBox::showAsync (juce::MessageBoxOptions().withIconType (juce::MessageBoxIconType::WarningIcon)
+                                                                         .withTitle ("Couldn't import that wavetable").withMessage (error).withButton ("OK"), nullptr);
+                              }
+                          });
+}
+
+//==============================================================================
 SynthPanel::SynthPanel (StacksAudioProcessor& p) : processor (p), apvts (p.apvts)
 {
     setWantsKeyboardFocus (true);
@@ -157,6 +251,15 @@ SynthPanel::SynthPanel (StacksAudioProcessor& p) : processor (p), apvts (p.apvts
         addAndMakeVisible (*control);
         section->controls.emplace_back (control.get(), cellWidth);
         controls.push_back (std::move (control));
+
+        const juce::String id (spec.id);
+        if (id == "oscA_wave" || id == "oscB_wave")
+        {
+            auto display = std::make_unique<WaveDisplay> (processor, id == "oscB_wave", section->colour);
+            addAndMakeVisible (*display);
+            section->controls.emplace_back (display.get(), kCell);
+            controls.push_back (std::move (display));
+        }
     }
 
     // ...placed in fixed rows that follow the signal path.

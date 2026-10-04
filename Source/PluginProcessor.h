@@ -130,6 +130,14 @@ public:
     std::vector<int> modulationsFor (int source) const;      // slots using this source
     std::vector<std::pair<int, float>> modulationsOnParam (int paramIndex) const; // (source, amount)
 
+    // Imported wavetables ("User 1-4")
+    static juce::File wavetablesDirectory();
+    const UserWavetables& userWavetables() const           { return userWaves; }
+    const WavetableBank& builtInWavetables() const         { return *bank; }
+    juce::String userWaveName (int slot) const             { return userWaves.name (slot); }
+    bool importWavetable (const juce::File&, int slot, juce::String& error); // copies into the folder, loads, names the slot
+    int firstFreeUserSlot() const;
+
     // Drawn LFO shapes and the tables the UI can display
     LfoPoints lfoPoints (int k) const;
     void setLfoPoints (int k, const LfoPoints&);
@@ -149,6 +157,7 @@ private:
     void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override;
     void handleAsyncUpdate() override;                     // rebuilds LFO tables on the message thread
     void rebuildLfoTables();
+    void reloadUserWaves();                                // loads whatever the state tree names
     void attachStateListeners();
     void applyGlobalModulation();                          // modulated copy of the params for the effects
     juce::String labToJson() const;
@@ -157,6 +166,7 @@ private:
 
     // Synth engine
     juce::SharedResourcePointer<WavetableBank> bank;      // built once, shared by all instances
+    UserWavetables userWaves;                             // per instance, named in the state tree
     SynthParams params;                                   // base values this block
     SynthParams fxParams;                                 // base + global modulation, read by the effects
     VoiceContext voiceContext;

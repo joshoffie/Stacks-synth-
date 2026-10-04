@@ -96,7 +96,7 @@ Per batch the AI designs 5 patches that stream into the **✦ AI IDEAS** section
 as they arrive, while the random breeder's 5 land in a folded **RANDOM
 VARIATIONS** section underneath.
 
-**Library**: the LIBRARY tab browses `~/Documents/Stacks Patches`. Make folders,
+**Library**: the LIBRARY tab browses `~/Music/Stacks Patches`. Make folders,
 open them, click a patch to load it. The ♥ on any card (or on Now Playing)
 saves that patch into the open folder *and* adds it to "Breeding from", the
 set Evolve works from. A patch's "..." moves it to another folder or trashes it.
@@ -104,7 +104,7 @@ set Evolve works from. A patch's "..." moves it to another folder or trashes it.
 The engine choice is stored in `~/Library/Application Support/Stacks/`, next to
 `llama.log` (runtime + speed stats), `last-ai-prompt.txt`, `last-ai-reply.txt`
 and `grammar.gbnf` for prompt tuning. Patches are plain JSON (`Save…` / `Load…`,
-default folder `~/Documents/Stacks Patches`).
+default folder `~/Music/Stacks Patches`).
 
 ## Giving it to friends
 

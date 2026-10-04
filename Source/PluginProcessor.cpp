@@ -60,6 +60,7 @@ StacksAudioProcessor::StacksAudioProcessor()
     }
 
     voiceContext.bank = &*bank;
+    voiceContext.user = &userWaves;
     voiceContext.params = &params;
     voiceContext.lfoTables = &lfoTables;
 
@@ -72,6 +73,7 @@ StacksAudioProcessor::StacksAudioProcessor()
         apvts.addParameterListener (paramId (lfoShapeParam (k)), this);
     attachStateListeners();
     rebuildLfoTables();
+    reloadUserWaves();
 
     refreshModels();
     loadEngineFromSettings();
@@ -299,6 +301,7 @@ void StacksAudioProcessor::setStateInformation (const void* data, int sizeInByte
             apvts.replaceState (state);
             attachStateListeners();
             rebuildLfoTables();
+            reloadUserWaves();
         }
 
         auto lab = root.getChildWithName ("Lab");
@@ -320,21 +323,26 @@ void StacksAudioProcessor::attachStateListeners()
 {
     apvts.state.removeListener (this);
     apvts.state.getOrCreateChildWithName (Patch::lfoShapesTreeType(), nullptr);
+    apvts.state.getOrCreateChildWithName (Patch::userWavesTreeType(), nullptr);
     apvts.state.addListener (this);
 }
 
 void StacksAudioProcessor::parameterChanged (const juce::String&, float)     { triggerAsyncUpdate(); }
 void StacksAudioProcessor::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&)
 {
-    if (tree.hasType (Patch::lfoShapesTreeType()))
+    if (tree.hasType (Patch::lfoShapesTreeType()) || tree.hasType (Patch::userWavesTreeType()))
         triggerAsyncUpdate();
 }
 void StacksAudioProcessor::valueTreeChildAdded (juce::ValueTree&, juce::ValueTree& child)
 {
-    if (child.hasType (Patch::lfoShapesTreeType()))
+    if (child.hasType (Patch::lfoShapesTreeType()) || child.hasType (Patch::userWavesTreeType()))
         triggerAsyncUpdate();
 }
-void StacksAudioProcessor::handleAsyncUpdate()                               { rebuildLfoTables(); }
+void StacksAudioProcessor::handleAsyncUpdate()
+{
+    rebuildLfoTables();
+    reloadUserWaves();
+}
 
 void StacksAudioProcessor::rebuildLfoTables()
 {
@@ -518,6 +526,66 @@ void StacksAudioProcessor::timerCallback()
 {
     if (builtInBackend != nullptr && ! labState.generating)
         builtInBackend->unloadIfIdle (600.0); // ten minutes idle -> give the RAM back
+    userWaves.retireOld (5.0);                // replaced tables no voice can still be reading
+}
+
+//==============================================================================
+juce::File StacksAudioProcessor::wavetablesDirectory()
+{
+    return ModelManager::appDataDirectory().getChildFile ("wavetables");
+}
+
+int StacksAudioProcessor::firstFreeUserSlot() const
+{
+    for (int i = 0; i < UserWavetables::kSlots; ++i)
+        if (userWaves.active (i) == nullptr)
+            return i;
+    return 0;
+}
+
+bool StacksAudioProcessor::importWavetable (const juce::File& source, int slot, juce::String& error)
+{
+    if (! source.existsAsFile())
+    {
+        error = "file not found";
+        return false;
+    }
+    const auto dir = wavetablesDirectory();
+    dir.createDirectory();
+    auto target = dir.getChildFile (source.getFileName());
+    if (! source.isAChildOf (dir) && (! target.existsAsFile() || target.getSize() != source.getSize()))
+        if (! source.copyFileTo (target))
+        {
+            error = "could not copy the file into the Stacks wavetables folder";
+            return false;
+        }
+
+    auto table = loadUserTable (target, error);
+    if (table == nullptr)
+        return false;
+
+    slot = juce::jlimit (0, UserWavetables::kSlots - 1, slot);
+    userWaves.set (slot, std::move (table));
+    auto waves = apvts.state.getOrCreateChildWithName (Patch::userWavesTreeType(), nullptr);
+    waves.setProperty (Patch::userWaveProperty (slot), target.getFileName(), nullptr);
+    labBroadcaster.sendChangeMessage();
+    return true;
+}
+
+void StacksAudioProcessor::reloadUserWaves()
+{
+    auto waves = apvts.state.getChildWithName (Patch::userWavesTreeType());
+    if (! waves.isValid())
+        return;
+    for (int slot = 0; slot < UserWavetables::kSlots; ++slot)
+    {
+        const auto name = waves.getProperty (Patch::userWaveProperty (slot)).toString();
+        if (name.isEmpty() || name == userWaves.name (slot))
+            continue;
+        juce::String error;
+        if (auto table = loadUserTable (wavetablesDirectory().getChildFile (name), error))
+            userWaves.set (slot, std::move (table));
+    }
 }
 
 void StacksAudioProcessor::refreshModels()
@@ -786,9 +854,11 @@ void StacksAudioProcessor::audition (int index)
 }
 
 //==============================================================================
+// ~/Music rather than ~/Documents: Documents is behind a macOS privacy prompt
+// that blocks the plug-in on first launch inside a host.
 juce::File StacksAudioProcessor::libraryRoot()
 {
-    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("Stacks Patches");
+    return juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("Stacks Patches");
 }
 
 void StacksAudioProcessor::setLibraryFolder (const juce::File& folder)

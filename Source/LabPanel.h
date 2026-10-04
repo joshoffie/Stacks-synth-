@@ -21,6 +21,7 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
     void mouseDown (const juce::MouseEvent&) override;
+    std::unique_ptr<juce::AccessibilityHandler> createAccessibilityHandler() override;
 
     std::function<void()> onAudition, onFavourite;
 

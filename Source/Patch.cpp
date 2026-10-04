@@ -41,6 +41,17 @@ juce::var Patch::toVar() const
         obj->setProperty ("origin", origin);
     obj->setProperty ("params", paramsToVar());
 
+    bool anyWave = false;
+    for (const auto& w : userWaves) anyWave = anyWave || w.isNotEmpty();
+    if (anyWave)
+    {
+        auto* waves = new juce::DynamicObject();
+        for (int k = 0; k < 4; ++k)
+            if (userWaves[(size_t) k].isNotEmpty())
+                waves->setProperty ("user" + juce::String (k + 1), userWaves[(size_t) k]);
+        obj->setProperty ("userWaves", juce::var (waves));
+    }
+
     bool anyShape = false;
     for (const auto& sh : lfoShapes) anyShape = anyShape || sh.isNotEmpty();
     if (anyShape)
@@ -106,7 +117,16 @@ std::optional<Patch> Patch::fromVar (const juce::var& v, const Patch* base)
         p.category = base->category;
     p.origin = obj->getProperty ("origin").toString().trim();
     if (base != nullptr)
+    {
         p.lfoShapes = base->lfoShapes;
+        p.userWaves = base->userWaves;
+    }
+    if (auto* waves = obj->getProperty ("userWaves").getDynamicObject())
+        for (int k = 0; k < 4; ++k)
+        {
+            const auto v = waves->getProperty ("user" + juce::String (k + 1));
+            if (v.isString()) p.userWaves[(size_t) k] = v.toString();
+        }
     if (auto* shapes = obj->getProperty ("lfoShapes").getDynamicObject())
         for (int k = 0; k < kNumLfos; ++k)
         {
@@ -180,6 +200,17 @@ juce::Identifier Patch::lfoShapeProperty (int k)
     return juce::Identifier ("lfo" + juce::String (k + 1));
 }
 
+const juce::Identifier& Patch::userWavesTreeType()
+{
+    static const juce::Identifier type ("UserWaves");
+    return type;
+}
+
+juce::Identifier Patch::userWaveProperty (int slot)
+{
+    return juce::Identifier ("user" + juce::String (slot + 1));
+}
+
 Patch Patch::capture (const juce::AudioProcessorValueTreeState& apvts)
 {
     Patch p;
@@ -192,6 +223,11 @@ Patch Patch::capture (const juce::AudioProcessorValueTreeState& apvts)
     if (shapes.isValid())
         for (int k = 0; k < kNumLfos; ++k)
             p.lfoShapes[(size_t) k] = shapes.getProperty (lfoShapeProperty (k)).toString();
+
+    auto waves = apvts.state.getChildWithName (userWavesTreeType());
+    if (waves.isValid())
+        for (int k = 0; k < 4; ++k)
+            p.userWaves[(size_t) k] = waves.getProperty (userWaveProperty (k)).toString();
     return p;
 }
 
@@ -209,6 +245,13 @@ void Patch::applyTo (juce::AudioProcessorValueTreeState& apvts) const
         if (json.isNotEmpty()) shapes.setProperty (lfoShapeProperty (k), json, nullptr);
         else                   shapes.removeProperty (lfoShapeProperty (k), nullptr);
     }
+
+    // Only overwrite the user slots a patch actually names, so loading a patch
+    // that doesn't use them leaves the player's imports alone.
+    auto waves = apvts.state.getOrCreateChildWithName (userWavesTreeType(), nullptr);
+    for (int k = 0; k < 4; ++k)
+        if (userWaves[(size_t) k].isNotEmpty())
+            waves.setProperty (userWaveProperty (k), userWaves[(size_t) k], nullptr);
 }
 
 //==============================================================================

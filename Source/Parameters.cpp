@@ -6,7 +6,8 @@ namespace stacks
 const juce::StringArray& waveNames()
 {
     static const juce::StringArray names { "Sine", "Triangle", "Saw", "Pulse", "Sync",
-                                           "Organ", "Formant", "Glass", "Fold", "Grit" };
+                                           "Organ", "Formant", "Glass", "Fold", "Grit",
+                                           "User 1", "User 2", "User 3", "User 4" };
     return names;
 }
 

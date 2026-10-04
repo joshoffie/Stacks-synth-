@@ -9,6 +9,31 @@
 namespace stacks
 {
 
+// The oscillator's current cycle at its morph position. Click to import a
+// wavetable (.wav) into a User slot and switch the oscillator to it.
+class WaveDisplay : public juce::Component,
+                    public juce::SettableTooltipClient,
+                    private juce::Timer
+{
+public:
+    WaveDisplay (StacksAudioProcessor&, bool oscB, juce::Colour);
+    ~WaveDisplay() override;
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+
+private:
+    void timerCallback() override;
+    void importWavetable();
+
+    StacksAudioProcessor& processor;
+    bool oscB;
+    juce::Colour colour;
+    int shownWave = -1;
+    float shownMorph = -1.0f;
+    juce::String shownName;
+    std::unique_ptr<juce::FileChooser> chooser;
+};
+
 // All the synth controls in fixed, captioned rows that follow the signal path,
 // plus the modulators area. Owns the "assign a modulator to a knob" flow.
 class SynthPanel : public juce::Component,

@@ -22,6 +22,7 @@ struct Patch
     juce::String origin;                   // "AI" when a language model designed it, otherwise empty
     std::array<float, kNumParams> values;  // real-world values; Choice params hold the index
     std::array<juce::String, kNumLfos> lfoShapes; // drawn LFO shapes as point JSON, empty = none
+    std::array<juce::String, 4> userWaves;        // file names of the imported wavetables in User 1-4
     juce::String filePath;                 // library file this patch is saved as (not part of the JSON)
 
     float get (P p) const noexcept { return values[(size_t) p]; }
@@ -46,6 +47,8 @@ struct Patch
     // Where drawn LFO shapes live inside the processor's state tree.
     static const juce::Identifier& lfoShapesTreeType();
     static juce::Identifier lfoShapeProperty (int k);
+    static const juce::Identifier& userWavesTreeType();
+    static juce::Identifier userWaveProperty (int slot);
 };
 
 // Keeps a patch in tune with the note that is played: oscillator A only at

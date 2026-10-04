@@ -60,6 +60,13 @@ public:
         if (onOpen) onOpen();
     }
 
+    std::unique_ptr<juce::AccessibilityHandler> createAccessibilityHandler() override
+    {
+        setTitle ((isFolder ? "Open folder " : "Load patch ") + name);
+        return std::make_unique<juce::AccessibilityHandler> (*this, juce::AccessibilityRole::button,
+            juce::AccessibilityActions().addAction (juce::AccessibilityActionType::press, [this] { if (onOpen) onOpen(); }));
+    }
+
     void paint (juce::Graphics& g) override
     {
         auto r = getLocalBounds().reduced (2).toFloat();

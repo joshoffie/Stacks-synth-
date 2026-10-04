@@ -20,6 +20,7 @@ struct SynthSound : public juce::SynthesiserSound
 struct VoiceContext
 {
     const WavetableBank* bank = nullptr;
+    const UserWavetables* user = nullptr;     // imported tables, "User 1-4"
     const SynthParams* params = nullptr;      // base (unmodulated) values for this block
     const LfoTableBank* lfoTables = nullptr;
     std::atomic<float> lastNote { -1.0f };    // most recent note, for glide
@@ -65,6 +66,7 @@ private:
     float lfoValue (int shape, float phase, float held) const noexcept;
     void updateEnvelopes (const SynthParams&);
 
+    float readWave (int wave, int mip, float morph, float phase) const noexcept;
     float lfoValueFor (int k, const SynthParams& p, int sampleInBlock, int blockLen, float& heldOut) noexcept;
     float sourceValue (int source, const float* lfo, float filterEnvValue, float modEnvValue) const noexcept;
 

@@ -1,7 +1,9 @@
 #include "Wavetable.h"
 
 #include <juce_dsp/juce_dsp.h>
+#include <juce_audio_formats/juce_audio_formats.h>
 #include <cmath>
+#include <memory>
 
 namespace stacks
 {
@@ -104,55 +106,136 @@ double WavetableBank::sampleFn (int wave, double m, double p)
     }
 }
 
+void Tables::buildMips (const float* cycle, float* dst)
+{
+    static thread_local std::unique_ptr<juce::dsp::FFT> fft;
+    if (fft == nullptr)
+        fft = std::make_unique<juce::dsp::FFT> (11); // 2^11 == kSize
+
+    std::vector<float> time (cycle, cycle + kSize);
+
+    // Remove DC, normalise the full-bandwidth cycle to peak 1.
+    double mean = 0.0;
+    for (float v : time) mean += v;
+    mean /= kSize;
+    float peak = 1.0e-9f;
+    for (auto& v : time) { v -= (float) mean; peak = std::max (peak, std::abs (v)); }
+    for (auto& v : time) v /= peak;
+
+    std::vector<float> spectrum ((size_t) kSize * 2, 0.0f), work ((size_t) kSize * 2);
+    std::copy (time.begin(), time.end(), spectrum.begin());
+    fft->performRealOnlyForwardTransform (spectrum.data(), true);
+
+    for (int level = 0; level < kLevels; ++level)
+    {
+        const int maxHarmonic = (kSize / 2) >> level;
+        work = spectrum;
+        work[0] = work[1] = 0.0f; // DC
+        for (int h = maxHarmonic + 1; h <= kSize / 2; ++h)
+            work[(size_t) h * 2] = work[(size_t) h * 2 + 1] = 0.0f;
+        fft->performRealOnlyInverseTransform (work.data());
+
+        float* out = dst + (size_t) level * kStride;
+        std::copy (work.begin(), work.begin() + kSize, out);
+        out[kSize] = out[0];
+    }
+}
+
 WavetableBank::WavetableBank()
 {
-    data.assign ((size_t) kNumWaves * kFrames * kLevels * kStride, 0.0f);
+    data.assign ((size_t) kNumBuiltIn * kFrames * kLevels * kStride, 0.0f);
+    std::vector<float> cycle ((size_t) kSize);
 
-    juce::dsp::FFT fft (11); // 2^11 == kSize
-    std::vector<float> time ((size_t) kSize);
-    std::vector<float> spectrum ((size_t) kSize * 2);
-    std::vector<float> work ((size_t) kSize * 2);
-
-    for (int wave = 0; wave < kNumWaves; ++wave)
+    for (int wave = 0; wave < kNumBuiltIn; ++wave)
     {
         for (int frame = 0; frame < kFrames; ++frame)
         {
             const double morph = (double) frame / (double) (kFrames - 1);
-
-            double mean = 0.0;
             for (int i = 0; i < kSize; ++i)
-            {
-                time[(size_t) i] = (float) sampleFn (wave, morph, (double) i / kSize);
-                mean += time[(size_t) i];
-            }
-            mean /= kSize;
-
-            // Remove DC, normalise the full-bandwidth cycle to peak 1.
-            float peak = 1.0e-9f;
-            for (auto& s : time) { s -= (float) mean; peak = std::max (peak, std::abs (s)); }
-            for (auto& s : time) s /= peak;
-
-            std::fill (spectrum.begin(), spectrum.end(), 0.0f);
-            std::copy (time.begin(), time.end(), spectrum.begin());
-            fft.performRealOnlyForwardTransform (spectrum.data(), true);
-
-            for (int level = 0; level < kLevels; ++level)
-            {
-                const int maxHarmonic = (kSize / 2) >> level;
-
-                work = spectrum;
-                work[0] = work[1] = 0.0f; // DC
-                for (int h = maxHarmonic + 1; h <= kSize / 2; ++h)
-                    work[(size_t) h * 2] = work[(size_t) h * 2 + 1] = 0.0f;
-
-                fft.performRealOnlyInverseTransform (work.data());
-
-                float* dst = table (wave, frame, level);
-                std::copy (work.begin(), work.begin() + kSize, dst);
-                dst[kSize] = dst[0];
-            }
+                cycle[(size_t) i] = (float) sampleFn (wave, morph, (double) i / kSize);
+            Tables::buildMips (cycle.data(), data.data() + ((size_t) wave * kFrames + (size_t) frame) * kLevels * kStride);
         }
     }
+}
+
+//==============================================================================
+std::shared_ptr<UserTable> loadUserTable (const juce::File& file, juce::String& error)
+{
+    juce::AudioFormatManager formats;
+    formats.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
+    if (reader == nullptr)
+    {
+        error = "not an audio file I can read";
+        return nullptr;
+    }
+
+    const auto length = (int) juce::jmin<juce::int64> (reader->lengthInSamples, 2048LL * 512LL);
+    if (length < 64)
+    {
+        error = "file is too short";
+        return nullptr;
+    }
+
+    juce::AudioBuffer<float> buffer ((int) reader->numChannels, length);
+    reader->read (&buffer, 0, length, 0, true, true);
+
+    // Mono sum
+    std::vector<float> mono ((size_t) length, 0.0f);
+    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+        for (int i = 0; i < length; ++i)
+            mono[(size_t) i] += buffer.getReadPointer (ch)[i] / (float) buffer.getNumChannels();
+
+    // Frame size: Serum tables are 2048 per frame; anything else is treated as
+    // frames of its own length (or a single cycle) and resampled to 2048.
+    int frameSize = Tables::kSize;
+    if (length < Tables::kSize)                 frameSize = length;
+    else if (length % Tables::kSize != 0 && length % 1024 == 0) frameSize = 1024;
+    else if (length % Tables::kSize != 0 && length % 512 == 0)  frameSize = 512;
+
+    const int available = juce::jmax (1, length / frameSize);
+    const int frames = juce::jmin (64, available);
+
+    auto table = std::make_shared<UserTable>();
+    table->name = file.getFileName();
+    table->frames = frames;
+    table->data.assign ((size_t) frames * Tables::kLevels * Tables::kStride, 0.0f);
+
+    std::vector<float> cycle ((size_t) Tables::kSize);
+    for (int f = 0; f < frames; ++f)
+    {
+        // evenly spaced pick when the file has more frames than we keep
+        const int src = frames == available ? f : (int) ((juce::int64) f * (available - 1) / juce::jmax (1, frames - 1));
+        const float* in = mono.data() + (size_t) src * frameSize;
+        for (int i = 0; i < Tables::kSize; ++i)
+        {
+            const float pos = (float) i * (float) frameSize / (float) Tables::kSize;
+            const int i0 = (int) pos;
+            const int i1 = (i0 + 1) % frameSize;
+            const float t = pos - (float) i0;
+            cycle[(size_t) i] = in[i0] + t * (in[i1] - in[i0]);
+        }
+        Tables::buildMips (cycle.data(), table->data.data() + (size_t) f * Tables::kLevels * Tables::kStride);
+    }
+    return table;
+}
+
+void UserWavetables::set (int slot, std::shared_ptr<UserTable> table)
+{
+    if (slot < 0 || slot >= kSlots)
+        return;
+    if (owned[slot] != nullptr)
+        retired.emplace_back (owned[slot], juce::Time::getMillisecondCounterHiRes());
+    owned[slot] = std::move (table);
+    slots[slot].store (owned[slot].get(), std::memory_order_release);
+}
+
+void UserWavetables::retireOld (double olderThanSeconds)
+{
+    const double now = juce::Time::getMillisecondCounterHiRes();
+    retired.erase (std::remove_if (retired.begin(), retired.end(),
+                                   [&] (const auto& r) { return now - r.second > olderThanSeconds * 1000.0; }),
+                   retired.end());
 }
 
 } // namespace stacks
