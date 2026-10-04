@@ -613,12 +613,16 @@ juce::String describePatch (const Patch& p)
     if (p.get (P::glide) > 0.02f)  parts.add ("glide");
 
     // Motion
-    static const char* shortSource[] = { "", "LFO1", "LFO2", "LFO3", "LFO4", "FEnv", "MEnv", "Vel", "Key", "Wheel", "AT", "Rnd" };
+    static const char* shortSource[] = { "", "LFO1", "LFO2", "LFO3", "LFO4", "FEnv", "MEnv", "Vel", "Key", "Wheel", "AT", "Rnd",
+                                         "Bright", "Move", "Grit", "Space", "Width", "Length" };
+    static_assert (sizeof (shortSource) / sizeof (shortSource[0]) == kNumModSources, "a short name per modulation source");
     for (int i = 0; i < kNumModSlots; ++i)
     {
         const int src = juce::jlimit (0, kNumModSources - 1, (int) p.get (modSourceParam (i)));
         const int dst = juce::jlimit (0, modTargetNames().size() - 1, (int) p.get (modDestParam (i)));
         if (src == SrcOff || dst == TargetOff || std::abs (p.get (modAmountParam (i))) < 0.02f)
+            continue;
+        if (isMacroSource (src))   // the macro plumbing is on every sound; it isn't what makes this one special
             continue;
         parts.add (juce::String (shortSource[src]) + " > " + modTargetNames()[dst]);
     }

@@ -365,7 +365,7 @@ static void testArpeggiator()
     in.addEvent (juce::MidiMessage::noteOn (1, 64, (juce::uint8) 100), 0);
     int ons = 0, offs = 0, firstOnAt = -1, samplesDone = 0;
     std::vector<int> notes;
-    for (int block = 0; block < 94; ++block)
+    for (int block = 0; block < 188; ++block)
     {
         arp.process (in, 512, p, 120.0, std::nullopt, false);
         for (const auto meta : in)

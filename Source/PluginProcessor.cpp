@@ -47,6 +47,8 @@ namespace
     const juce::String kDot = juce::String (juce::CharPointer_UTF8 ("  \xc2\xb7  "));
 }
 
+static void installFactoryPresets();   // defined with the library code below
+
 StacksAudioProcessor::StacksAudioProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, nullptr, "PARAMS", createParameterLayout()),
