@@ -28,7 +28,7 @@ namespace
         if (auto* obj = v.getDynamicObject())
         {
             for (int i = 0; i < kNumModSlots; ++i)
-                if ((int) p.get (modSourceParam (i)) == SrcOff)
+                if ((int) p.get (modSourceParam (i)) == SrcOff || isMacroSource ((int) p.get (modSourceParam (i))))
                 {
                     obj->removeProperty (paramId (modSourceParam (i)));
                     obj->removeProperty (paramId (modDestParam (i)));
@@ -99,7 +99,7 @@ namespace
     bool isExtraParam (const char* id)
     {
         const juce::String s (id);
-        if (s == "master_gain" || isCoreParam (id) || s.startsWith ("mod") || s.startsWith ("lfo3_") || s.startsWith ("lfo4_"))
+        if (s == "master_gain" || isCoreParam (id) || s.startsWith ("mod") || s.startsWith ("lfo3_") || s.startsWith ("lfo4_") || s.startsWith ("macro") || s.startsWith ("arp_"))
             return false;
         if ((s.startsWith ("lfo1_") || s.startsWith ("lfo2_")) && (s.endsWith ("_shape") || s.endsWith ("_rate") || s.endsWith ("_sync")))
             return false;
@@ -334,8 +334,8 @@ juce::String LlmPatchGenerator::systemPrompt (bool designWaves)
     for (const auto& spec : paramSpecs())
     {
         juce::String id (spec.id);
-        if (id == "master_gain")
-            continue;
+        if (id == "master_gain" || id.startsWith ("macro") || id.startsWith ("arp_"))
+            continue;   // the player's big knobs and the arp are not the model's business
 
         juce::String suffix;
         if (id.startsWith ("lfo"))
@@ -755,6 +755,7 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
             }
         }
 
+        ensureMacroRoutings (*patch);
         patch->set (P::master_gain, -6.0f);
         patch->origin = "AI";
         patch->prompt = req.hint.trim();

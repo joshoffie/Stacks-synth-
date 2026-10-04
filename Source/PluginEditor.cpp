@@ -43,6 +43,16 @@ StacksAudioProcessorEditor::StacksAudioProcessorEditor (StacksAudioProcessor& p)
     settingsButton.setTooltip ("Settings: which AI model designs patches, your own models, calm mode, and the model guide");
     settingsButton.onClick = [this] { SettingsPanel::show (synthProcessor, this); };
     addAndMakeVisible (settingsButton);
+
+    undoButton.setButtonText (juce::String::fromUTF8 ("\xe2\x86\xb6"));   // undo arrow
+    undoButton.setTooltip ("Undo (Cmd+Z): back to the sound before the last load, drag or knob move");
+    undoButton.onClick = [this] { synthProcessor.undo(); };
+    addAndMakeVisible (undoButton);
+    redoButton.setButtonText (juce::String::fromUTF8 ("\xe2\x86\xb7"));
+    redoButton.setTooltip ("Redo (Shift+Cmd+Z)");
+    redoButton.onClick = [this] { synthProcessor.redo(); };
+    addAndMakeVisible (redoButton);
+    setWantsKeyboardFocus (true);
     addAndMakeVisible (synthPanel);
     addAndMakeVisible (labPanel);
 
@@ -54,8 +64,8 @@ StacksAudioProcessorEditor::StacksAudioProcessorEditor (StacksAudioProcessor& p)
     changeListenerCallback (nullptr);
 
     setResizable (true, true);
-    setResizeLimits (1340, 680, 2200, 1400);
-    setSize (1460, 736);
+    setResizeLimits (1340, 700, 2400, 1500);
+    setSize (1500, 820);
 }
 
 StacksAudioProcessorEditor::~StacksAudioProcessorEditor()
@@ -67,6 +77,17 @@ StacksAudioProcessorEditor::~StacksAudioProcessorEditor()
 void StacksAudioProcessorEditor::changeListenerCallback (juce::ChangeBroadcaster*)
 {
     patchName.setText (synthProcessor.currentPatchName(), juce::dontSendNotification);
+    undoButton.setEnabled (synthProcessor.canUndo());
+    redoButton.setEnabled (synthProcessor.canRedo());
+}
+
+bool StacksAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
+{
+    const bool cmd = key.getModifiers().isCommandDown();
+    if (cmd && key.getKeyCode() == 'Z' && key.getModifiers().isShiftDown()) { synthProcessor.redo(); return true; }
+    if (cmd && key.getKeyCode() == 'Z')  { synthProcessor.undo(); return true; }
+    if (cmd && key.getKeyCode() == 'Y')  { synthProcessor.redo(); return true; }
+    return false;
 }
 
 void StacksAudioProcessorEditor::paint (juce::Graphics& g)
@@ -84,6 +105,10 @@ void StacksAudioProcessorEditor::resized()
     auto header = r.removeFromTop (kHeaderHeight);
     masterKnob.setBounds (header.removeFromRight (64));
     settingsButton.setBounds (header.removeFromRight (30).withSizeKeepingCentre (26, 26));
+    header.removeFromRight (6);
+    redoButton.setBounds (header.removeFromRight (28).withSizeKeepingCentre (26, 26));
+    header.removeFromRight (2);
+    undoButton.setBounds (header.removeFromRight (28).withSizeKeepingCentre (26, 26));
     header.removeFromRight (6);
     title.setBounds (header.removeFromLeft (130).withTrimmedBottom (14));
     patchName.setBounds (header.removeFromLeft (juce::jmin (420, header.getWidth() / 2)).reduced (6, 0).withTrimmedBottom (14));

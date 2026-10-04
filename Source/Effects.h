@@ -1,6 +1,8 @@
 #pragma once
 
 #include <juce_audio_basics/juce_audio_basics.h>
+#include <juce_dsp/juce_dsp.h>
+#include <memory>
 #include <array>
 #include <vector>
 
@@ -159,6 +161,64 @@ private:
     float lfoPhase[2] {};
     PitchShifter shifter;
     float shimmerFeedback = 0.0f;
+};
+
+} // namespace stacks
+
+namespace stacks
+{
+
+//==============================================================================
+// Oversampled waveshaper: Soft / Hard / Tube / Fold / Crush, with a tone
+// control after it and a dry/wet mix.
+class DistortionFx
+{
+public:
+    struct Params { int mode = 0; float driveDb = 12.0f, toneHz = 8000.0f, mix = 0.0f; };
+
+    void prepare (double sampleRate, int maxBlock);
+    void reset();
+    void process (juce::AudioBuffer<float>&, const Params&);
+
+private:
+    double sr = 48000.0;
+    std::unique_ptr<juce::dsp::Oversampling<float>> os;
+    OnePole tone[2], dc[2];
+    float crushHeld[2] {};
+    int crushCount[2] {};
+    juce::AudioBuffer<float> dry;
+};
+
+// Three bands: low shelf, mid peak, high shelf.
+class EqFx
+{
+public:
+    struct Params { float lowGainDb = 0.0f, lowHz = 150.0f, midGainDb = 0.0f, midHz = 1200.0f, midQ = 1.0f, highGainDb = 0.0f, highHz = 6000.0f; };
+
+    void prepare (double sampleRate, int maxBlock);
+    void reset();
+    void process (juce::AudioBuffer<float>&, const Params&);
+
+private:
+    double sr = 48000.0;
+    juce::dsp::IIR::Filter<float> low[2], mid[2], high[2];
+    Params last;
+    bool primed = false;
+};
+
+// Glue at the end of the chain, with parallel mix.
+class CompressorFx
+{
+public:
+    struct Params { float thresholdDb = -18.0f, ratio = 4.0f, attackMs = 10.0f, releaseMs = 150.0f, makeupDb = 0.0f, mix = 0.0f; };
+
+    void prepare (double sampleRate, int maxBlock);
+    void reset();
+    void process (juce::AudioBuffer<float>&, const Params&);
+
+private:
+    juce::dsp::Compressor<float> comp;
+    juce::AudioBuffer<float> dry;
 };
 
 } // namespace stacks

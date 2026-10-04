@@ -48,6 +48,9 @@ void SynthVoice::setCurrentPlaybackSampleRate (double newRate)
     juce::dsp::ProcessSpec spec { newRate, (juce::uint32) kSub, 2 };
     filter.prepare (spec);
     filter.reset();
+    for (auto& c : comb) c.prepare ((int) (newRate / 20.0) + 8);
+    for (auto& s : svfA) s.reset();
+    for (auto& s : svfB) s.reset();
     ampEnv.setSampleRate (newRate);
     filterEnv.setSampleRate (newRate);
     modEnv.setSampleRate (newRate);
@@ -107,6 +110,9 @@ void SynthVoice::startNote (int midiNoteNumber, float vel, juce::SynthesiserSoun
 
     updateEnvelopes (p);
     filter.reset();
+    for (auto& s : svfA) s.reset();
+    for (auto& s : svfB) s.reset();
+    for (auto& c : comb) c.clear();
     ampEnv.noteOn();
     filterEnv.noteOn();
     modEnv.noteOn();
@@ -205,6 +211,58 @@ float SynthVoice::readWave (int osc, int wave, int mip, float morph, float phase
     return std::sin (twoPi * phase);
 }
 
+// Notch (a hole at the cutoff), Comb (a resonance at the cutoff's pitch) and
+// Formant (two vowel peaks; the cutoff sweeps A-E-I-O-U).
+void SynthVoice::processExtraFilter (int type, float cutoff, float res, int n, float fsr) noexcept
+{
+    float* L = scratch.getWritePointer (0);
+    float* R = scratch.getWritePointer (1);
+    float* ch[2] = { L, R };
+
+    if (type == 6)   // Notch
+    {
+        const float g = std::tan (juce::MathConstants<float>::pi * cutoff / fsr);
+        const float k = 1.0f / (0.7f + res * 8.0f);
+        for (int c = 0; c < 2; ++c)
+            for (int i = 0; i < n; ++i)
+            {
+                svfA[c].process (ch[c][i], g, k);
+                ch[c][i] = svfA[c].lp + svfA[c].hp;
+            }
+        return;
+    }
+    if (type == 7)   // Comb
+    {
+        const float delaySamples = juce::jlimit (2.0f, fsr / 20.0f, fsr / cutoff);
+        const float fb = res * 0.93f;
+        for (int c = 0; c < 2; ++c)
+            for (int i = 0; i < n; ++i)
+            {
+                const float z = comb[c].read (delaySamples);
+                const float y = ch[c][i] + fb * z;
+                comb[c].write (y);
+                ch[c][i] = 0.5f * (ch[c][i] + y);
+            }
+        return;
+    }
+    // Formant: F1/F2 of A, E, I, O, U, swept by the cutoff on a log scale.
+    static const float f1[] = { 730.0f, 530.0f, 390.0f, 570.0f, 440.0f };
+    static const float f2[] = { 1090.0f, 1840.0f, 1990.0f, 840.0f, 1020.0f };
+    const float pos = juce::jlimit (0.0f, 3.999f, std::log2 (juce::jmax (1.0f, cutoff / 150.0f)) / std::log2 (20000.0f / 150.0f) * 4.0f);
+    const int v0 = (int) pos; const float t = pos - (float) v0; const int v1 = juce::jmin (4, v0 + 1);
+    const float fa = f1[v0] + (f1[v1] - f1[v0]) * t, fb2 = f2[v0] + (f2[v1] - f2[v0]) * t;
+    const float ga = std::tan (juce::MathConstants<float>::pi * juce::jmin (fa, fsr * 0.45f) / fsr);
+    const float gb = std::tan (juce::MathConstants<float>::pi * juce::jmin (fb2, fsr * 0.45f) / fsr);
+    const float k = 1.0f / (2.0f + res * 16.0f);
+    for (int c = 0; c < 2; ++c)
+        for (int i = 0; i < n; ++i)
+        {
+            svfA[c].process (ch[c][i], ga, k);
+            svfB[c].process (ch[c][i], gb, k);
+            ch[c][i] = (svfA[c].bp + 0.7f * svfB[c].bp) * 2.2f;
+        }
+}
+
 // LFOs, Key and Random are bipolar (-1..1); envelopes and controllers are 0..1.
 float SynthVoice::sourceValue (int source, const float* lfo, float filterEnvValue, float modEnvValue) const noexcept
 {
@@ -221,6 +279,8 @@ float SynthVoice::sourceValue (int source, const float* lfo, float filterEnvValu
         case SrcModWheel:   return ctx.modWheel.load();
         case SrcAftertouch: return aftertouch;
         case SrcRandom:     return noteRandom;
+        case SrcMacro1: case SrcMacro2: case SrcMacro3: case SrcMacro4: case SrcMacro5: case SrcMacro6:
+                            return ctx.params->get (macroParam (source - SrcMacro1));   // the big knobs, shared by every voice
         default:            return 0.0f;
     }
 }
@@ -383,23 +443,29 @@ void SynthVoice::renderNextBlock (juce::AudioBuffer<float>& out, int startSample
         }
 
         // ---- filter --------------------------------------------------------
-        const auto wantedMode = filterModeFor (p.geti (P::filter_type));
-        if (wantedMode != filterMode)
-        {
-            filterMode = wantedMode;
-            filter.setMode (filterMode); // resets state, so only on a real change
-        }
+        const int filterType = p.geti (P::filter_type);
         const float keyTrack = p.get (P::filter_keytrack) * (currentNote - 60.0f) / 12.0f;
         float cutoff = p.get (P::filter_cutoff) * std::exp2 (envF * p.get (P::filter_env) + keyTrack);
         cutoff = juce::jlimit (20.0f, juce::jmin (20000.0f, fsr * 0.45f), cutoff);
-        filter.setCutoffFrequencyHz (cutoff);
-        filter.setResonance (juce::jlimit (0.0f, 1.0f, p.get (P::filter_res)));
-        filter.setDrive (juce::jmax (1.0f, p.get (P::filter_drive)));
+        if (filterType <= 5)
+        {
+            const auto wantedMode = filterModeFor (filterType);
+            if (wantedMode != filterMode)
+            {
+                filterMode = wantedMode;
+                filter.setMode (filterMode); // resets state, so only on a real change
+            }
+            filter.setCutoffFrequencyHz (cutoff);
+            filter.setResonance (juce::jlimit (0.0f, 1.0f, p.get (P::filter_res)));
+            filter.setDrive (juce::jmax (1.0f, p.get (P::filter_drive)));
 
-        juce::dsp::AudioBlock<float> block (scratch);
-        auto subBlock = block.getSubBlock (0, (size_t) n);
-        juce::dsp::ProcessContextReplacing<float> context (subBlock);
-        filter.process (context);
+            juce::dsp::AudioBlock<float> block (scratch);
+            auto subBlock = block.getSubBlock (0, (size_t) n);
+            juce::dsp::ProcessContextReplacing<float> context (subBlock);
+            filter.process (context);
+        }
+        else
+            processExtraFilter (filterType, cutoff, juce::jlimit (0.0f, 1.0f, p.get (P::filter_res)), n, fsr);
 
         // ---- amplitude, pan, output ----------------------------------------
         const float gl = std::sqrt (0.5f * (1.0f - pan)) * juce::MathConstants<float>::sqrt2;
@@ -429,6 +495,9 @@ void SynthVoice::renderNextBlock (juce::AudioBuffer<float>& out, int startSample
         {
             clearCurrentNote();
             filter.reset();
+    for (auto& s : svfA) s.reset();
+    for (auto& s : svfB) s.reset();
+    for (auto& c : comb) c.clear();
             break;
         }
     }

@@ -425,6 +425,32 @@ namespace
     }
 }
 
+void ensureMacroRoutings (Patch& p)
+{
+    for (int i = 0; i < kNumModSlots; ++i)
+        if (isMacroSource ((int) p.get (modSourceParam (i))))
+            return;
+    struct Route { int macro; P target; float depth; };
+    static const Route routes[] = {
+        { 0, P::filter_cutoff, 0.45f },
+        { 1, P::oscA_morph, 0.3f },     { 1, P::chorus_mix, 0.25f },
+        { 2, P::filter_drive, 0.5f },   { 2, P::fm_amount, 0.2f },
+        { 3, P::reverb_mix, 0.4f },     { 3, P::delay_mix, 0.2f },
+        { 4, P::unison_detune, 0.3f },  { 4, P::unison_spread, 0.3f },
+        { 5, P::aenv_release, 0.35f },  { 5, P::aenv_decay, 0.25f },
+    };
+    int slot = kNumModSlots - 1;
+    for (const auto& r : routes)
+    {
+        while (slot >= 0 && (int) p.get (modSourceParam (slot)) != SrcOff) --slot;
+        if (slot < 0) return;
+        p.set (modSourceParam (slot), (float) (SrcMacro1 + r.macro));
+        p.set (modDestParam (slot), (float) modTargetForParam ((int) r.target));
+        p.set (modAmountParam (slot), r.depth);
+        --slot;
+    }
+}
+
 Patch morphPatch (const Patch& from, const Patch& to, float t)
 {
     Patch out = to;

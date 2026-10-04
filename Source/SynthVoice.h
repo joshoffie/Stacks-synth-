@@ -5,6 +5,7 @@
 
 #include "Parameters.h"
 #include "Wavetable.h"
+#include "Effects.h"
 #include "LfoTable.h"
 
 namespace stacks
@@ -77,6 +78,24 @@ private:
     juce::ADSR ampEnv, filterEnv, modEnv;
     juce::dsp::LadderFilter<float> filter;
     juce::dsp::LadderFilterMode filterMode = juce::dsp::LadderFilterMode::LPF24;
+
+    // Notch, Comb and Formant: types the ladder doesn't do. A TPT state-variable
+    // filter (two per channel, the formant needs two peaks) and a comb line.
+    struct Svf
+    {
+        float ic1 = 0.0f, ic2 = 0.0f, lp = 0.0f, bp = 0.0f, hp = 0.0f;
+        void reset() noexcept { ic1 = ic2 = lp = bp = hp = 0.0f; }
+        void process (float x, float g, float k) noexcept
+        {
+            const float a1 = 1.0f / (1.0f + g * (g + k)), a2 = g * a1, a3 = g * a2;
+            const float v3 = x - ic2, v1 = a1 * ic1 + a2 * v3, v2 = ic2 + a2 * ic1 + a3 * v3;
+            ic1 = 2.0f * v1 - ic1; ic2 = 2.0f * v2 - ic2;
+            lp = v2; bp = v1; hp = x - k * v1 - v2;
+        }
+    };
+    Svf svfA[2], svfB[2];
+    FracDelay comb[2];
+    void processExtraFilter (int type, float cutoff, float res, int n, float fsr) noexcept;
     juce::AudioBuffer<float> scratch { 2, kSub };
     juce::Random rng;
 

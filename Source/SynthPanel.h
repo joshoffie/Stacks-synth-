@@ -56,11 +56,12 @@ public:
 
     void beginAssign (int source);
     void endAssign();
-    void setView (int rowIndex);                              // -1 = all rows
+    void setView (int rowIndex);                              // -1 = all rows, -2 = the macros page
 
 private:
     class RowContainer;
     class HelpStrip;
+    class MacroPage;
     struct Section
     {
         juce::String title;
@@ -99,6 +100,7 @@ private:
     std::unique_ptr<ModulatorsPanel> modulators;
     std::vector<std::unique_ptr<juce::TextButton>> viewButtons;
     std::unique_ptr<HelpStrip> help;
+    std::unique_ptr<MacroPage> macroPage;
     std::vector<juce::Component*> optionalDisplays;          // shown when the row has room (always in a single-row view)
     int viewMode = -1;                                        // -1 = all
     int assigningSource = -1;

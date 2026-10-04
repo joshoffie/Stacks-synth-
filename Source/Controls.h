@@ -35,6 +35,7 @@ public:
     ParamKnob (juce::AudioProcessorValueTreeState&, const ParamSpec&, bool compact = false);
     ~ParamKnob() override;
     void setAccent (juce::Colour);
+    void setLarge (bool);                              // bigger label and read-out for the macro page
     void setModulations (std::vector<KnobModulation>); // repaints the rings
     void setLiveValue (float realValue);               // where the modulation has the knob right now
     void clearLiveValue();

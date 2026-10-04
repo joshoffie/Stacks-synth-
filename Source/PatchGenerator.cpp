@@ -419,7 +419,7 @@ namespace
         for (int i = 0; i < kNumParams; ++i)
         {
             const auto& s = specs[(size_t) i];
-            if (std::strcmp (s.id, "master_gain") == 0)
+            if (std::strcmp (s.id, "master_gain") == 0 || std::strcmp (s.group, "MACROS") == 0 || std::strcmp (s.group, "ARP") == 0)
                 continue;
 
             if (s.kind == ParamKind::Choice)
@@ -427,7 +427,7 @@ namespace
                 const juce::String id (s.id);
                 const float chance = id.endsWith ("_wave") ? 0.3f : id.endsWith ("_dest") ? 0.04f : id.endsWith ("_source") ? 0.06f : 0.12f;
                 if (rng.chance (amount * chance))
-                    p.set (i, (float) rng.r.nextInt (id.endsWith ("_wave") ? WavetableBank::kNumBuiltIn : s.choices().size()));
+                    p.set (i, (float) rng.r.nextInt (id.endsWith ("_wave") ? WavetableBank::kNumBuiltIn : id.endsWith ("_source") ? (int) SrcMacro1 : s.choices().size()));
                 continue;
             }
 
@@ -632,7 +632,8 @@ int countAudibleDifferences (const Patch& a, const Patch& b)
     for (int i = 0; i < kNumParams; ++i)
     {
         const juce::String id (specs[(size_t) i].id);
-        if (id == "master_gain" || id.startsWith ("mod"))
+        const juce::String group (specs[(size_t) i].group);
+        if (id == "master_gain" || id.startsWith ("mod") || group == "MACROS" || group == "ARP")
             continue;
         if (specs[(size_t) i].kind == ParamKind::Choice)
         {
@@ -709,6 +710,7 @@ std::vector<Patch> RandomPatchGenerator::generate (const GenerationRequest& req,
             designWave (p, req, *bank, archetype, rng);
         applyHint (p, hintLower, rng);
         keepPatchInTune (p);
+        ensureMacroRoutings (p);
         p.set (P::master_gain, -6.0f);
         p.origin = "Random";
         p.prompt = req.hint.trim();

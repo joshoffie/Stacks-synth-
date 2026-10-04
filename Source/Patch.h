@@ -64,6 +64,10 @@ struct Patch
 // allowed when B is a silent modulator), fine detune and pitch-LFO depth capped.
 void keepPatchInTune (Patch&);
 
+// Gives a patch its macro routings if it has none: Brightness > Cutoff and so
+// on, in free slots from the top down, so every sound answers the big knobs.
+void ensureMacroRoutings (Patch&);
+
 // A blend of two sounds: t = 0 is `from`, 1 is `to`, past 1 keeps going in the
 // same direction (clamped to each knob's range). Knobs move in normalised
 // space; choices and designed tables switch over at 0.5. Kept in tune.

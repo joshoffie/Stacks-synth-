@@ -13,6 +13,8 @@ namespace
     const juce::Colour kFilter   { 0xffe8775a }; // coral
     const juce::Colour kMovement { 0xff5ec8c0 }; // teal
     const juce::Colour kSpace    { 0xff7fa7d8 }; // blue
+    const juce::Colour kShape    { 0xffd08ab8 }; // rose
+    const juce::Colour kMacro    { 0xffe0c070 }; // gold
 
     const char* kModulatorsGroup = "__MODULATORS__";
 
@@ -23,7 +25,8 @@ namespace
         static const std::vector<RowSpec> specs = {
             { "SOUND",      kSound,    0, { "OSC A", "OSC B", "MIX" } },
             { "FILTER",     kFilter,   0, { "FILTER", "FILTER ENV", "AMP ENV" } },
-            { "MODULATORS", kMovement, SynthPanel::kModulatorsHeight, { kModulatorsGroup, "VOICE" } },
+            { "MODULATORS", kMovement, SynthPanel::kModulatorsHeight, { kModulatorsGroup, "VOICE", "ARP" } },
+            { "SHAPE",      kShape,    0, { "DISTORTION", "EQ", "COMPRESSOR" } },
             { "SPACE",      kSpace,    0, { "CHORUS", "DELAY", "REVERB" } },
         };
         return specs;
@@ -289,11 +292,13 @@ private:
         {
             static const char* const screens[] = {
                 "SOUND is where the tone starts: two wavetable oscillators (A and B, B can FM A), a sub for weight and noise for air. Morph slides through each table.",
-                "FILTER shapes the tone: cutoff is brightness, resonance a peak at the cutoff. The filter envelope moves the cutoff per note; the amp envelope shapes loudness.",
-                "MODULATORS make things move: draw an LFO, press Assign and click any knob - it swings around its value. The Mod Env is a spare envelope for anything.",
+                "FILTER shapes the tone: cutoff is brightness, resonance a peak at the cutoff (Notch, Comb and Formant are special flavours). The filter envelope moves the cutoff per note; the amp envelope shapes loudness.",
+                "MODULATORS make things move: draw an LFO, press Assign and click any knob - it swings around its value. The Arp plays held notes as a pattern in time with the host.",
+                "SHAPE adds character: distortion (soft, hard, tube, fold, crush), a three-band EQ, and a compressor at the end of the chain for glue.",
                 "SPACE is the room: chorus for width and shimmer, delay for echoes (in time with the host), reverb for the tail. The 'more' buttons hold the fine print.",
             };
-            if (panel.viewMode >= 0 && panel.viewMode < 4) newBody = screens[panel.viewMode];
+            if (panel.viewMode == -2) newBody = "MACROS: six big knobs wired for this sound. Brightness opens the filter, Movement adds motion, Grit adds dirt, Space adds room, Width spreads it, Length holds it.";
+            else if (panel.viewMode >= 0 && panel.viewMode < 5) newBody = screens[panel.viewMode];
             else newBody = "Hover any control to see what it does. The tabs above open one section at a time, larger. Signal flows top to bottom: SOUND > FILTER > MODULATORS > SPACE.";
         }
         if (newTitle != title || newBody != body)
@@ -309,8 +314,92 @@ private:
 };
 
 //==============================================================================
+// The first screen: six big knobs every sound answers. Under each one, what it
+// is wired to right now (the model or the defaults decide per patch).
+class SynthPanel::MacroPage : public juce::Component
+{
+public:
+    MacroPage (StacksAudioProcessor& p, juce::AudioProcessorValueTreeState& apvts) : processor (p)
+    {
+        for (int k = 0; k < kNumMacros; ++k)
+        {
+            auto knob = std::make_unique<ParamKnob> (apvts, spec (macroParam (k)));
+            knob->setAccent (kMacro);
+            knob->setLarge (true);
+            addAndMakeVisible (*knob);
+            knobs.push_back (std::move (knob));
+        }
+        refreshTargets();
+    }
+
+    void refreshTargets()
+    {
+        targets.clear();
+        for (int k = 0; k < kNumMacros; ++k)
+        {
+            juce::StringArray parts;
+            for (int slot : processor.modulationsFor (SrcMacro1 + k))
+            {
+                const int target = (int) processor.apvts.getRawParameterValue (paramId (modDestParam (slot)))->load();
+                const float amount = processor.apvts.getRawParameterValue (paramId (modAmountParam (slot)))->load();
+                if (target <= 0) continue;
+                parts.add (modTargetNames()[juce::jlimit (0, modTargetNames().size() - 1, target)] + " " + (amount >= 0 ? "+" : "") + juce::String (juce::roundToInt (amount * 100)) + "%");
+            }
+            targets.add (parts.isEmpty() ? juce::String ("not wired - press Assign in MODULATORS") : parts.joinIntoString ("   "));
+            std::vector<KnobModulation> mods;
+            for (const auto& m : processor.modulationsOnParam ((int) macroParam (k))) mods.push_back ({ m.slot, m.source, m.amount });
+            knobs[(size_t) k]->setModulations (mods);
+        }
+        repaint();
+    }
+
+    void resized() override
+    {
+        auto r = getLocalBounds().reduced (24, 8);
+        r.removeFromTop (34);
+        const int cols = 3, rows = 2;
+        const int w = r.getWidth() / cols, h = r.getHeight() / rows;
+        for (int k = 0; k < kNumMacros; ++k)
+        {
+            auto cell = juce::Rectangle<int> (r.getX() + (k % cols) * w, r.getY() + (k / cols) * h, w, h);
+            cell.removeFromBottom (26);   // the target line
+            const int side = juce::jmin (cell.getWidth(), cell.getHeight());
+            knobs[(size_t) k]->setBounds (cell.withSizeKeepingCentre (side, side));
+        }
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        auto r = getLocalBounds().reduced (24, 8);
+        auto title = r.removeFromTop (34);
+        g.setColour (colours::muted);
+        g.setFont (StacksLookAndFeel::font (12.5f));
+        g.drawFittedText ("Six knobs every sound answers. Turn them and listen; the lines below say what each one is moving for this patch. "
+                          "To rewire one: MODULATORS > MORE, pick the macro, press Assign, click a knob.", title, juce::Justification::centredLeft, 2);
+        const int cols = 3, rows = 2;
+        const int w = r.getWidth() / cols, h = r.getHeight() / rows;
+        g.setFont (StacksLookAndFeel::font (11.5f));
+        for (int k = 0; k < kNumMacros; ++k)
+        {
+            auto cell = juce::Rectangle<int> (r.getX() + (k % cols) * w, r.getY() + (k / cols) * h, w, h);
+            auto line = cell.removeFromBottom (26).reduced (6, 0);
+            g.setColour (targets[k].startsWith ("not wired") ? colours::muted : kMacro.withAlpha (0.9f));
+            g.drawFittedText (targets[k], line, juce::Justification::centred, 1);
+        }
+    }
+
+private:
+    StacksAudioProcessor& processor;
+    std::vector<std::unique_ptr<ParamKnob>> knobs;
+    juce::StringArray targets;
+};
+
+//==============================================================================
 SynthPanel::SynthPanel (StacksAudioProcessor& p) : processor (p), apvts (p.apvts)
 {
+    macroPage = std::make_unique<MacroPage> (p, apvts);
+    addChildComponent (*macroPage);
+
     help = std::make_unique<HelpStrip> (*this);
     addAndMakeVisible (*help);
 
@@ -453,6 +542,7 @@ SynthPanel::SynthPanel (StacksAudioProcessor& p) : processor (p), apvts (p.apvts
         addAndMakeVisible (*b);
         viewButtons.push_back (std::move (b));
     };
+    addViewButton ("MACROS", -2, kMacro);
     addViewButton ("ALL", -1, colours::accent);
     for (int i = 0; i < (int) rows.size(); ++i)
         addViewButton (rows[(size_t) i].caption, i, rows[(size_t) i].colour);
@@ -498,6 +588,7 @@ void SynthPanel::handleAsyncUpdate()
 
 void SynthPanel::refreshModulationDisplay()
 {
+    if (macroPage) macroPage->refreshTargets();
     for (auto* knob : knobs)
     {
         std::vector<KnobModulation> mods;
@@ -570,9 +661,11 @@ void SynthPanel::setView (int rowIndex)
 {
     viewMode = rowIndex;
     for (int i = 0; i < (int) viewButtons.size(); ++i)
-        viewButtons[(size_t) i]->setToggleState (i - 1 == rowIndex, juce::dontSendNotification);
+        viewButtons[(size_t) i]->setToggleState (i - 2 == rowIndex, juce::dontSendNotification);
     for (int i = 0; i < (int) rows.size(); ++i)
-        rows[(size_t) i].container->setVisible (viewMode < 0 || viewMode == i);
+        rows[(size_t) i].container->setVisible (viewMode == -1 || viewMode == i);
+    macroPage->setVisible (viewMode == -2);
+    if (viewMode == -2) macroPage->refreshTargets();
     resized();
     repaint();
 }
@@ -596,6 +689,7 @@ void SynthPanel::resized()
     area.removeFromTop (6);
     help->setBounds (area.removeFromBottom (24));
     area.removeFromBottom (4);
+    macroPage->setBounds (area);
 
     const int normalH = kTitleH + kCellH + kPad;
 
@@ -612,7 +706,7 @@ void SynthPanel::resized()
                 full += 2 * kPad + kGap;
                 for (const auto& [component, cellWidth] : section->controls) full += cellWidth;
             }
-            if (full > area.getWidth() - 8) compact = true;
+            if ((float) full * 0.85f > (float) (area.getWidth() - 8)) compact = true;
         }
 
     // Lay every row out in its own container at natural size...
@@ -644,15 +738,19 @@ void SynthPanel::resized()
         row.container->setSize (row.naturalWidth, row.height);
     }
 
-    // ...then place them: stacked for ALL, or one row scaled to fill.
+    // ...then place them: stacked for ALL (scaled down together if they don't
+    // fit), or one row scaled to fill.
     if (viewMode < 0)
     {
-        int y = area.getY() + kPad;
+        int totalH = 2 * kPad, maxW = 1;
+        for (const auto& row : rows) { totalH += row.height + kGap; maxW = juce::jmax (maxW, row.naturalWidth); }
+        const float scale = juce::jmin (1.0f, (float) (area.getWidth() - 4) / (float) maxW, (float) (area.getHeight() - 4) / (float) totalH);
+        float y = (float) area.getY() + kPad * scale;
         for (auto& row : rows)
         {
-            row.container->setTransform ({});
-            row.container->setTopLeftPosition (0, y);
-            y += row.height + kGap;
+            row.container->setTopLeftPosition (0, 0);
+            row.container->setTransform (juce::AffineTransform::scale (scale).translated ((float) area.getX(), y));
+            y += (row.height + kGap) * scale;
         }
     }
     else if (viewMode < (int) rows.size())

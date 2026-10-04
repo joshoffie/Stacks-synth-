@@ -16,6 +16,8 @@ juce::Colour modSourceColour (int source)
         case SrcVelocity:   return juce::Colour (0xff8fd18f);
         case SrcKey:        return juce::Colour (0xffc8c86a);
         case SrcModWheel:   return juce::Colour (0xffd9a06a);
+        case SrcMacro1: case SrcMacro2: case SrcMacro3: case SrcMacro4: case SrcMacro5: case SrcMacro6:
+                            return juce::Colour (0xffe0c070);   // the big knobs: gold
         case SrcAftertouch: return juce::Colour (0xffc08cf0);
         case SrcRandom:     return juce::Colour (0xffa0a0a0);
         default:            return colours::muted;
@@ -209,6 +211,14 @@ std::unique_ptr<juce::AccessibilityHandler> ParamKnob::createAccessibilityHandle
         }));
 }
 
+void ParamKnob::setLarge (bool large)
+{
+    label.setFont (juce::Font (juce::FontOptions (large ? 15.0f : 11.0f, large ? juce::Font::bold : juce::Font::plain)));
+    label.setColour (juce::Label::textColourId, large ? colours::text : colours::muted);
+    if (! compact) slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, large ? 80 : 58, large ? 20 : 15);
+    resized();
+}
+
 void ParamKnob::clearLiveValue()
 {
     if (liveNorm >= 0.0f) { liveNorm = -1.0f; repaint(); }
@@ -217,7 +227,7 @@ void ParamKnob::clearLiveValue()
 void ParamKnob::resized()
 {
     auto r = getLocalBounds();
-    label.setBounds (r.removeFromTop (14));
+    label.setBounds (r.removeFromTop (label.getFont().getHeight() > 13.0f ? 22 : 14));
     slider.setBounds (r);
     if (overlay) overlay->setBounds (r);
 }

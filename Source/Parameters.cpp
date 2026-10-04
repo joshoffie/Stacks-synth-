@@ -13,7 +13,31 @@ const juce::StringArray& waveNames()
 
 const juce::StringArray& filterTypeNames()
 {
-    static const juce::StringArray names { "LP12", "LP24", "HP12", "HP24", "BP12", "BP24" };
+    static const juce::StringArray names { "LP12", "LP24", "HP12", "HP24", "BP12", "BP24", "Notch", "Comb", "Formant" };
+    return names;
+}
+
+const juce::StringArray& distModeNames()
+{
+    static const juce::StringArray names { "Soft", "Hard", "Tube", "Fold", "Crush" };
+    return names;
+}
+
+const juce::StringArray& arpModeNames()
+{
+    static const juce::StringArray names { "Off", "Up", "Down", "Up-Down", "Random", "As Played" };
+    return names;
+}
+
+const juce::StringArray& arpRateNames()
+{
+    static const juce::StringArray names { "1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32" };
+    return names;
+}
+
+const juce::StringArray& macroNames()
+{
+    static const juce::StringArray names { "Brightness", "Movement", "Grit", "Space", "Width", "Length" };
     return names;
 }
 
@@ -43,7 +67,8 @@ const juce::StringArray& lfoModeNames()
 
 const juce::StringArray& modSourceNames()
 {
-    static const juce::StringArray names { "Off", "LFO 1", "LFO 2", "LFO 3", "LFO 4", "Filter Env", "Mod Env", "Velocity", "Key", "Mod Wheel", "Aftertouch", "Random" };
+    static const juce::StringArray names { "Off", "LFO 1", "LFO 2", "LFO 3", "LFO 4", "Filter Env", "Mod Env", "Velocity", "Key", "Mod Wheel", "Aftertouch", "Random",
+                                           "Brightness", "Movement", "Grit", "Space", "Width", "Length" };
     return names;
 }
 
@@ -68,8 +93,9 @@ namespace
                 const auto& sp = specs[(size_t) i];
                 const juce::String id (sp.id);
                 const bool modSlot = id.startsWith ("mod") && (id.endsWith ("_amount") || id.endsWith ("_source") || id.endsWith ("_dest"));
-                if (sp.kind != ParamKind::Float || modSlot || id == "master_gain")
-                    continue;
+                const juce::String group (sp.group);
+                if (sp.kind != ParamKind::Float || modSlot || id == "master_gain" || group == "MACROS" || group == "ARP")
+                    continue;   // macros and the arp are sources and a player, not targets
                 targetForParam[(size_t) i] = names.size();
                 names.add (sp.name);
                 paramForTarget.push_back (i);
@@ -134,7 +160,8 @@ bool isAdvancedParam (const char* id)
 {
     static const juce::StringArray advanced { "chorus_voices", "chorus_feedback", "chorus_spread", "chorus_tone",
                                               "delay_tone", "delay_hpf", "delay_wow", "delay_width",
-                                              "reverb_predelay", "reverb_lowcut", "reverb_highcut", "reverb_mod", "reverb_shimmer", "reverb_width" };
+                                              "reverb_predelay", "reverb_lowcut", "reverb_highcut", "reverb_mod", "reverb_shimmer", "reverb_width",
+                                              "dist_tone", "eq_low_freq", "eq_mid_freq", "eq_mid_q", "eq_high_freq", "comp_attack", "comp_release", "arp_swing" };
     return advanced.contains (id);
 }
 
@@ -149,6 +176,7 @@ P modSourceParam (int slot) { return offsetFrom (P::mod1_source, juce::jlimit (0
 P modDestParam (int slot)   { return offsetFrom (P::mod1_dest,   juce::jlimit (0, kNumModSlots - 1, slot), 3); }
 P modAmountParam (int slot) { return offsetFrom (P::mod1_amount, juce::jlimit (0, kNumModSlots - 1, slot), 3); }
 
+P macroParam (int k)    { return offsetFrom (P::macro1, juce::jlimit (0, kNumMacros - 1, k), 1); }
 P lfoShapeParam (int k) { return offsetFrom (P::lfo1_shape, juce::jlimit (0, kNumLfos - 1, k), 5); }
 P lfoRateParam (int k)  { return offsetFrom (P::lfo1_rate,  juce::jlimit (0, kNumLfos - 1, k), 5); }
 P lfoSyncParam (int k)  { return offsetFrom (P::lfo1_sync,  juce::jlimit (0, kNumLfos - 1, k), 5); }

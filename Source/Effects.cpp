@@ -366,3 +366,166 @@ void ReverbFx::process (juce::AudioBuffer<float>& buffer, const Params& prm)
 }
 
 } // namespace stacks
+
+namespace stacks
+{
+
+//==============================================================================
+void DistortionFx::prepare (double sampleRate, int maxBlock)
+{
+    sr = sampleRate;
+    os = std::make_unique<juce::dsp::Oversampling<float>> (2, 1, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true);
+    os->initProcessing ((size_t) juce::jmax (1, maxBlock));
+    dry.setSize (2, juce::jmax (1, maxBlock));
+    reset();
+}
+
+void DistortionFx::reset()
+{
+    if (os) os->reset();
+    for (auto& t : tone) t.reset();
+    for (auto& d : dc) d.reset();
+    crushHeld[0] = crushHeld[1] = 0.0f;
+    crushCount[0] = crushCount[1] = 0;
+}
+
+void DistortionFx::process (juce::AudioBuffer<float>& buffer, const Params& p)
+{
+    const int n = buffer.getNumSamples();
+    if (p.mix < 0.0005f || os == nullptr)
+        return;
+    dry.setSize (2, n, false, false, true);
+    for (int ch = 0; ch < 2; ++ch)
+        dry.copyFrom (ch, 0, buffer, ch, 0, n);
+
+    const float g = juce::Decibels::decibelsToGain (juce::jlimit (0.0f, 36.0f, p.driveDb));
+    const float norm = p.mode == 1 ? 1.0f : 1.0f / std::tanh (juce::jmin (g, 4.0f));
+    const int holdEvery = 1 + (int) (p.driveDb / 36.0f * 24.0f);
+    const float step = std::exp2 (1.0f - (16.0f - p.driveDb / 36.0f * 13.0f));   // crush: 16 bits down to 3
+
+    juce::dsp::AudioBlock<float> block (buffer);
+    auto sub = block.getSubBlock (0, (size_t) n);
+    auto up = os->processSamplesUp (sub);
+    for (size_t ch = 0; ch < up.getNumChannels(); ++ch)
+    {
+        float* x = up.getChannelPointer (ch);
+        for (size_t i = 0; i < up.getNumSamples(); ++i)
+        {
+            const float v = x[i] * g;
+            float y;
+            switch (p.mode)
+            {
+                case 1:  y = juce::jlimit (-1.0f, 1.0f, v); break;                                   // Hard
+                case 2:  y = std::tanh (v + 0.12f * v * std::abs (v)) * norm; break;                 // Tube: even harmonics
+                case 3:  y = std::sin (juce::MathConstants<float>::halfPi * juce::jlimit (-3.0f, 3.0f, v)); break; // Fold
+                case 4:                                                                              // Crush
+                {
+                    const int c = (int) juce::jmin (ch, (size_t) 1);
+                    if (++crushCount[c] >= holdEvery) { crushCount[c] = 0; crushHeld[c] = std::round (juce::jlimit (-1.0f, 1.0f, v) / step) * step; }
+                    y = crushHeld[c];
+                    break;
+                }
+                default: y = std::tanh (v) * norm; break;                                             // Soft
+            }
+            x[i] = y;
+        }
+    }
+    os->processSamplesDown (sub);
+
+    const float toneC = onePoleCoef (p.toneHz, sr), dcC = onePoleCoef (12.0f, sr);
+    for (int ch = 0; ch < 2; ++ch)
+    {
+        float* out = buffer.getWritePointer (ch);
+        const float* in = dry.getReadPointer (ch);
+        for (int i = 0; i < n; ++i)
+        {
+            float y = tone[ch].lp (out[i], toneC);
+            y = dc[ch].hp (y, dcC);
+            out[i] = in[i] + (y - in[i]) * p.mix;
+        }
+    }
+}
+
+//==============================================================================
+void EqFx::prepare (double sampleRate, int maxBlock)
+{
+    juce::ignoreUnused (maxBlock);
+    sr = sampleRate;
+    primed = false;
+    reset();
+}
+
+void EqFx::reset()
+{
+    for (int ch = 0; ch < 2; ++ch) { low[ch].reset(); mid[ch].reset(); high[ch].reset(); }
+}
+
+void EqFx::process (juce::AudioBuffer<float>& buffer, const Params& p)
+{
+    const bool flat = std::abs (p.lowGainDb) < 0.05f && std::abs (p.midGainDb) < 0.05f && std::abs (p.highGainDb) < 0.05f;
+    if (flat) { primed = false; return; }
+
+    auto differs = [] (float a, float b) { return std::abs (a - b) > 1.0e-3f; };
+    if (! primed || differs (p.lowGainDb, last.lowGainDb) || differs (p.lowHz, last.lowHz) || differs (p.midGainDb, last.midGainDb)
+        || differs (p.midHz, last.midHz) || differs (p.midQ, last.midQ) || differs (p.highGainDb, last.highGainDb) || differs (p.highHz, last.highHz))
+    {
+        const float nyq = (float) sr * 0.45f;
+        auto lowC  = juce::dsp::IIR::Coefficients<float>::makeLowShelf  (sr, juce::jlimit (20.0f, nyq, p.lowHz),  0.707f, juce::Decibels::decibelsToGain (p.lowGainDb));
+        auto midC  = juce::dsp::IIR::Coefficients<float>::makePeakFilter (sr, juce::jlimit (20.0f, nyq, p.midHz),  juce::jlimit (0.1f, 10.0f, p.midQ), juce::Decibels::decibelsToGain (p.midGainDb));
+        auto highC = juce::dsp::IIR::Coefficients<float>::makeHighShelf (sr, juce::jlimit (20.0f, nyq, p.highHz), 0.707f, juce::Decibels::decibelsToGain (p.highGainDb));
+        for (int ch = 0; ch < 2; ++ch) { low[ch].coefficients = lowC; mid[ch].coefficients = midC; high[ch].coefficients = highC; }
+        last = p;
+        if (! primed) reset();
+        primed = true;
+    }
+    const int n = buffer.getNumSamples();
+    for (int ch = 0; ch < 2; ++ch)
+    {
+        float* x = buffer.getWritePointer (ch);
+        for (int i = 0; i < n; ++i)
+            x[i] = high[ch].processSample (mid[ch].processSample (low[ch].processSample (x[i])));
+    }
+}
+
+//==============================================================================
+void CompressorFx::prepare (double sampleRate, int maxBlock)
+{
+    juce::dsp::ProcessSpec spec { sampleRate, (juce::uint32) juce::jmax (1, maxBlock), 2 };
+    comp.prepare (spec);
+    dry.setSize (2, juce::jmax (1, maxBlock));
+    reset();
+}
+
+void CompressorFx::reset()
+{
+    comp.reset();
+}
+
+void CompressorFx::process (juce::AudioBuffer<float>& buffer, const Params& p)
+{
+    if (p.mix < 0.0005f)
+        return;
+    const int n = buffer.getNumSamples();
+    dry.setSize (2, n, false, false, true);
+    for (int ch = 0; ch < 2; ++ch)
+        dry.copyFrom (ch, 0, buffer, ch, 0, n);
+
+    comp.setThreshold (p.thresholdDb);
+    comp.setRatio (juce::jmax (1.0f, p.ratio));
+    comp.setAttack (p.attackMs);
+    comp.setRelease (p.releaseMs);
+    juce::dsp::AudioBlock<float> block (buffer);
+    juce::dsp::ProcessContextReplacing<float> context (block);
+    comp.process (context);
+
+    const float makeup = juce::Decibels::decibelsToGain (p.makeupDb);
+    for (int ch = 0; ch < 2; ++ch)
+    {
+        float* out = buffer.getWritePointer (ch);
+        const float* in = dry.getReadPointer (ch);
+        for (int i = 0; i < n; ++i)
+            out[i] = in[i] + (out[i] * makeup - in[i]) * p.mix;
+    }
+}
+
+} // namespace stacks

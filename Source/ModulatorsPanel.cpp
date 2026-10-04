@@ -190,6 +190,8 @@ ModulatorsPanel::ModulatorsPanel (StacksAudioProcessor& p) : processor (p)
         addAndMakeVisible (b);
     }
 
+    for (int k = 0; k < kNumMacros; ++k)
+        sourcePicker.addItem (macroNames()[k] + " (macro)", SrcMacro1 + k);
     sourcePicker.addItem ("Velocity", SrcVelocity);
     sourcePicker.addItem ("Key", SrcKey);
     sourcePicker.addItem ("Mod Wheel", SrcModWheel);

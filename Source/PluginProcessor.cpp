@@ -63,6 +63,8 @@ StacksAudioProcessor::StacksAudioProcessor()
     voiceContext.bank = &*bank;
     voiceContext.user = &userWaves;
     paramRange (0);   // builds the range table now, not on the audio thread
+    for (auto* param : getParameters())
+        param->addListener (this);
     voiceContext.params = &params;
     voiceContext.lfoTables = &lfoTables;
     voiceContext.liveValues = liveValues.data();
@@ -95,6 +97,8 @@ StacksAudioProcessor::~StacksAudioProcessor()
 {
     stopTimer();
     cancelPendingUpdate();
+    for (auto* param : getParameters())
+        param->removeListener (this);
     apvts.state.removeListener (this);
     for (int k = 0; k < kNumLfos; ++k)
         apvts.removeParameterListener (paramId (lfoShapeParam (k)), this);
@@ -109,6 +113,10 @@ void StacksAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
     currentSampleRate = sampleRate;
     synth.setCurrentPlaybackSampleRate (sampleRate);
 
+    arp.prepare (sampleRate);
+    distortion.prepare (sampleRate, samplesPerBlock);
+    eq.prepare (sampleRate, samplesPerBlock);
+    compressor.prepare (sampleRate, samplesPerBlock);
     chorus.prepare (sampleRate, samplesPerBlock);
     delay.prepare (sampleRate, samplesPerBlock);
     reverb.prepare (sampleRate, samplesPerBlock);
@@ -135,11 +143,28 @@ void StacksAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     for (int i = 0; i < kNumParams; ++i)
         params.v[i] = rawParams[(size_t) i]->load();
 
+    std::optional<double> ppq;
+    bool hostPlaying = false;
     if (auto* playHead = getPlayHead())
         if (auto position = playHead->getPosition())
+        {
             if (auto bpm = position->getBpm())
                 currentBpm = *bpm;
+            if (auto q = position->getPpqPosition()) ppq = *q;
+            hostPlaying = position->getIsPlaying();
+        }
     voiceContext.bpm = currentBpm;
+
+    // The arpeggiator plays the held notes for you, in time with the host.
+    {
+        Arpeggiator::Params ap;
+        ap.mode = params.geti (P::arp_mode);
+        ap.rate = params.geti (P::arp_rate);
+        ap.octaves = params.geti (P::arp_octaves);
+        ap.gate = params.get (P::arp_gate);
+        ap.swing = params.get (P::arp_swing);
+        arp.process (midi, numSamples, ap, currentBpm, ppq, hostPlaying);
+    }
 
     // Free-running LFOs: phase and value at the start of this block, shared by
     // every voice and by the effects.
@@ -304,6 +329,8 @@ void StacksAudioProcessor::applyGlobalModulation()
             case SrcLfo1: case SrcLfo2: case SrcLfo3: case SrcLfo4: s = voiceContext.lfoGlobalValue[src - SrcLfo1]; break;
             case SrcModWheel:   s = voiceContext.modWheel.load(); break;
             case SrcAftertouch: s = voiceContext.aftertouch.load(); break;
+            case SrcMacro1: case SrcMacro2: case SrcMacro3: case SrcMacro4: case SrcMacro5: case SrcMacro6:
+                                s = params.get (macroParam (src - SrcMacro1)); break;
             default: continue; // per-note sources have no meaning for a global knob
         }
         nudgeParam (fxParams, paramIndex, amount * s);
@@ -328,6 +355,19 @@ void StacksAudioProcessor::processEffects (juce::AudioBuffer<float>& buffer)
         fxBuffer.copyFrom (1, 0, buffer, 0, 0, n);
         target = &fxBuffer;
     }
+
+    DistortionFx::Params dist;
+    dist.mode = fxParams.geti (P::dist_mode);
+    dist.driveDb = fxParams.get (P::dist_drive);
+    dist.toneHz = fxParams.get (P::dist_tone);
+    dist.mix = fxParams.get (P::dist_mix);
+    distortion.process (*target, dist);
+
+    EqFx::Params eqp;
+    eqp.lowGainDb = fxParams.get (P::eq_low_gain);   eqp.lowHz = fxParams.get (P::eq_low_freq);
+    eqp.midGainDb = fxParams.get (P::eq_mid_gain);   eqp.midHz = fxParams.get (P::eq_mid_freq);  eqp.midQ = fxParams.get (P::eq_mid_q);
+    eqp.highGainDb = fxParams.get (P::eq_high_gain); eqp.highHz = fxParams.get (P::eq_high_freq);
+    eq.process (*target, eqp);
 
     ChorusFx::Params cp;
     cp.mode = fxParams.geti (P::chorus_mode);
@@ -366,6 +406,15 @@ void StacksAudioProcessor::processEffects (juce::AudioBuffer<float>& buffer)
     rp.width = fxParams.get (P::reverb_width);
     if (rp.mix > 0.0005f)
         reverb.process (*target, rp);
+
+    CompressorFx::Params comp;
+    comp.thresholdDb = fxParams.get (P::comp_threshold);
+    comp.ratio = fxParams.get (P::comp_ratio);
+    comp.attackMs = fxParams.get (P::comp_attack);
+    comp.releaseMs = fxParams.get (P::comp_release);
+    comp.makeupDb = fxParams.get (P::comp_makeup);
+    comp.mix = fxParams.get (P::comp_mix);
+    compressor.process (*target, comp);
 
     if (mono)
     {
@@ -613,8 +662,12 @@ Patch StacksAudioProcessor::currentPatch() const
     return p;
 }
 
-void StacksAudioProcessor::applyPatch (const Patch& p)
+void StacksAudioProcessor::applyPatch (const Patch& patchIn)
 {
+    if (! applyingUndo)
+        pushUndoSnapshot();
+    Patch p = patchIn;
+    ensureMacroRoutings (p);   // every sound answers the big knobs
     p.applyTo (apvts);
     patchName = p.name;
     patchCategory = p.category;
@@ -628,6 +681,50 @@ void StacksAudioProcessor::applyPatch (const Patch& p)
 bool StacksAudioProcessor::currentIsEdited() const
 {
     return ! Patch::capture (apvts).sameValuesAs (loadedSnapshot);
+}
+
+void StacksAudioProcessor::pushUndoSnapshot()
+{
+    auto snap = currentPatch();
+    if (! undoStack.empty() && undoStack.back().sameValuesAs (snap) && undoStack.back().name == snap.name)
+        return;
+    undoStack.push_back (std::move (snap));
+    if (undoStack.size() > 60)
+        undoStack.erase (undoStack.begin());
+    redoStack.clear();
+}
+
+void StacksAudioProcessor::parameterGestureChanged (int, bool gestureIsStarting)
+{
+    // A knob about to move: remember the sound as it was (UI thread only; hosts automate elsewhere).
+    if (gestureIsStarting && ! applyingUndo && juce::MessageManager::getInstance()->isThisTheMessageThread())
+        pushUndoSnapshot();
+}
+
+void StacksAudioProcessor::undo()
+{
+    if (undoStack.empty()) return;
+    redoStack.push_back (currentPatch());
+    auto p = undoStack.back();
+    undoStack.pop_back();
+    applyingUndo = true;
+    applyPatch (p);
+    applyingUndo = false;
+    labState.status = "Undo";
+    labBroadcaster.sendChangeMessage();
+}
+
+void StacksAudioProcessor::redo()
+{
+    if (redoStack.empty()) return;
+    undoStack.push_back (currentPatch());
+    auto p = redoStack.back();
+    redoStack.pop_back();
+    applyingUndo = true;
+    applyPatch (p);
+    applyingUndo = false;
+    labState.status = "Redo";
+    labBroadcaster.sendChangeMessage();
 }
 
 void StacksAudioProcessor::setCurrentPatchName (const juce::String& name)

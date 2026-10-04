@@ -9,6 +9,7 @@
 #include "LfoTable.h"
 #include "PatchGenerator.h"
 #include "Effects.h"
+#include "Arpeggiator.h"
 #include "ai/ModelManager.h"
 #include "ai/LlamaBackend.h"
 
@@ -45,6 +46,7 @@ struct EngineChoice
 
 class StacksAudioProcessor : public juce::AudioProcessor,
                              private juce::Timer,
+                             private juce::AudioProcessorParameter::Listener,
                              private juce::AudioProcessorValueTreeState::Listener,
                              private juce::ValueTree::Listener,
                              private juce::AsyncUpdater
@@ -148,6 +150,12 @@ public:
     bool isBusy() const                                    { return labState.generating || isDownloading(); }
     std::shared_ptr<LlmBackend> aiBackend() const          { return activeBackend; }   // null with the random engine
 
+    // Undo / redo over whole sounds: every load, drag and knob gesture leaves a snapshot.
+    void undo();
+    void redo();
+    bool canUndo() const                                   { return ! undoStack.empty(); }
+    bool canRedo() const                                   { return ! redoStack.empty(); }
+
     // Calm mode: no live knob markers or LFO playhead. Persisted.
     bool calmMode() const                                  { return calm; }
     void setCalmMode (bool);
@@ -205,6 +213,9 @@ private:
     void loadEngineFromSettings();
     void rebuildGenerator();
     void timerCallback() override;                         // frees an idle built-in model
+    void parameterValueChanged (int, float) override {}
+    void parameterGestureChanged (int, bool gestureIsStarting) override;
+    void pushUndoSnapshot();
     void parameterChanged (const juce::String&, float) override;
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
     void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override;
@@ -235,6 +246,10 @@ private:
     juce::Synthesiser synth;
 
     // Master effects
+    Arpeggiator arp;
+    DistortionFx distortion;
+    EqFx eq;
+    CompressorFx compressor;
     ChorusFx chorus;
     DelayFx delay;
     ReverbFx reverb;
@@ -269,6 +284,8 @@ private:
     std::atomic<int> explainToken { 0 };
     bool patchFavourite = false;
     Patch loadedSnapshot;                                  // values as loaded, to spot edits
+    std::vector<Patch> undoStack, redoStack;
+    bool applyingUndo = false;
     void writeFavouriteFlag (const juce::File&, bool);
     std::atomic<int> generationToken { 0 };                // bumps per request; stale callbacks are ignored (read from pool threads)
     std::atomic<bool> cancelRequested { false };

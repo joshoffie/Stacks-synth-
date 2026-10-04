@@ -24,6 +24,7 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    bool keyPressed (const juce::KeyPress&) override;
 
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
@@ -35,7 +36,7 @@ private:
     ParamKnob masterKnob;
     ScopeView scope;
     TunerView tuner;
-    juce::TextButton settingsButton;
+    juce::TextButton settingsButton, undoButton, redoButton;
     SynthPanel synthPanel;
     LabPanel labPanel;
     juce::MidiKeyboardComponent keyboard;

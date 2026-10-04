@@ -26,6 +26,10 @@ struct ParamSpec
 
 const juce::StringArray& waveNames();
 const juce::StringArray& filterTypeNames();
+const juce::StringArray& distModeNames();
+const juce::StringArray& arpModeNames();
+const juce::StringArray& arpRateNames();
+const juce::StringArray& macroNames();   // the six macro knobs, in order
 const juce::StringArray& lfoShapeNames();
 const juce::StringArray& lfoSyncNames();
 const juce::StringArray& lfoModeNames();
@@ -41,9 +45,12 @@ bool isAdvancedParam (const char* id);
 
 // Modulation: kNumModSlots connections of source -> target x amount. Targets are
 // a few virtual ones (pitch, amp, pan) followed by every float parameter.
-enum ModSource { SrcOff = 0, SrcLfo1, SrcLfo2, SrcLfo3, SrcLfo4, SrcFilterEnv, SrcModEnv, SrcVelocity, SrcKey, SrcModWheel, SrcAftertouch, SrcRandom, kNumModSources };
+enum ModSource { SrcOff = 0, SrcLfo1, SrcLfo2, SrcLfo3, SrcLfo4, SrcFilterEnv, SrcModEnv, SrcVelocity, SrcKey, SrcModWheel, SrcAftertouch, SrcRandom,
+                 SrcMacro1, SrcMacro2, SrcMacro3, SrcMacro4, SrcMacro5, SrcMacro6, kNumModSources };
+constexpr int kNumMacros = 6;   // Brightness, Movement, Grit, Space, Width, Length: big knobs any patch can be played with
+inline bool isMacroSource (int src) noexcept { return src >= SrcMacro1 && src < SrcMacro1 + kNumMacros; }
 enum ModTarget { TargetOff = 0, TargetPitch, TargetPitchB, TargetAmp, TargetPan, kNumVirtualTargets };
-constexpr int kNumModSlots = 12;
+constexpr int kNumModSlots = 20;
 constexpr int kNumLfos = 4;
 enum LfoShape  { ShapeSine = 0, ShapeTriangle, ShapeSaw, ShapeRamp, ShapeSquare, ShapeRandom, ShapeCustom };
 
@@ -67,7 +74,7 @@ inline bool isBipolarSource (int src) noexcept
  X(sub_level,      "Sub",          "MIX",        Float,   0,     1,     0,     0,     "",   nullptr,            "sine sub-oscillator one octave below") \
  X(noise_level,    "Noise",        "MIX",        Float,   0,     1,     0,     0,     "",   nullptr,            "white noise level") \
  X(fm_amount,      "FM B>A",       "MIX",        Float,   0,     1,     0,     0,     "",   nullptr,            "how much B frequency-modulates A: 0 none, 0.1 warm, 0.3+ metallic") \
- X(filter_type,    "Filter Type",  "FILTER",     Choice,  0,     5,     1,     0,     "",   filterTypeNames, "LP = low-pass, HP = high-pass, BP = band-pass; 12/24 dB per octave") \
+ X(filter_type,    "Filter Type",  "FILTER",     Choice,  0,     8,     1,     0,     "",   filterTypeNames, "LP = low-pass, HP = high-pass, BP = band-pass (12/24 dB per octave); Notch = a hole at the cutoff; Comb = metallic resonance at the cutoff pitch; Formant = vowel (cutoff sweeps A-E-I-O-U)") \
  X(filter_cutoff,  "Cutoff",       "FILTER",     Float,   20,    20000, 8000,  632,   "Hz", nullptr,            "filter cutoff frequency in Hz") \
  X(filter_res,     "Resonance",    "FILTER",     Float,   0,     1,     0.1,   0,     "",   nullptr,            "filter resonance, self-oscillates near 1") \
  X(filter_drive,   "Drive",        "FILTER",     Float,   1,     10,    1,     0,     "",   nullptr,            "filter input saturation, 1 = clean") \
@@ -141,10 +148,56 @@ inline bool isBipolarSource (int src) noexcept
  X(mod12_source,     "Mod12 Src",     "MOD MATRIX", Choice,  0,     11,    0,     0,     "",   modSourceNames,     "connection 12 source") \
  X(mod12_dest,       "Mod12 Target",  "MOD MATRIX", Choice,  0,     999,   0,     0,     "",   modTargetNames,     "connection 12 target: Pitch, Pitch B, Amp, Pan or the name of any knob") \
  X(mod12_amount,     "Mod12 Amt",     "MOD MATRIX", Float,  -1,     1,     0,     0,     "",   nullptr,            "connection 12 depth -1..1 (Pitch: x12 semitones; knobs: fraction of the knob's travel)") \
+ X(mod13_source,     "Mod13 Src",     "MOD MATRIX", Choice,  0,     17,    0,     0,     "",   modSourceNames,     "connection 13 source") \
+ X(mod13_dest,       "Mod13 Target",  "MOD MATRIX", Choice,  0,     999,   0,     0,     "",   modTargetNames,     "connection 13 target: Pitch, Pitch B, Amp, Pan or the name of any knob") \
+ X(mod13_amount,     "Mod13 Amt",     "MOD MATRIX", Float,  -1,     1,     0,     0,     "",   nullptr,            "connection 13 depth -1..1 (Pitch: x12 semitones; knobs: fraction of the knob's travel)") \
+ X(mod14_source,     "Mod14 Src",     "MOD MATRIX", Choice,  0,     17,    0,     0,     "",   modSourceNames,     "connection 14 source") \
+ X(mod14_dest,       "Mod14 Target",  "MOD MATRIX", Choice,  0,     999,   0,     0,     "",   modTargetNames,     "connection 14 target: Pitch, Pitch B, Amp, Pan or the name of any knob") \
+ X(mod14_amount,     "Mod14 Amt",     "MOD MATRIX", Float,  -1,     1,     0,     0,     "",   nullptr,            "connection 14 depth -1..1 (Pitch: x12 semitones; knobs: fraction of the knob's travel)") \
+ X(mod15_source,     "Mod15 Src",     "MOD MATRIX", Choice,  0,     17,    0,     0,     "",   modSourceNames,     "connection 15 source") \
+ X(mod15_dest,       "Mod15 Target",  "MOD MATRIX", Choice,  0,     999,   0,     0,     "",   modTargetNames,     "connection 15 target: Pitch, Pitch B, Amp, Pan or the name of any knob") \
+ X(mod15_amount,     "Mod15 Amt",     "MOD MATRIX", Float,  -1,     1,     0,     0,     "",   nullptr,            "connection 15 depth -1..1 (Pitch: x12 semitones; knobs: fraction of the knob's travel)") \
+ X(mod16_source,     "Mod16 Src",     "MOD MATRIX", Choice,  0,     17,    0,     0,     "",   modSourceNames,     "connection 16 source") \
+ X(mod16_dest,       "Mod16 Target",  "MOD MATRIX", Choice,  0,     999,   0,     0,     "",   modTargetNames,     "connection 16 target: Pitch, Pitch B, Amp, Pan or the name of any knob") \
+ X(mod16_amount,     "Mod16 Amt",     "MOD MATRIX", Float,  -1,     1,     0,     0,     "",   nullptr,            "connection 16 depth -1..1 (Pitch: x12 semitones; knobs: fraction of the knob's travel)") \
+ X(mod17_source,     "Mod17 Src",     "MOD MATRIX", Choice,  0,     17,    0,     0,     "",   modSourceNames,     "connection 17 source") \
+ X(mod17_dest,       "Mod17 Target",  "MOD MATRIX", Choice,  0,     999,   0,     0,     "",   modTargetNames,     "connection 17 target: Pitch, Pitch B, Amp, Pan or the name of any knob") \
+ X(mod17_amount,     "Mod17 Amt",     "MOD MATRIX", Float,  -1,     1,     0,     0,     "",   nullptr,            "connection 17 depth -1..1 (Pitch: x12 semitones; knobs: fraction of the knob's travel)") \
+ X(mod18_source,     "Mod18 Src",     "MOD MATRIX", Choice,  0,     17,    0,     0,     "",   modSourceNames,     "connection 18 source") \
+ X(mod18_dest,       "Mod18 Target",  "MOD MATRIX", Choice,  0,     999,   0,     0,     "",   modTargetNames,     "connection 18 target: Pitch, Pitch B, Amp, Pan or the name of any knob") \
+ X(mod18_amount,     "Mod18 Amt",     "MOD MATRIX", Float,  -1,     1,     0,     0,     "",   nullptr,            "connection 18 depth -1..1 (Pitch: x12 semitones; knobs: fraction of the knob's travel)") \
+ X(mod19_source,     "Mod19 Src",     "MOD MATRIX", Choice,  0,     17,    0,     0,     "",   modSourceNames,     "connection 19 source") \
+ X(mod19_dest,       "Mod19 Target",  "MOD MATRIX", Choice,  0,     999,   0,     0,     "",   modTargetNames,     "connection 19 target: Pitch, Pitch B, Amp, Pan or the name of any knob") \
+ X(mod19_amount,     "Mod19 Amt",     "MOD MATRIX", Float,  -1,     1,     0,     0,     "",   nullptr,            "connection 19 depth -1..1 (Pitch: x12 semitones; knobs: fraction of the knob's travel)") \
+ X(mod20_source,     "Mod20 Src",     "MOD MATRIX", Choice,  0,     17,    0,     0,     "",   modSourceNames,     "connection 20 source") \
+ X(mod20_dest,       "Mod20 Target",  "MOD MATRIX", Choice,  0,     999,   0,     0,     "",   modTargetNames,     "connection 20 target: Pitch, Pitch B, Amp, Pan or the name of any knob") \
+ X(mod20_amount,     "Mod20 Amt",     "MOD MATRIX", Float,  -1,     1,     0,     0,     "",   nullptr,            "connection 20 depth -1..1 (Pitch: x12 semitones; knobs: fraction of the knob's travel)") \
  X(unison_voices,  "Unison",       "VOICE",      Int,     1,     4,     1,     0,     "",   nullptr,            "stacked detuned copies per note, 1-4") \
  X(unison_detune,  "Detune",       "VOICE",      Float,   0,     50,    10,    0,     "ct", nullptr,            "unison detune in cents") \
  X(unison_spread,  "Spread",       "VOICE",      Float,   0,     1,     0.5,   0,     "",   nullptr,            "unison stereo width") \
  X(glide,          "Glide",        "VOICE",      Float,   0,     2,     0,     0,     "s",  nullptr,            "portamento time in seconds") \
+ X(macro1,         "Brightness",   "MACROS",     Float,   0,     1,     0,     0,     "",   nullptr,            "macro: opens the sound up (wired to Cutoff by default)") \
+ X(macro2,         "Movement",     "MACROS",     Float,   0,     1,     0,     0,     "",   nullptr,            "macro: more motion (A Morph and Chorus Mix by default)") \
+ X(macro3,         "Grit",         "MACROS",     Float,   0,     1,     0,     0,     "",   nullptr,            "macro: dirt and edge (filter Drive and FM by default)") \
+ X(macro4,         "Space",        "MACROS",     Float,   0,     1,     0,     0,     "",   nullptr,            "macro: room and echo (Reverb Mix and Delay Mix by default)") \
+ X(macro5,         "Width",        "MACROS",     Float,   0,     1,     0,     0,     "",   nullptr,            "macro: stereo size (Detune and Spread by default)") \
+ X(macro6,         "Length",       "MACROS",     Float,   0,     1,     0,     0,     "",   nullptr,            "macro: longer notes (Release and Decay by default)") \
+ X(arp_mode,       "Arp",          "ARP",        Choice,  0,     5,     0,     0,     "",   arpModeNames,       "arpeggiator: Off, or the order held notes are played in") \
+ X(arp_rate,       "Rate",         "ARP",        Choice,  0,     5,     1,     0,     "",   arpRateNames,       "arpeggiator step length, locked to the host tempo") \
+ X(arp_octaves,    "Octaves",      "ARP",        Int,     1,     4,     1,     0,     "",   nullptr,            "how many octaves the pattern climbs through") \
+ X(arp_gate,       "Gate",         "ARP",        Float,   0.1,   1,     0.6,   0,     "",   nullptr,            "how much of each step the note sounds for") \
+ X(arp_swing,      "Swing",        "ARP",        Float,   0,     0.5,   0,     0,     "",   nullptr,            "delays every other step for a shuffle feel (advanced)") \
+ X(dist_mode,      "Dist Mode",    "DISTORTION", Choice,  0,     4,     0,     0,     "",   distModeNames,      "Soft = warm saturation, Hard = clipping, Tube = asymmetric valve-like, Fold = wavefolder, Crush = bit and rate reduction") \
+ X(dist_drive,     "Dist Drive",   "DISTORTION", Float,   0,     36,    12,    0,     "dB", nullptr,            "distortion input gain in dB") \
+ X(dist_tone,      "Dist Tone",    "DISTORTION", Float,   500,   20000, 8000,  3000,  "Hz", nullptr,            "low-pass after the distortion (advanced)") \
+ X(dist_mix,       "Dist Mix",     "DISTORTION", Float,   0,     1,     0,     0,     "",   nullptr,            "distortion amount, 0 = off") \
+ X(eq_low_gain,    "Low",          "EQ",         Float,  -12,    12,    0,     0,     "dB", nullptr,            "low shelf gain in dB") \
+ X(eq_mid_gain,    "Mid",          "EQ",         Float,  -12,    12,    0,     0,     "dB", nullptr,            "mid peak gain in dB") \
+ X(eq_high_gain,   "High",         "EQ",         Float,  -12,    12,    0,     0,     "dB", nullptr,            "high shelf gain in dB") \
+ X(eq_low_freq,    "Low Freq",     "EQ",         Float,   40,    600,   150,   150,   "Hz", nullptr,            "low shelf corner (advanced)") \
+ X(eq_mid_freq,    "Mid Freq",     "EQ",         Float,   200,   8000,  1200,  1000,  "Hz", nullptr,            "mid peak frequency (advanced)") \
+ X(eq_mid_q,       "Mid Q",        "EQ",         Float,   0.3,   4,     1,     0,     "",   nullptr,            "mid peak width, higher = narrower (advanced)") \
+ X(eq_high_freq,   "High Freq",    "EQ",         Float,   2000,  16000, 6000,  5000,  "Hz", nullptr,            "high shelf corner (advanced)") \
  X(chorus_mode,    "Chorus Mode",  "CHORUS",     Choice,  0,     3,     0,     0,     "",   chorusModeNames, "Chorus = classic, Ensemble = lush string-machine, Flanger = short metallic sweep, Dimension = wide and subtle") \
  X(chorus_rate,    "Chorus Rate",  "CHORUS",     Float,   0.05,  5,     0.8,   0.5,   "Hz", nullptr,            "chorus speed in Hz") \
  X(chorus_depth,   "Chorus Depth", "CHORUS",     Float,   0,     1,     0.3,   0,     "",   nullptr,            "chorus depth") \
@@ -172,6 +225,12 @@ inline bool isBipolarSource (int src) noexcept
  X(reverb_mod,     "Reverb Mod",   "REVERB",     Float,   0,     1,     0.3,   0,     "",   nullptr,            "modulation inside the tail, smoother and more chorus-like (advanced)") \
  X(reverb_shimmer, "Shimmer",      "REVERB",     Float,   0,     1,     0,     0,     "",   nullptr,            "octave-up pitch-shifted feedback for a halo; the Shimmer type turns it up (advanced)") \
  X(reverb_width,   "Reverb Width", "REVERB",     Float,   0,     1,     1,     0,     "",   nullptr,            "stereo width of the tail (advanced)") \
+ X(comp_threshold, "Threshold",    "COMPRESSOR", Float,  -48,    0,    -18,    0,     "dB", nullptr,            "level above which the compressor pulls down") \
+ X(comp_ratio,     "Ratio",        "COMPRESSOR", Float,   1,     20,    4,     0,     "",   nullptr,            "how hard it pulls down, 4 = gentle glue, 20 = limiting") \
+ X(comp_attack,    "Comp Attack",  "COMPRESSOR", Float,   1,     100,   10,    0,     "ms", nullptr,            "how fast it reacts (advanced)") \
+ X(comp_release,   "Comp Release", "COMPRESSOR", Float,   20,    1000,  150,   0,     "ms", nullptr,            "how fast it lets go (advanced)") \
+ X(comp_makeup,    "Makeup",       "COMPRESSOR", Float,   0,     24,    0,     0,     "dB", nullptr,            "gain added back after compression") \
+ X(comp_mix,       "Comp Mix",     "COMPRESSOR", Float,   0,     1,     0,     0,     "",   nullptr,            "compressor amount, 0 = off, under 1 = parallel compression") \
  X(master_gain,    "Master",       "MASTER",     Float,  -24,    6,    -6,     0,     "dB", nullptr,            "output level in dB")
 
 enum class P : int
@@ -190,6 +249,9 @@ const std::vector<ParamSpec>& paramSpecs();
 P modSourceParam (int slot);
 P modDestParam (int slot);
 P modAmountParam (int slot);
+
+// Macro k (0-based) knob.
+P macroParam (int k);
 
 // LFO k (0-based) parameters.
 P lfoShapeParam (int k);

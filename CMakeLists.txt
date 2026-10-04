@@ -58,6 +58,7 @@ target_sources(Stacks PRIVATE
     Source/SynthVoice.cpp
     Source/Patch.cpp
     Source/Effects.cpp
+    Source/Arpeggiator.cpp
     Source/PatchGenerator.cpp
     Source/ai/OllamaBackend.cpp
     Source/ai/LlamaBackend.cpp

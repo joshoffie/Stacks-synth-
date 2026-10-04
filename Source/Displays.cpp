@@ -212,11 +212,25 @@ void FilterCurve::paint (juce::Graphics& g)
     {
         const float w = hz / fc;
         float gain = 1.0f;
+        const float octaves = std::log2 (w);
+        if (t == 6)                                              // Notch: a hole at the cutoff, narrower with resonance
+            return 1.0f - 0.97f * std::exp (-octaves * octaves * (6.0f + res * 40.0f));
+        if (t == 7)                                              // Comb: peaks at every multiple of the cutoff
+            return 0.5f + 0.5f * (1.0f + res * 1.5f) * std::cos (juce::MathConstants<float>::twoPi * hz / fc) / (1.0f + res * 0.5f);
+        if (t == 8)                                              // Formant: two vowel peaks swept by the cutoff
+        {
+            static const float f1[] = { 730.0f, 530.0f, 390.0f, 570.0f, 440.0f }, f2[] = { 1090.0f, 1840.0f, 1990.0f, 840.0f, 1020.0f };
+            const float pos = juce::jlimit (0.0f, 3.999f, std::log2 (juce::jmax (1.0f, fc / 150.0f)) / std::log2 (20000.0f / 150.0f) * 4.0f);
+            const int v0 = (int) pos; const float tt = pos - (float) v0; const int v1 = juce::jmin (4, v0 + 1);
+            const float fa = f1[v0] + (f1[v1] - f1[v0]) * tt, fb = f2[v0] + (f2[v1] - f2[v0]) * tt;
+            const float q = 2.0f + res * 16.0f;
+            auto peak = [&] (float f0) { const float o = std::log2 (hz / f0); return 1.0f / std::sqrt (1.0f + std::pow (o * q, 2.0f)); };
+            return (peak (fa) + 0.7f * peak (fb)) * 0.9f;
+        }
         if (t < 2)      gain = 1.0f / std::sqrt (1.0f + std::pow (w, 2.0f * order));
         else if (t < 4) gain = 1.0f / std::sqrt (1.0f + std::pow (1.0f / w, 2.0f * order));
         else            gain = 1.0f / std::sqrt (1.0f + std::pow (w, order)) / std::sqrt (1.0f + std::pow (1.0f / w, order)) * 2.0f;
         // resonance: a peak about a third of an octave wide around the cutoff
-        const float octaves = std::log2 (w);
         gain *= 1.0f + res * 8.0f * std::exp (-octaves * octaves * 18.0f);
         return gain;
     };
