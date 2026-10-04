@@ -625,6 +625,41 @@ namespace
     }
 } // namespace
 
+int countAudibleDifferences (const Patch& a, const Patch& b)
+{
+    const auto& specs = paramSpecs();
+    int differences = 0;
+    for (int i = 0; i < kNumParams; ++i)
+    {
+        const juce::String id (specs[(size_t) i].id);
+        if (id == "master_gain" || id.startsWith ("mod"))
+            continue;
+        if (specs[(size_t) i].kind == ParamKind::Choice)
+        {
+            if ((int) a.values[(size_t) i] != (int) b.values[(size_t) i]) ++differences;
+            continue;
+        }
+        const auto& range = paramRange (i);
+        const float na = range.convertTo0to1 (juce::jlimit (range.start, range.end, a.values[(size_t) i]));
+        const float nb = range.convertTo0to1 (juce::jlimit (range.start, range.end, b.values[(size_t) i]));
+        if (std::abs (na - nb) > 0.12f) ++differences;
+    }
+    // Connections as sets of (source, target): one difference per routing only one side has.
+    auto routings = [] (const Patch& p)
+    {
+        std::vector<std::pair<int, int>> r;
+        for (int i = 0; i < kNumModSlots; ++i)
+            if ((int) p.get (modSourceParam (i)) != SrcOff && (int) p.get (modDestParam (i)) != TargetOff)
+                r.emplace_back ((int) p.get (modSourceParam (i)), (int) p.get (modDestParam (i)));
+        return r;
+    };
+    const auto ra = routings (a), rb = routings (b);
+    for (const auto& r : ra) if (std::find (rb.begin(), rb.end(), r) == rb.end()) ++differences;
+    for (const auto& r : rb) if (std::find (ra.begin(), ra.end(), r) == ra.end()) ++differences;
+    if (a.waves[0] != b.waves[0]) ++differences;
+    return differences;
+}
+
 void mutatePatch (Patch& p, float amount, juce::int64 seed)
 {
     Rng rng (seed);

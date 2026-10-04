@@ -4,6 +4,7 @@
 
 #include "PluginProcessor.h"
 #include "Controls.h"
+#include "StacksLookAndFeel.h"
 #include "SynthPanel.h"
 #include "LabPanel.h"
 
@@ -25,7 +26,7 @@ private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
 
     StacksAudioProcessor& synthProcessor;
-    juce::LookAndFeel_V4 lookAndFeel;
+    StacksLookAndFeel lookAndFeel;
 
     juce::Label title, patchName;
     ParamKnob masterKnob;

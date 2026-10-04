@@ -106,6 +106,49 @@ namespace
         return true;
     }
 
+    // One concrete direction of change per descendant. Small models asked to
+    // "vary" a parent hand back near-copies; told exactly what to change they
+    // don't. The Variation knob decides how far the list is allowed to go.
+    juce::String descendantDirections (const GenerationRequest& req)
+    {
+        static const char* const gentle[] = {
+            "keep its character but redesign the wavetable spectrum and move Morph with a slower LFO",
+            "darker and softer: lower filter_cutoff by at least an octave, slower aenv_attack, more reverb",
+            "brighter and snappier: open the filter, shorter aenv_decay and aenv_release, add a synced Ping-Pong delay",
+            "wider: unison_voices 3-4 with unison_detune 15-30 and chorus_mix 0.3-0.5",
+            "replace the LFO connection with a different target (Pan, Cutoff, Amp, Chorus Mix or Reverb Mix), a different shape and rate",
+            "half speed: slower LFO rate, longer aenv_release, a longer, darker reverb",
+        };
+        static const char* const bolder[] = {
+            "change oscillator B: another wave, oscB_coarse an octave or a fifth away as a silent FM modulator, fm_amount 0.3-0.6",
+            "make it rhythmic: a Square or Random LFO synced to 1/8 or 1/16 on Cutoff or Pan at 0.4-0.6",
+            "thin and resonant: less sub_level and fm_amount, filter_res 0.5-0.7, a touch of noise_level",
+            "an inverted filter sweep: negative filter_env with a long fenv_decay, over a Plate reverb",
+            "Mod Env > FM B>A 0.4-0.6 with menv_decay 0.3 for a metallic attack, then a soft body",
+            "a tape-delay texture: delay_mode Tape, delay_feedback 0.5-0.7, delay_mix 0.4, chorus_mode Ensemble",
+        };
+        static const char* const wild[] = {
+            "turn it into a Pluck with the same tone: aenv_sustain 0, aenv_decay 0.2-0.5, filter_env 2-4",
+            "turn it into a Bass: oscA_coarse -12, sub_level 0.6-0.9, filter_cutoff 150-600, no reverb",
+            "turn it into a Lead: glide 0.05-0.12, a Sine LFO vibrato on Pitch at 0.02-0.03 and 5-6 Hz, unison 2-3",
+            "turn it into a Texture: Grit or Formant on oscillator A, noise, a Random LFO on A Morph, long delay feedback",
+            "turn it into a Bell: fm_amount 0.5-0.8 with oscB_coarse 19 or 24 as a silent modulator, aenv_sustain 0, long release",
+        };
+        std::vector<const char*> pool (std::begin (gentle), std::end (gentle));
+        if (req.variation > 0.33f) pool.insert (pool.end(), std::begin (bolder), std::end (bolder));
+        if (req.variation > 0.66f) pool.insert (pool.end(), std::begin (wild), std::end (wild));
+
+        juce::Random rng ((juce::int64) juce::Time::getHighResolutionTicks());
+        std::vector<const char*> order (pool);
+        for (int i = (int) order.size() - 1; i > 0; --i)
+            std::swap (order[(size_t) i], order[(size_t) rng.nextInt (i + 1)]);
+
+        juce::String s;
+        for (int i = 0; i < req.count; ++i)
+            s << "  Descendant " << (i + 1) << ": " << order[(size_t) i % order.size()] << ".\n";
+        return s;
+    }
+
     // The parent's oscillator spectra, so a descendant's table can be a relative of them.
     juce::String parentSpectra (const Patch& parent)
     {
@@ -409,14 +452,16 @@ juce::String LlmPatchGenerator::userPrompt (const GenerationRequest& req)
                 s << parentSpectra (parent);
         }
         s << "Create " << req.count << " descendants. Keep what makes the parents appealing and vary them "
-          << variationPhrase (req.variation, true) << ". ";
+          << variationPhrase (req.variation, true) << ". Each descendant has its own direction - follow it:\n"
+          << descendantDirections (req);
         if (req.parents.size() > 1)
             s << "Let some descendants combine traits from two parents. ";
         s << "Set \"parent\" to the number of the parent whose values fill in anything you omit. "
           << "Give each descendant a fresh two-word name that shares one word with its parent.\n";
         if (req.designWaves)
             s << "Design each descendant's waveA as a relative of its parent's spectrum: keep the character, change the shape.\n";
-        s << "Never copy a parent: every descendant changes at least five settings (and its wavetable) so that it sounds recognisably different.\n";
+        s << "Never copy a parent: a descendant must differ in at least " << juce::roundToInt (2.0f + 8.0f * req.variation)
+          << " settings that you can hear (a knob moved by a quarter of its range or more, a different choice, a different connection), and its wavetable spectrum must change too.\n";
         if (req.hint.trim().isNotEmpty())
             s << "Direction from the user: \"" << req.hint.trim() << "\". Follow it closely.\n";
         if (req.brief.isNotEmpty())
@@ -682,6 +727,30 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
             for (const auto& sibling : out)
                 if (sibling.name.equalsIgnoreCase (patch->name))
                     patch->name << " II";
+        }
+
+        // Descendants must be audibly different from the parent and from each
+        // other; the model drifts toward near-copies, so push them apart.
+        if (! req.parents.empty())
+        {
+            const int wanted = juce::roundToInt (2.0f + 8.0f * req.variation);
+            const auto seed = (juce::int64) juce::Time::getHighResolutionTicks() + (juce::int64) out.size() * 7919;
+            auto tooClose = [&]
+            {
+                if (countAudibleDifferences (*patch, *base) < wanted) return true;
+                for (const auto& sibling : out)
+                    if (countAudibleDifferences (*patch, sibling) < juce::jmax (2, wanted / 2)) return true;
+                return false;
+            };
+            for (int attempt = 0; attempt < 4 && tooClose(); ++attempt)
+            {
+                mutatePatch (*patch, 0.3f + 0.4f * req.variation, seed + attempt);
+                if (! patch->waves[0].isEmpty() && patch->waves[0] == base->waves[0])
+                    patch->waves[0] = mutateWave (patch->waves[0], 0.4f + 0.4f * req.variation, seed + attempt);
+                if (! patch->waves[0].isEmpty())
+                    patch->set (P::oscA_wave, (float) kCustomWave);
+                keepPatchInTune (*patch);
+            }
         }
 
         patch->set (P::master_gain, -6.0f);

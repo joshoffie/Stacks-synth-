@@ -101,7 +101,7 @@ private:
     juce::Slider variation;
     juce::ToggleButton designWavesToggle { "Design wavetables" };
     juce::TextButton favouriteButton;
-    juce::TextButton newBatchButton { "Fresh ideas" }, evolveButton { "Evolve" }, backButton { "<" };
+    juce::TextButton newBatchButton { "Generate" }, evolveButton { "Evolve" }, backButton { "<" };
     juce::TextButton gardenTab { "GARDEN" }, ideasTab { "LIST" }, libraryTab { "LIBRARY" };
     View view = View::garden;
     LibraryPanel library;

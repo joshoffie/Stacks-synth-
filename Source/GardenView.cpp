@@ -226,7 +226,7 @@ void GardenView::mouseDown (const juce::MouseEvent& e)
         if (e.mods.isPopupMenu())
         {
             juce::PopupMenu menu;
-            menu.addItem ("Fresh ideas (new generation from scratch)", [this] { if (onFresh) onFresh(); });
+            menu.addItem ("Generate from the description (new generation from scratch)", [this] { if (onFresh) onFresh(); });
             menu.addItem ("Evolve this sound", [this] { if (onEvolve) onEvolve(); });
             menu.addItem (heart() + "  Favourite this sound", [this] { processor.favouriteCurrent(); });
             menu.showMenuAsync (juce::PopupMenu::Options());
@@ -322,7 +322,7 @@ void GardenView::paint (juce::Graphics& g)
     else if (generating)
         text = lab.progressDetail.isNotEmpty() ? lab.progressDetail : "growing...";
     else if (lab.candidates.empty())
-        text = "Press Fresh ideas to grow the first leaves. Click a leaf to hear it, drag it outward for wilder children.";
+        text = "Describe a sound above and press Generate to grow the first leaves. Click a leaf to hear it, drag it outward for wilder children.";
     else
         text = lab.seedIsPatch ? "click a leaf: hear   -   click the seed: hear the parent again   -   drag a leaf outward: wilder   -   right-click a leaf: plant it"
                                : "click a leaf: hear   -   drag a leaf outward: wilder   -   right-click a leaf: plant it   -   Evolve grows from what you're hearing";

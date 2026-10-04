@@ -48,6 +48,10 @@ public:
 // 0.5 feels like a sibling). The AI generator uses it when a model hands back
 // a copy of a parent or of another patch in the batch.
 void mutatePatch (Patch&, float amount, juce::int64 seed);
+// How many settings differ noticeably between two patches: a choice that
+// changed, a knob moved more than 12% of its travel, or a connection that
+// differs (source/target). The Lab uses it to keep descendants apart.
+int countAudibleDifferences (const Patch&, const Patch&);
 WaveSpec mutateWave (const WaveSpec&, float amount, juce::int64 seed);
 
 // No AI: archetype-based random patches, plus crossover + mutation of the

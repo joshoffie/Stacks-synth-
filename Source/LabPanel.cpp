@@ -218,10 +218,10 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
     refreshEnginesButton.onClick = [this] { processor.refreshOllamaModels(); };
     addAndMakeVisible (refreshEnginesButton);
 
-    hint.setTextToShowWhenEmpty ("Direction (optional): darker, more movement, plucky...", colours::muted);
+    hint.setTextToShowWhenEmpty ("Describe a sound and press Return: \"mgmt style synth patch\", \"dark evolving pad\"...", colours::muted);
     hint.setMultiLine (false);
     hint.setReturnKeyStartsNewLine (false);
-    hint.onReturnKey = [this] { evolveButton.triggerClick(); };
+    hint.onReturnKey = [this] { newBatchButton.triggerClick(); };   // a prompt stands on its own: no preset needed
     addAndMakeVisible (hint);
 
     variationLabel.setText ("Variation", juce::dontSendNotification);
@@ -579,10 +579,10 @@ void LabPanel::refresh()
     evolveButton.setButtonText ("Evolve: " + currentName);
     evolveButton.setTooltip ("Ten descendants of the sound you're playing now, steered by the direction text");
     evolveButton.setEnabled (! busy);
-    newBatchButton.setButtonText (busy ? "Stop" : "Fresh ideas");
+    newBatchButton.setButtonText (busy ? "Stop" : "Generate");
     newBatchButton.setTooltip (lab.generating ? "Stop generating; keep what has arrived"
                              : processor.isDownloading() ? "Cancel the model download"
-                             : "Ten new patches from scratch. Uses the direction text, not the current sound.");
+                             : "New patches from your description alone - no preset needed. (Evolve grows from the sound you're hearing instead.)");
     backButton.setEnabled (! busy && ! lab.history.empty());
     engineBox.setEnabled (! busy);
     designWavesToggle.setToggleState (processor.designWavetables(), juce::dontSendNotification);

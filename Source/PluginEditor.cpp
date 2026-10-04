@@ -19,31 +19,14 @@ StacksAudioProcessorEditor::StacksAudioProcessorEditor (StacksAudioProcessor& p)
       labPanel (p),
       keyboard (p.keyboardState, juce::MidiKeyboardComponent::horizontalKeyboard)
 {
-    auto scheme = juce::LookAndFeel_V4::getMidnightColourScheme();
-    scheme.setUIColour (juce::LookAndFeel_V4::ColourScheme::windowBackground, colours::background);
-    scheme.setUIColour (juce::LookAndFeel_V4::ColourScheme::widgetBackground, colours::panel);
-    scheme.setUIColour (juce::LookAndFeel_V4::ColourScheme::menuBackground, colours::panel);
-    scheme.setUIColour (juce::LookAndFeel_V4::ColourScheme::defaultFill, colours::accent);
-    scheme.setUIColour (juce::LookAndFeel_V4::ColourScheme::highlightedFill, colours::accent);
-    scheme.setUIColour (juce::LookAndFeel_V4::ColourScheme::defaultText, colours::text);
-    scheme.setUIColour (juce::LookAndFeel_V4::ColourScheme::highlightedText, juce::Colours::black);
-    scheme.setUIColour (juce::LookAndFeel_V4::ColourScheme::outline, juce::Colour (0xff3a3f49));
-    lookAndFeel.setColourScheme (scheme);
-    lookAndFeel.setColour (juce::Slider::rotarySliderFillColourId, colours::accent);
-    lookAndFeel.setColour (juce::Slider::rotarySliderOutlineColourId, juce::Colour (0xff3a3f49));
-    lookAndFeel.setColour (juce::Slider::thumbColourId, colours::text);
-    lookAndFeel.setColour (juce::Slider::trackColourId, colours::accent);
-    lookAndFeel.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff343943));
-    lookAndFeel.setColour (juce::ComboBox::backgroundColourId, juce::Colour (0xff343943));
-    lookAndFeel.setColour (juce::TextEditor::backgroundColourId, juce::Colour (0xff1b1d22));
     setLookAndFeel (&lookAndFeel);
 
     title.setText ("STACKS", juce::dontSendNotification);
-    title.setFont (juce::Font (juce::FontOptions (22.0f, juce::Font::bold)));
+    title.setFont (StacksLookAndFeel::font (22.0f, true));
     title.setColour (juce::Label::textColourId, colours::accent);
     addAndMakeVisible (title);
 
-    patchName.setFont (juce::Font (juce::FontOptions (16.0f)));
+    patchName.setFont (StacksLookAndFeel::font (16.0f));
     patchName.setColour (juce::Label::textColourId, colours::text);
     patchName.setEditable (false, true, false);
     patchName.setTooltip ("Double-click to rename the current patch");

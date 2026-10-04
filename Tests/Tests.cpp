@@ -176,6 +176,13 @@ static void testPatchJson()
     Patch m = p;
     mutatePatch (m, 0.5f, 1234);
     CHECK (! m.sameValuesAs (p));
+    CHECK (countAudibleDifferences (p, p) == 0);
+    Patch far = p;
+    far.set (P::filter_cutoff, 300.0f);
+    far.set (P::oscA_wave, 2.0f);
+    far.set (modSourceParam (0), (float) SrcVelocity);
+    far.set (modDestParam (0), (float) modTargetForParam ((int) P::filter_cutoff));
+    CHECK (countAudibleDifferences (p, far) == 3);   // the cutoff move, the wave choice, the new routing (same designed table)
     const auto mw = mutateWave (p.waves[0], 0.5f, 1234);
     CHECK (mw.frames.size() == p.waves[0].frames.size() && mw != p.waves[0]);
 }
@@ -438,6 +445,9 @@ static void testLlmGenerator()
     {
         CHECK (kids[1].waves[0] == out[0].waves[0]);          // no waveA in the reply: the parent's table is inherited
         CHECK (! kids[0].sameValuesAs (out[0]));              // a verbatim copy of the parent is nudged into a relative
+        CHECK (countAudibleDifferences (kids[0], out[0]) >= 6); // and far enough to hear (variation 0.5 -> 6 changes)
+        CHECK (countAudibleDifferences (kids[1], out[0]) >= 6);
+        CHECK (fake->lastUser.contains ("Descendant 1:") && fake->lastUser.contains ("Descendant 2:"));
         CHECK (kids[0].name.endsWith (" II"));
     }
 
