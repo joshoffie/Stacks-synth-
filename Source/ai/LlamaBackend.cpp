@@ -10,7 +10,7 @@ namespace stacks
 
 namespace
 {
-    constexpr int kContextTokens = 8192;
+    constexpr int kContextTokens = 12288;   // a 5k-token Evolve prompt plus five patches must fit
     constexpr int kBatchTokens   = 512;
     constexpr int kMaxNewTokens  = 6000;
 
@@ -114,7 +114,9 @@ bool LlamaBackend::ensureLoaded (juce::String& error, const std::function<bool()
     const int hw = (int) std::thread::hardware_concurrency();
     ctxParams.n_threads = juce::jmax (2, hw / 2);
     ctxParams.n_threads_batch = ctxParams.n_threads;
-    ctxParams.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_AUTO;
+    ctxParams.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
+    ctxParams.type_k = GGML_TYPE_Q8_0;          // 8-bit KV cache: 12k tokens in ~0.9 GB instead of 1.8 GB
+    ctxParams.type_v = GGML_TYPE_Q8_0;
     ctxParams.no_perf = true;
 
     ctx = llama_init_from_model (model, ctxParams);

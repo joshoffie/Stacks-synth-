@@ -304,6 +304,20 @@ static void testGrammarAndPrompt()
     const auto user = LlmPatchGenerator::userPrompt (r);
     CHECK (user.contains ("in the style of MGMT") && user.contains ("Sound brief") && user.contains ("Bright detuned saws."));
     CHECK (user.contains ("exactly 10 entries"));
+
+    // The parent dump: core + non-default values + live connections, not the whole table.
+    Patch parent;
+    parent.name = "Parent";
+    parent.set (P::filter_cutoff, 800.0f);
+    parent.set (P::chorus_mix, 0.4f);
+    GenerationRequest ev;
+    ev.parents = { parent };
+    ev.designWaves = false;
+    const auto evolve = LlmPatchGenerator::userPrompt (ev);
+    CHECK (evolve.contains ("\"filter_cutoff\": 800") && evolve.contains ("\"chorus_mix\": 0.4") && evolve.contains ("\"oscA_wave\""));
+    if (! (evolve.contains ("\"filter_cutoff\": 800") && evolve.contains ("\"chorus_mix\": 0.4") && evolve.contains ("\"oscA_wave\"")))
+        std::printf ("  parent dump was: %s\n", evolve.fromFirstOccurrenceOf ("params:", false, false).upToFirstOccurrenceOf ("\n", false, false).toRawUTF8());
+    CHECK (! evolve.contains ("chorus_tone") && ! evolve.contains ("reverb_predelay") && ! evolve.contains ("mod1_source") && ! evolve.contains ("master_gain"));
 }
 
 static void testRandomGenerator()

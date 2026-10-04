@@ -14,11 +14,19 @@ namespace
         return juce::String (v, 3).trimCharactersAtEnd ("0").trimCharactersAtEnd (".");
     }
 
-    // Full values, minus connections that are switched off (saves a lot of tokens).
+    const std::vector<const char*>& coreParamIds();
+    bool isCoreParam (const char* id);
+
+    // The parent as the model sees it: the core settings, whatever differs from
+    // the defaults, and the connections that are switched on. Everything else is
+    // a default the child inherits anyway - and every value shown here is one
+    // the model tends to echo back, which is what used to overflow the context.
     juce::String compactParams (const Patch& p)
     {
+        const Patch defaults;
         auto v = p.paramsToVar();
         if (auto* obj = v.getDynamicObject())
+        {
             for (int i = 0; i < kNumModSlots; ++i)
                 if ((int) p.get (modSourceParam (i)) == SrcOff)
                 {
@@ -26,6 +34,17 @@ namespace
                     obj->removeProperty (paramId (modDestParam (i)));
                     obj->removeProperty (paramId (modAmountParam (i)));
                 }
+            const auto& specs = paramSpecs();
+            for (int i = 0; i < kNumParams; ++i)
+            {
+                const juce::String id (specs[(size_t) i].id);
+                if (id.startsWith ("mod") || isCoreParam (specs[(size_t) i].id) || id == "master_gain")
+                    continue;
+                if (std::abs (p.values[(size_t) i] - defaults.values[(size_t) i]) < 1.0e-4f)
+                    obj->removeProperty (specs[(size_t) i].id);
+            }
+            obj->removeProperty ("master_gain");
+        }
         return juce::JSON::toString (v, true);
     }
 
