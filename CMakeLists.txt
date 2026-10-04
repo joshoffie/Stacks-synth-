@@ -68,6 +68,7 @@ target_sources(Stacks PRIVATE
     Source/Controls.cpp
     Source/StacksLookAndFeel.cpp
     Source/Displays.cpp
+    Source/SettingsPanel.cpp
     Source/SynthPanel.cpp
     Source/ModulatorsPanel.cpp
     Source/LabPanel.cpp

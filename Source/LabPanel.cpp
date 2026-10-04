@@ -1,4 +1,5 @@
 #include "LabPanel.h"
+#include "PatchGenerator.h"
 #include "Controls.h" // colours
 
 namespace stacks
@@ -6,18 +7,10 @@ namespace stacks
 
 namespace
 {
-    constexpr int kRandomItemId = 1;
-    constexpr int kOllamaItemBase = 100;
-    constexpr int kOllamaUnavailableId = 99;
-    constexpr int kBuiltinItemBase = 200;
 
     const juce::Colour kRandomCard { 0xff23262c };
     const juce::Colour kRandomTag  { 0xff7c828c };
 
-    juce::String sizeText (juce::int64 bytes)
-    {
-        return juce::String ((double) bytes / 1.0e9, 1) + " GB";
-    }
 
     juce::String heart()  { return juce::String::fromUTF8 ("\xe2\x99\xa5"); }   // ♥
     juce::String spark()  { return juce::String::fromUTF8 ("\xe2\x9c\xa6"); }   // ✦
@@ -46,9 +39,10 @@ void PatchCard::showSaveButton (bool show)
     resized();
 }
 
-void PatchCard::set (const Patch& p, Style s, bool isAuditioned, bool isFavourite)
+void PatchCard::set (const Patch& p, Style s, bool isAuditioned, bool isFavourite, int changes)
 {
     name = p.name;
+    changesFromSeed = changes;
     description = p.description;
     category = p.category;
     style = s;
@@ -104,6 +98,8 @@ void PatchCard::paint (juce::Graphics& g)
     juce::String badge = isCurrent ? "NOW PLAYING" : isRandom ? "RANDOM" : spark() + " AI";
     if (tags.isNotEmpty()) tags << "  ";
     tags << badge;
+    if (changesFromSeed >= 0 && style != Style::nowPlaying)
+        tags << juce::String (juce::CharPointer_UTF8 ("  \xc2\xb7  ")) << changesFromSeed << " changes from seed";
 
     g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
     g.setColour (isRandom ? kRandomTag : colours::accent);
@@ -203,20 +199,6 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
     header.setFont (juce::Font (juce::FontOptions (15.0f, juce::Font::bold)));
     header.setColour (juce::Label::textColourId, colours::text);
     addAndMakeVisible (header);
-
-    engineLabel.setText ("Engine", juce::dontSendNotification);
-    engineLabel.setFont (juce::Font (juce::FontOptions (11.0f)));
-    engineLabel.setColour (juce::Label::textColourId, colours::muted);
-    addAndMakeVisible (engineLabel);
-
-    engineBox.setTooltip ("Who designs the patches: the built-in random breeder, a model running inside Stacks, or the Ollama app");
-    engineBox.onChange = [this] { engineChosen(); };
-    addAndMakeVisible (engineBox);
-
-    refreshEnginesButton.setButtonText (juce::String::fromUTF8 ("\xe2\x86\xbb")); // ↻
-    refreshEnginesButton.setTooltip ("Look for models again");
-    refreshEnginesButton.onClick = [this] { processor.refreshOllamaModels(); };
-    addAndMakeVisible (refreshEnginesButton);
 
     hint.setTextToShowWhenEmpty ("Describe a sound and press Return: \"mgmt style synth patch\", \"dark evolving pad\"...", colours::muted);
     hint.setMultiLine (false);
@@ -322,7 +304,6 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
     addAndMakeVisible (progressStrip);
 
     processor.labBroadcaster.addChangeListener (this);
-    rebuildEngineMenu();
     showView (View::garden);
     refresh();
     startTimer (1000);
@@ -346,13 +327,6 @@ void LabPanel::resized()
 
     header.setBounds (r.removeFromTop (22));
     r.removeFromTop (4);
-
-    auto engineRow = r.removeFromTop (24);
-    engineLabel.setBounds (engineRow.removeFromLeft (60));
-    refreshEnginesButton.setBounds (engineRow.removeFromRight (28));
-    engineRow.removeFromRight (4);
-    engineBox.setBounds (engineRow);
-    r.removeFromTop (6);
 
     hint.setBounds (r.removeFromTop (26));
     r.removeFromTop (6);
@@ -452,99 +426,6 @@ void LabPanel::layoutCards()
     cardList.setSize (width, juce::jmax (y, 1));
 }
 
-void LabPanel::rebuildEngineMenu()
-{
-    const auto choice = processor.engine();
-    const auto& ollama = processor.ollamaModels();
-    const auto& builtins = processor.builtInModels();
-
-    engineBox.clear (juce::dontSendNotification);
-    engineMenuModels.clear();
-    engineMenuBuiltins.clear();
-
-    engineBox.addItem ("Random (no AI)", kRandomItemId);
-
-    engineBox.addSectionHeading ("Built-in AI (runs inside Stacks)");
-    for (const auto& m : builtins)
-    {
-        juce::String label = m.label;
-        if (m.fromOllama)       label << " (Ollama's copy)";
-        if (! m.installed)      label << "  -  download " << sizeText (m.bytes);
-        engineMenuBuiltins.add (m.id);
-        engineBox.addItem (label, kBuiltinItemBase + engineMenuBuiltins.size() - 1);
-    }
-
-    engineBox.addSectionHeading ("Ollama app");
-    if (ollama.isEmpty())
-    {
-        engineBox.addItem ("Ollama isn't running", kOllamaUnavailableId);
-        engineBox.setItemEnabled (kOllamaUnavailableId, false);
-        if (choice.kind == EngineKind::Ollama && choice.model.isNotEmpty())
-        {
-            engineMenuModels.add (choice.model);
-            engineBox.addItem ("Ollama: " + choice.model, kOllamaItemBase);
-        }
-    }
-    else
-    {
-        for (const auto& m : ollama)
-        {
-            engineMenuModels.add (m);
-            engineBox.addItem ("Ollama: " + m, kOllamaItemBase + engineMenuModels.size() - 1);
-        }
-        if (choice.kind == EngineKind::Ollama && choice.model.isNotEmpty() && ! ollama.contains (choice.model))
-        {
-            engineMenuModels.add (choice.model);
-            engineBox.addItem ("Ollama: " + choice.model + " (missing)", kOllamaItemBase + engineMenuModels.size() - 1);
-        }
-    }
-
-    int selectedId = kRandomItemId;
-    if (choice.kind == EngineKind::Ollama)
-    {
-        const int idx = engineMenuModels.indexOf (choice.model);
-        if (idx >= 0) selectedId = kOllamaItemBase + idx;
-    }
-    else if (choice.kind == EngineKind::Builtin)
-    {
-        const int idx = engineMenuBuiltins.indexOf (choice.model);
-        if (idx >= 0) selectedId = kBuiltinItemBase + idx;
-    }
-    engineBox.setSelectedId (selectedId, juce::dontSendNotification);
-}
-
-void LabPanel::engineChosen()
-{
-    const int id = engineBox.getSelectedId();
-    EngineChoice choice;
-
-    if (id >= kBuiltinItemBase && id - kBuiltinItemBase < engineMenuBuiltins.size())
-    {
-        const auto modelId = engineMenuBuiltins[id - kBuiltinItemBase];
-        for (const auto& m : processor.builtInModels())
-        {
-            if (m.id != modelId) continue;
-            if (! m.installed)
-            {
-                // Not here yet: fetch it, the selection moves over once it has arrived.
-                processor.startModelDownload (modelId);
-                rebuildEngineMenu();
-                return;
-            }
-        }
-        choice.kind = EngineKind::Builtin;
-        choice.model = modelId;
-    }
-    else if (id >= kOllamaItemBase && id - kOllamaItemBase < engineMenuModels.size())
-    {
-        choice.kind = EngineKind::Ollama;
-        choice.model = engineMenuModels[id - kOllamaItemBase];
-    }
-
-    if (! (choice == processor.engine()))
-        processor.setEngine (choice);
-}
-
 void LabPanel::refreshNowPlaying()
 {
     auto current = processor.currentPatch();
@@ -571,8 +452,6 @@ void LabPanel::refresh()
                                        : juce::String ("AI Lab"),
                     juce::dontSendNotification);
 
-    rebuildEngineMenu();
-
     const bool busy = processor.isBusy();
     juce::String currentName = processor.currentPatchName();
     if (currentName.length() > 20) currentName = currentName.substring (0, 19) + juce::String::fromUTF8 ("\xe2\x80\xa6");
@@ -584,7 +463,6 @@ void LabPanel::refresh()
                              : processor.isDownloading() ? "Cancel the model download"
                              : "New patches from your description alone - no preset needed. (Evolve grows from the sound you're hearing instead.)");
     backButton.setEnabled (! busy && ! lab.history.empty());
-    engineBox.setEnabled (! busy);
     designWavesToggle.setToggleState (processor.designWavetables(), juce::dontSendNotification);
     favouriteButton.setButtonText (heart() + (processor.currentIsFavourite() ? " Favourite  " : " Favourite"));
     favouriteButton.setColour (juce::TextButton::buttonColourId, processor.currentIsFavourite() ? colours::accentDim : colours::card);
@@ -606,7 +484,7 @@ void LabPanel::refresh()
     {
         const auto& c = lab.candidates[(size_t) i];
         cards[(size_t) i]->set (c, c.origin == "AI" ? PatchCard::Style::ai : PatchCard::Style::random,
-                                i == lab.auditioned, c.favourite);
+                                i == lab.auditioned, c.favourite, lab.seedIsPatch ? countAudibleDifferences (c, lab.seed) : -1);
     }
 
     shownNowPlaying.clear();

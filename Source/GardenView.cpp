@@ -1,4 +1,5 @@
 #include "GardenView.h"
+#include "PatchGenerator.h"
 #include "Controls.h"
 
 namespace stacks
@@ -21,14 +22,15 @@ class GardenView::Leaf : public juce::Component,
 public:
     Leaf (GardenView& g, int idx) : garden (g), index (idx) {}
 
-    void set (const Patch& p, bool isAuditioned, bool isFavourite, float grow)
+    void set (const Patch& p, bool isAuditioned, bool isFavourite, float grow, int changesFromSeed)
     {
         name = p.name;
         ai = p.origin == "AI";
         auditioned = isAuditioned;
         favourite = isFavourite;
         growth = grow;
-        setTooltip (p.name + (p.category.isNotEmpty() ? "  (" + p.category + ")" : "") + "\n" + p.description
+        setTooltip (p.name + (p.category.isNotEmpty() ? "  (" + p.category + ")" : "")
+                    + (changesFromSeed >= 0 ? "  -  " + juce::String (changesFromSeed) + " audible changes from the seed (closer leaves are more alike)" : juce::String()) + "\n" + p.description
                     + "\n\nclick: hear   drag outward: wilder   right-click: plant / favourite");
         setTitle ("Audition " + name);
         repaint();
@@ -203,13 +205,16 @@ void GardenView::layoutLeaves()
         }
         const float grow = (float) juce::jlimit (0.0, 1.0, (now - appearedAt[(size_t) i]) / kSproutMs);
         const float eased = 1.0f - (1.0f - grow) * (1.0f - grow);
-        const float len = (ai ? length : length * 0.82f) * eased;
+        // Leaves that stray further from the seed sit further out.
+        const int changes = lab.seedIsPatch ? countAudibleDifferences (c, lab.seed) : -1;
+        const float closeness = changes < 0 ? 1.0f : juce::jlimit (0.72f, 1.12f, 0.72f + 0.4f * (float) changes / 14.0f);
+        const float len = (ai ? length : length * 0.82f) * closeness * eased;
         const juce::Point<float> pos (centre.x + std::cos (angle) * len, centre.y - std::sin (angle) * len);
 
         auto& leaf = *leaves[(size_t) i];
         const int size = (int) (kLeafRadius + 9.0f) * 2;
         leaf.setBounds ((int) pos.x - size / 2, (int) pos.y - size / 2, size, size);
-        leaf.set (c, i == lab.auditioned, c.favourite, eased);
+        leaf.set (c, i == lab.auditioned, c.favourite, eased, changes);
     }
 }
 

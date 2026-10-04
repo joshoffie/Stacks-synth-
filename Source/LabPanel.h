@@ -18,7 +18,7 @@ public:
     static constexpr int kHeight = 60, kCompactHeight = 50;
 
     PatchCard();
-    void set (const Patch&, Style, bool isAuditioned, bool isFavourite);
+    void set (const Patch&, Style, bool isAuditioned, bool isFavourite, int changesFromSeed = -1);
     void paint (juce::Graphics&) override;
     void resized() override;
     void mouseDown (const juce::MouseEvent&) override;
@@ -31,6 +31,7 @@ private:
     juce::TextButton favButton, saveButton { "Save" };
     juce::String name, description, category;
     Style style = Style::ai;
+    int changesFromSeed = -1;
     bool auditioned = false, favourite = false;
 };
 
@@ -85,18 +86,14 @@ private:
     void refresh();
     void refreshNowPlaying();
     void layoutCards();
-    void rebuildEngineMenu();
-    void engineChosen();
     enum class View { garden, ideas, library };
     void showView (View);
     void savePresetDialog (bool markFavourite = false);   // folder + name; the favourite flavour also sets the heart
 
     StacksAudioProcessor& processor;
 
-    juce::Label header, engineLabel, variationLabel, status;
+    juce::Label header, variationLabel, status;
     ProgressStrip progressStrip;
-    juce::ComboBox engineBox;
-    juce::TextButton refreshEnginesButton;
     juce::TextEditor hint;
     juce::Slider variation;
     juce::ToggleButton designWavesToggle { "Design wavetables" };
@@ -116,8 +113,6 @@ private:
     juce::String shownNowPlaying;
 
 
-    juce::StringArray engineMenuModels;   // Ollama model name per menu entry
-    juce::StringArray engineMenuBuiltins; // built-in model id per menu entry
     int shownGeneration = -1;
 };
 

@@ -34,9 +34,15 @@ public:
     static std::vector<ModelInfo> catalogue();
     static std::optional<ModelInfo> find (const juce::String& id);
 
+    // The user's own .gguf files (ids "file:<path>"), remembered in custom-models.json.
+    static juce::String addCustomModel (const juce::File&);
+    static void removeCustomModel (const juce::String& id);
+
 private:
     static std::vector<ModelInfo> builtInCatalogue();
     static std::vector<ModelInfo> ollamaCopies();
+    static std::vector<ModelInfo> customModels();
+    static juce::File customModelsFile();
 };
 
 // Downloads one catalogue model in the background. Callbacks run on the

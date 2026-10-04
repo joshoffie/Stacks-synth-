@@ -95,7 +95,53 @@ std::vector<ModelInfo> ModelManager::catalogue()
 
     for (auto& m : ollamaCopies())
         list.push_back (m);
+    for (auto& m : customModels())
+        list.push_back (m);
     return list;
+}
+
+juce::File ModelManager::customModelsFile() { return appDataDirectory().getChildFile ("custom-models.json"); }
+
+std::vector<ModelInfo> ModelManager::customModels()
+{
+    std::vector<ModelInfo> list;
+    if (auto* arr = juce::JSON::parse (customModelsFile().loadFileAsString()).getArray())
+        for (const auto& v : *arr)
+        {
+            juce::File f (v.toString());
+            ModelInfo m;
+            m.id = "file:" + f.getFullPathName();
+            m.label = f.getFileNameWithoutExtension().substring (0, 36);
+            m.note = "your own model, loaded from " + f.getParentDirectory().getFullPathName();
+            m.file = f;
+            m.bytes = f.existsAsFile() ? f.getSize() : 0;
+            m.installed = f.existsAsFile() && m.bytes > 1024 * 1024;
+            list.push_back (m);
+        }
+    return list;
+}
+
+juce::String ModelManager::addCustomModel (const juce::File& f)
+{
+    juce::Array<juce::var> arr;
+    if (auto* existing = juce::JSON::parse (customModelsFile().loadFileAsString()).getArray())
+        arr = *existing;
+    if (! arr.contains (juce::var (f.getFullPathName())))
+        arr.add (f.getFullPathName());
+    appDataDirectory().createDirectory();
+    customModelsFile().replaceWithText (juce::JSON::toString (juce::var (arr)));
+    return "file:" + f.getFullPathName();
+}
+
+void ModelManager::removeCustomModel (const juce::String& id)
+{
+    juce::Array<juce::var> arr, kept;
+    if (auto* existing = juce::JSON::parse (customModelsFile().loadFileAsString()).getArray())
+        arr = *existing;
+    for (const auto& v : arr)
+        if ("file:" + v.toString() != id)
+            kept.add (v);
+    customModelsFile().replaceWithText (juce::JSON::toString (juce::var (kept)));
 }
 
 std::optional<ModelInfo> ModelManager::find (const juce::String& id)

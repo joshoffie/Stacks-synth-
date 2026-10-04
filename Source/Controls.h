@@ -37,6 +37,7 @@ public:
     void setAccent (juce::Colour);
     void setModulations (std::vector<KnobModulation>); // repaints the rings
     void setLiveValue (float realValue);               // where the modulation has the knob right now
+    void clearLiveValue();
     void setAssignMode (bool on, juce::Colour sourceColour);
     int parameterIndex() const { return paramIndex; }
 

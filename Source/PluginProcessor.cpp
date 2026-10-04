@@ -555,10 +555,11 @@ void StacksAudioProcessor::loadEngineFromSettings()
 {
     auto& s = settings();
     designWaves = s.getBoolValue ("designWaves", true);
+    calm = s.getBoolValue ("calm", false);
     EngineChoice choice;
-    const auto kind = s.getValue ("engine", "random");
+    const auto kind = s.getValue ("engine", "builtin");   // Qwen3 4B out of the box; it downloads itself on first use
     choice.kind  = kind == "ollama" ? EngineKind::Ollama : kind == "builtin" ? EngineKind::Builtin : EngineKind::Random;
-    choice.model = s.getValue ("model", "");
+    choice.model = s.getValue ("model", "qwen3-4b");
     if (choice.kind != EngineKind::Random && choice.model.isEmpty())
         choice.kind = EngineKind::Random;
     engineChoice = choice;
@@ -582,10 +583,12 @@ void StacksAudioProcessor::setEngine (const EngineChoice& choice)
 void StacksAudioProcessor::rebuildGenerator()
 {
     generator = randomGenerator;
+    activeBackend.reset();
 
     if (engineChoice.kind == EngineKind::Ollama)
     {
-        generator = std::make_shared<LlmPatchGenerator> (std::make_shared<OllamaBackend> (engineChoice.model), randomGenerator);
+        activeBackend = std::make_shared<OllamaBackend> (engineChoice.model);
+        generator = std::make_shared<LlmPatchGenerator> (activeBackend, randomGenerator);
     }
     else if (engineChoice.kind == EngineKind::Builtin)
     {
@@ -595,6 +598,7 @@ void StacksAudioProcessor::rebuildGenerator()
                 continue;
             if (builtInBackend == nullptr || builtInBackend->file() != m.file)
                 builtInBackend = std::make_shared<LlamaBackend> (m.file, m.label);
+            activeBackend = builtInBackend;
             generator = std::make_shared<LlmPatchGenerator> (builtInBackend, randomGenerator);
             break;
         }
@@ -686,6 +690,15 @@ void StacksAudioProcessor::reloadCustomWaves()
     }
 }
 
+void StacksAudioProcessor::setCalmMode (bool shouldBeCalm)
+{
+    calm = shouldBeCalm;
+    auto& s = settings();
+    s.setValue ("calm", shouldBeCalm);
+    s.saveIfNeeded();
+    labBroadcaster.sendChangeMessage();
+}
+
 void StacksAudioProcessor::setDesignWavetables (bool shouldDesign)
 {
     designWaves = shouldDesign;
@@ -730,6 +743,14 @@ bool StacksAudioProcessor::startModelDownload (const juce::String& modelId)
         {
             setEngine ({ EngineKind::Builtin, modelId });
             labState.status = label + " installed and selected";
+            if (pendingRequest)
+            {
+                auto request = *pendingRequest;
+                pendingRequest.reset();
+                labBroadcaster.sendChangeMessage();
+                startGeneration (std::move (request));
+                return;
+            }
         }
         else
         {
@@ -831,6 +852,21 @@ void StacksAudioProcessor::startGeneration (GenerationRequest req)
 {
     if (labState.generating)
         return;
+
+    // The chosen built-in model isn't on this Mac yet: fetch it, then run this request.
+    if (engineChoice.kind == EngineKind::Builtin && generator == randomGenerator)
+    {
+        if (auto info = ModelManager::find (engineChoice.model); info && ! info->installed && info->url.isNotEmpty())
+        {
+            pendingRequest = req;
+            if (isDownloading())
+                labState.status = "Still downloading " + info->label + " - your request runs when it lands";
+            else if (startModelDownload (engineChoice.model))
+                labState.status = "Downloading " + info->label + " first (" + juce::String (info->bytes / 1000000) + " MB) - your request runs when it lands";
+            labBroadcaster.sendChangeMessage();
+            return;
+        }
+    }
 
     const int token = ++generationToken;
     cancelRequested = false;

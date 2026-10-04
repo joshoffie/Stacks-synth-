@@ -166,6 +166,7 @@ void LfoDisplay::paint (juce::Graphics& g)
     }
 
     // playhead
+    if (processor.calmMode()) return;
     const float phase = processor.lfoDisplayPhase (lfo) + processor.apvts.getRawParameterValue (paramId (lfoPhaseParam (lfo)))->load();
     const float px = inner.getX() + (phase - std::floor (phase)) * inner.getWidth();
     g.setColour (colours::text.withAlpha (0.5f));

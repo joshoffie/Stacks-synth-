@@ -470,6 +470,11 @@ SynthPanel::SynthPanel (StacksAudioProcessor& p) : processor (p), apvts (p.apvts
 
 void SynthPanel::timerCallback()
 {
+    if (processor.calmMode())
+    {
+        for (auto* knob : knobs) knob->clearLiveValue();
+        return;
+    }
     for (auto* knob : knobs)
         knob->setLiveValue (processor.liveValue (knob->parameterIndex()));
 }

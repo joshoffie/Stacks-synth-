@@ -127,6 +127,11 @@ public:
     void cancelDownload();
     bool isDownloading() const                             { return downloader != nullptr && downloader->isRunning(); }
     bool isBusy() const                                    { return labState.generating || isDownloading(); }
+    std::shared_ptr<LlmBackend> aiBackend() const          { return activeBackend; }   // null with the random engine
+
+    // Calm mode: no live knob markers or LFO playhead. Persisted.
+    bool calmMode() const                                  { return calm; }
+    void setCalmMode (bool);
 
     // Let the generators invent new wavetables ("Custom") instead of only picking built-ins. Persisted.
     bool designWavetables() const                          { return designWaves; }
@@ -223,6 +228,9 @@ private:
     juce::StringArray knownOllamaModels;
     std::vector<ModelInfo> knownModels;
     std::shared_ptr<LlamaBackend> builtInBackend;          // kept across engine rebuilds so the model stays loaded
+    std::shared_ptr<LlmBackend> activeBackend;             // whichever model the engine uses right now
+    std::optional<GenerationRequest> pendingRequest;       // runs once a missing model has downloaded
+    bool calm = false;
     std::unique_ptr<ModelDownloader> downloader;
     int lastDownloadPercent = -1;
     juce::ThreadPool pool { 2 };

@@ -209,6 +209,11 @@ std::unique_ptr<juce::AccessibilityHandler> ParamKnob::createAccessibilityHandle
         }));
 }
 
+void ParamKnob::clearLiveValue()
+{
+    if (liveNorm >= 0.0f) { liveNorm = -1.0f; repaint(); }
+}
+
 void ParamKnob::resized()
 {
     auto r = getLocalBounds();

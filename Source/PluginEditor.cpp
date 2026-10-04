@@ -36,6 +36,11 @@ StacksAudioProcessorEditor::StacksAudioProcessorEditor (StacksAudioProcessor& p)
 
     addAndMakeVisible (masterKnob);
     addAndMakeVisible (scope);
+
+    settingsButton.setButtonText (juce::String::fromUTF8 ("\xe2\x9a\x99"));   // gear
+    settingsButton.setTooltip ("Settings: which AI model designs patches, your own models, calm mode, and the model guide");
+    settingsButton.onClick = [this] { SettingsPanel::show (synthProcessor, this); };
+    addAndMakeVisible (settingsButton);
     addAndMakeVisible (synthPanel);
     addAndMakeVisible (labPanel);
 
@@ -76,6 +81,8 @@ void StacksAudioProcessorEditor::resized()
 
     auto header = r.removeFromTop (kHeaderHeight);
     masterKnob.setBounds (header.removeFromRight (64));
+    settingsButton.setBounds (header.removeFromRight (30).withSizeKeepingCentre (26, 26));
+    header.removeFromRight (6);
     title.setBounds (header.removeFromLeft (130).withTrimmedBottom (14));
     patchName.setBounds (header.removeFromLeft (juce::jmin (420, header.getWidth() / 2)).reduced (6, 0).withTrimmedBottom (14));
     header.removeFromRight (10);
