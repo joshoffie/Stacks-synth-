@@ -1211,6 +1211,8 @@ void StacksAudioProcessor::explainCurrentPatch()
         PatchExplainer::explain (*backend, patch, [&] (const juce::String& t) { text += t; push (false); },
                                  [weak, token] { auto* self = weak.get(); return self == nullptr || self->explainToken.load() != token; }, error);
         push (true);
+        // For tuning the prompt: the last explanation, next to the last prompt and reply.
+        ModelManager::appDataDirectory().getChildFile ("last-explanation.txt").replaceWithText (PatchExplainer::userPrompt (patch) + "\n\n----- REPLY -----\n" + text + (error.isNotEmpty() ? "\n----- ERROR -----\n" + error : juce::String()));
         juce::MessageManager::callAsync ([weak, token]
         {
             if (auto* self = weak.get())

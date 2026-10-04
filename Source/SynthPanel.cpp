@@ -658,7 +658,8 @@ void SynthPanel::resized()
     else if (viewMode < (int) rows.size())
     {
         auto& row = rows[(size_t) viewMode];
-        const float scale = juce::jlimit (1.0f, 2.2f, juce::jmin ((float) (area.getWidth() - 8) / (float) row.naturalWidth,
+        // Fill the panel: larger when there is room, smaller when a row with its displays is wider than the panel.
+        const float scale = juce::jlimit (0.6f, 2.2f, juce::jmin ((float) (area.getWidth() - 8) / (float) row.naturalWidth,
                                                                    (float) (area.getHeight() - 8) / (float) row.height));
         const float px = (float) area.getX() + ((float) area.getWidth() - row.naturalWidth * scale) * 0.5f;
         const float py = (float) area.getY() + juce::jmax (4.0f, ((float) area.getHeight() - row.height * scale) * 0.35f);
