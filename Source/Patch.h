@@ -5,6 +5,7 @@
 #include <optional>
 
 #include "Parameters.h"
+#include "LfoTable.h"
 
 namespace stacks
 {
@@ -20,6 +21,8 @@ struct Patch
     juce::String category;                 // e.g. "Pad", "Bass" — free text
     juce::String origin;                   // "AI" when a language model designed it, otherwise empty
     std::array<float, kNumParams> values;  // real-world values; Choice params hold the index
+    std::array<juce::String, kNumLfos> lfoShapes; // drawn LFO shapes as point JSON, empty = none
+    juce::String filePath;                 // library file this patch is saved as (not part of the JSON)
 
     float get (P p) const noexcept { return values[(size_t) p]; }
     void set (P p, float v) noexcept { set ((int) p, v); }
@@ -39,6 +42,10 @@ struct Patch
     // Both are message-thread operations.
     static Patch capture (const juce::AudioProcessorValueTreeState&);
     void applyTo (juce::AudioProcessorValueTreeState&) const;
+
+    // Where drawn LFO shapes live inside the processor's state tree.
+    static const juce::Identifier& lfoShapesTreeType();
+    static juce::Identifier lfoShapeProperty (int k);
 };
 
 // Keeps a patch in tune with the note that is played: oscillator A only at

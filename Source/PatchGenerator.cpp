@@ -130,16 +130,17 @@ namespace
         p.set (modAmountParam (slot), amount);
     }
 
+    bool isLfoSource (int src) { return src == SrcLfo1 || src == SrcLfo2 || src == SrcLfo3 || src == SrcLfo4; }
+
     bool hasLfoMod (const Patch& p)
     {
         for (int i = 0; i < kNumModSlots; ++i)
-        {
-            const int src = (int) p.get (modSourceParam (i));
-            if ((src == SrcLfo1 || src == SrcLfo2) && (int) p.get (modDestParam (i)) != DestOff)
+            if (isLfoSource ((int) p.get (modSourceParam (i))) && (int) p.get (modDestParam (i)) != TargetOff)
                 return true;
-        }
         return false;
     }
+
+    int targetOf (P param) { return juce::jmax (0, modTargetForParam ((int) param)); }
 
     // Sets an LFO's shape and rate and routes it through a free matrix slot.
     void setLfo (Patch& p, int which, int dest, float rate, float amount, int shape)
@@ -206,12 +207,12 @@ namespace
                 setEnvelope (p, P::aenv_attack, P::aenv_decay, P::aenv_sustain, P::aenv_release,
                              rng.logUni (0.3f, 2.0f), rng.logUni (1.0f, 3.0f), rng.uni (0.7f, 1.0f), rng.logUni (1.0f, 4.0f));
                 {
-                    const int dest = rng.pick ({ DestMorphA, DestFilter, DestPitch, DestMorphB });
-                    setLfo (p, 1, dest, rng.logUni (0.05f, 0.5f), dest == DestPitch ? rng.uni (0.01f, 0.03f) : rng.uni (0.1f, 0.5f), rng.pick ({ 0, 1 }));
+                    const int dest = rng.pick ({ targetOf (P::oscA_morph), targetOf (P::filter_cutoff), TargetPitch, targetOf (P::oscB_morph) });
+                    setLfo (p, 1, dest, rng.logUni (0.05f, 0.5f), dest == TargetPitch ? rng.uni (0.01f, 0.03f) : rng.uni (0.1f, 0.5f), rng.pick ({ 0, 1 }));
                 }
                 if (rng.chance (0.5f))
-                    setLfo (p, 2, DestPan, rng.logUni (0.05f, 0.3f), rng.uni (0.2f, 0.6f), 0);
-                addMod (p, SrcModWheel, DestFilter, rng.uni (0.3f, 0.6f));
+                    setLfo (p, 2, TargetPan, rng.logUni (0.05f, 0.3f), rng.uni (0.2f, 0.6f), 0);
+                addMod (p, SrcModWheel, targetOf (P::filter_cutoff), rng.uni (0.3f, 0.6f));
                 p.set (P::chorus_mix, rng.uni (0.2f, 0.6f));
                 p.set (P::chorus_rate, rng.uni (0.2f, 1.0f));
                 p.set (P::chorus_depth, rng.uni (0.2f, 0.5f));
@@ -239,7 +240,7 @@ namespace
                              0.001f, rng.logUni (0.05f, 0.4f), rng.uni (0.0f, 0.2f), rng.logUni (0.05f, 0.4f));
                 setEnvelope (p, P::aenv_attack, P::aenv_decay, P::aenv_sustain, P::aenv_release,
                              rng.logUni (0.001f, 0.005f), rng.logUni (0.1f, 0.6f), rng.uni (0.0f, 0.2f), rng.logUni (0.1f, 0.5f));
-                addMod (p, SrcVelocity, DestFilter, rng.uni (0.2f, 0.5f));
+                addMod (p, SrcVelocity, targetOf (P::filter_cutoff), rng.uni (0.2f, 0.5f));
                 setDelay (p, rng, rng.uni (0.2f, 0.4f), rng.uni (0.3f, 0.6f));
                 if (rng.chance (0.5f)) { setDelayMode (p, 1); p.set (P::delay_sync, (float) rng.pick ({ 3, 4, 5 })); }
                 setReverb (p, rng.uni (0.1f, 0.3f), rng.uni (0.3f, 0.7f), rng.uni (0.3f, 0.7f));
@@ -269,7 +270,7 @@ namespace
                 setEnvelope (p, P::aenv_attack, P::aenv_decay, P::aenv_sustain, P::aenv_release,
                              rng.logUni (0.001f, 0.01f), rng.logUni (0.2f, 0.6f), rng.uni (0.4f, 0.9f), rng.logUni (0.05f, 0.3f));
                 p.set (P::glide, rng.chance (0.4f) ? rng.uni (0.02f, 0.08f) : 0.0f);
-                addMod (p, SrcVelocity, DestFilter, rng.uni (0.2f, 0.5f));
+                addMod (p, SrcVelocity, targetOf (P::filter_cutoff), rng.uni (0.2f, 0.5f));
                 setReverb (p, rng.uni (0.0f, 0.1f), 0.3f, 0.7f);
                 break;
 
@@ -290,8 +291,8 @@ namespace
                 setEnvelope (p, P::aenv_attack, P::aenv_decay, P::aenv_sustain, P::aenv_release,
                              rng.logUni (0.001f, 0.01f), rng.logUni (0.5f, 2.0f), rng.uni (0.2f, 0.6f), rng.logUni (0.3f, 1.0f));
                 if (rng.chance (0.4f))
-                    setLfo (p, 1, DestAmp, rng.uni (3.0f, 6.0f), rng.uni (0.1f, 0.3f), 0);
-                addMod (p, SrcVelocity, DestFilter, rng.uni (0.2f, 0.5f));
+                    setLfo (p, 1, TargetAmp, rng.uni (3.0f, 6.0f), rng.uni (0.1f, 0.3f), 0);
+                addMod (p, SrcVelocity, targetOf (P::filter_cutoff), rng.uni (0.2f, 0.5f));
                 p.set (P::chorus_mix, rng.uni (0.1f, 0.4f));
                 setReverb (p, rng.uni (0.2f, 0.4f), rng.uni (0.4f, 0.7f), rng.uni (0.3f, 0.7f));
                 break;
@@ -315,8 +316,8 @@ namespace
                              rng.logUni (0.001f, 0.05f), rng.logUni (0.1f, 0.6f), rng.uni (0.3f, 0.7f), rng.logUni (0.1f, 0.4f));
                 setEnvelope (p, P::aenv_attack, P::aenv_decay, P::aenv_sustain, P::aenv_release,
                              rng.logUni (0.005f, 0.05f), rng.logUni (0.1f, 0.5f), rng.uni (0.8f, 1.0f), rng.logUni (0.1f, 0.4f));
-                setLfo (p, 1, DestPitch, rng.uni (4.0f, 7.0f), rng.uni (0.015f, 0.04f), 0);
-                addMod (p, SrcVelocity, DestFilter, rng.uni (0.2f, 0.5f));
+                setLfo (p, 1, TargetPitch, rng.uni (4.0f, 7.0f), rng.uni (0.015f, 0.04f), 0);
+                addMod (p, SrcVelocity, targetOf (P::filter_cutoff), rng.uni (0.2f, 0.5f));
                 setDelay (p, rng, rng.uni (0.2f, 0.4f), rng.uni (0.3f, 0.5f));
                 setReverb (p, rng.uni (0.1f, 0.3f), rng.uni (0.4f, 0.7f), 0.5f);
                 break;
@@ -339,9 +340,9 @@ namespace
                 setEnvelope (p, P::fenv_attack, P::fenv_decay, P::fenv_sustain, P::fenv_release,
                              0.001f, rng.logUni (0.5f, 2.0f), 0.0f, 1.0f);
                 if (rng.chance (0.5f))
-                    setLfo (p, 1, DestFM, rng.logUni (0.1f, 1.0f), rng.uni (0.05f, 0.2f), 0);
+                    setLfo (p, 1, targetOf (P::fm_amount), rng.logUni (0.1f, 1.0f), rng.uni (0.05f, 0.2f), 0);
                 setModEnv (p, 0.001f, rng.logUni (0.2f, 1.0f), 0.0f, 0.5f);
-                addMod (p, SrcModEnv, DestFM, rng.uni (0.15f, 0.4f));
+                addMod (p, SrcModEnv, targetOf (P::fm_amount), rng.uni (0.15f, 0.4f));
                 setReverb (p, rng.uni (0.3f, 0.6f), rng.uni (0.6f, 0.9f), rng.uni (0.2f, 0.5f));
                 break;
 
@@ -364,9 +365,9 @@ namespace
                              rng.logUni (0.1f, 3.0f), rng.logUni (0.5f, 4.0f), rng.uni (0.2f, 0.8f), rng.logUni (0.5f, 3.0f));
                 setEnvelope (p, P::aenv_attack, P::aenv_decay, P::aenv_sustain, P::aenv_release,
                              rng.logUni (0.05f, 2.0f), rng.logUni (0.5f, 3.0f), rng.uni (0.5f, 1.0f), rng.logUni (0.5f, 4.0f));
-                setLfo (p, 1, rng.pick ({ DestMorphA, DestFM, DestMorphB }), rng.logUni (0.1f, 3.0f), rng.uni (0.3f, 1.0f), rng.pick ({ 0, 1, 2, 4 }));
-                setLfo (p, 2, rng.pick ({ DestPan, DestFilter, DestAmp }), rng.logUni (0.1f, 2.0f), rng.uni (0.2f, 0.7f), rng.pick ({ 0, 1, 4 }));
-                addMod (p, SrcRandom, DestMorphA, rng.uni (0.1f, 0.3f));
+                setLfo (p, 1, rng.pick ({ targetOf (P::oscA_morph), targetOf (P::fm_amount), targetOf (P::oscB_morph) }), rng.logUni (0.1f, 3.0f), rng.uni (0.3f, 1.0f), rng.pick ({ 0, 1, 2, 4 }));
+                setLfo (p, 2, rng.pick ({ TargetPan, targetOf (P::filter_cutoff), TargetAmp }), rng.logUni (0.1f, 2.0f), rng.uni (0.2f, 0.7f), rng.pick ({ 0, 1, 4 }));
+                addMod (p, SrcRandom, targetOf (P::oscA_morph), rng.uni (0.1f, 0.3f));
                 setDelay (p, rng, rng.uni (0.3f, 0.6f), rng.uni (0.5f, 0.85f));
                 setDelayMode (p, rng.pick ({ 0, 1, 2, 2 }));
                 setReverb (p, rng.uni (0.4f, 0.8f), rng.uni (0.6f, 1.0f), rng.uni (0.2f, 0.6f));
@@ -394,8 +395,8 @@ namespace
                              rng.logUni (2.0f, 8.0f), 4.0f, 1.0f, rng.logUni (2.0f, 6.0f));
                 setEnvelope (p, P::aenv_attack, P::aenv_decay, P::aenv_sustain, P::aenv_release,
                              rng.logUni (2.0f, 8.0f), 2.0f, 1.0f, rng.logUni (3.0f, 8.0f));
-                setLfo (p, 1, rng.pick ({ DestMorphA, DestFilter }), rng.logUni (0.02f, 0.2f), rng.uni (0.2f, 0.6f), rng.pick ({ 0, 1 }));
-                setLfo (p, 2, rng.pick ({ DestPan, DestMorphB }), rng.logUni (0.02f, 0.15f), rng.uni (0.2f, 0.5f), 0);
+                setLfo (p, 1, rng.pick ({ targetOf (P::oscA_morph), targetOf (P::filter_cutoff) }), rng.logUni (0.02f, 0.2f), rng.uni (0.2f, 0.6f), rng.pick ({ 0, 1 }));
+                setLfo (p, 2, rng.pick ({ TargetPan, targetOf (P::oscB_morph) }), rng.logUni (0.02f, 0.15f), rng.uni (0.2f, 0.5f), 0);
                 p.set (P::chorus_mix, rng.uni (0.1f, 0.4f));
                 setChorusMode (p, rng.pick ({ 1, 3 }));
                 setReverb (p, rng.uni (0.4f, 0.7f), rng.uni (0.8f, 1.0f), rng.uni (0.2f, 0.5f));
@@ -409,23 +410,6 @@ namespace
     }
 
     //--------------------------------------------------------------------------
-    const std::vector<juce::NormalisableRange<float>>& ranges()
-    {
-        static const std::vector<juce::NormalisableRange<float>> r = []
-        {
-            std::vector<juce::NormalisableRange<float>> out;
-            for (const auto& s : paramSpecs())
-            {
-                juce::NormalisableRange<float> range (s.min, s.max);
-                if (s.skewCentre > 0.0f)
-                    range.setSkewForCentre (s.skewCentre);
-                out.push_back (range);
-            }
-            return out;
-        }();
-        return r;
-    }
-
     // Nudge every parameter a little (or a lot). Perturbation happens in the
     // knob's normalised space so a cutoff of 200 Hz moves by a musically
     // similar amount to one at 5 kHz.
@@ -440,16 +424,17 @@ namespace
 
             if (s.kind == ParamKind::Choice)
             {
-                const bool isWave = juce::String (s.id).endsWith ("_wave");
-                if (rng.chance (amount * (isWave ? 0.3f : 0.12f)))
-                    p.set (i, (float) rng.r.nextInt (s.choices->size()));
+                const juce::String id (s.id);
+                const float chance = id.endsWith ("_wave") ? 0.3f : id.endsWith ("_dest") ? 0.04f : id.endsWith ("_source") ? 0.06f : 0.12f;
+                if (rng.chance (amount * chance))
+                    p.set (i, (float) rng.r.nextInt (s.choices().size()));
                 continue;
             }
 
             if (! rng.chance (0.3f + 0.5f * amount))
                 continue;
 
-            const auto& range = ranges()[(size_t) i];
+            const auto& range = paramRange (i);
             float norm = range.convertTo0to1 (juce::jlimit (s.min, s.max, p.values[(size_t) i]));
             norm = juce::jlimit (0.0f, 1.0f, norm + rng.gauss() * 0.2f * amount);
             p.set (i, range.convertFrom0to1 (norm));
@@ -520,12 +505,12 @@ namespace
         if (hintLower.contains ("movement") || hintLower.contains ("motion") || hintLower.contains ("evolving") || hintLower.contains ("wobble"))
         {
             if (! hasLfoMod (p))
-                setLfo (p, 1, rng.pick ({ DestMorphA, DestFilter, DestMorphB }), rng.logUni (0.1f, 1.0f), rng.uni (0.3f, 0.7f), rng.pick ({ 0, 1 }));
+                setLfo (p, 1, rng.pick ({ targetOf (P::oscA_morph), targetOf (P::filter_cutoff), targetOf (P::oscB_morph) }), rng.logUni (0.1f, 1.0f), rng.uni (0.3f, 0.7f), rng.pick ({ 0, 1 }));
             else
                 for (int i = 0; i < kNumModSlots; ++i)
                 {
                     const int src = (int) p.get (modSourceParam (i));
-                    if ((src == SrcLfo1 || src == SrcLfo2) && (int) p.get (modDestParam (i)) != DestPitch)
+                    if (isLfoSource (src) && (int) p.get (modDestParam (i)) != TargetPitch)
                         p.set (modAmountParam (i), juce::jmax (p.get (modAmountParam (i)), rng.uni (0.3f, 0.7f)));
                 }
         }

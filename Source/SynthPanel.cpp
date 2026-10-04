@@ -10,19 +10,19 @@ namespace
     const juce::Colour kSound    { 0xfff2a541 }; // amber
     const juce::Colour kFilter   { 0xffe8775a }; // coral
     const juce::Colour kMovement { 0xff5ec8c0 }; // teal
-    const juce::Colour kMatrix   { 0xffa08cf0 }; // violet
     const juce::Colour kSpace    { 0xff7fa7d8 }; // blue
 
-    struct RowSpec { const char* caption; juce::Colour colour; std::vector<const char*> groups; };
+    const char* kModulatorsGroup = "__MODULATORS__";
+
+    struct RowSpec { const char* caption; juce::Colour colour; int height; std::vector<const char*> groups; };
 
     const std::vector<RowSpec>& rowSpecs()
     {
         static const std::vector<RowSpec> specs = {
-            { "SOUND",    kSound,    { "OSC A", "OSC B", "MIX" } },
-            { "FILTER",   kFilter,   { "FILTER", "FILTER ENV", "AMP ENV" } },
-            { "MOVEMENT", kMovement, { "MOD ENV", "LFO 1", "LFO 2", "VOICE" } },
-            { "MATRIX",   kMatrix,   { "MOD MATRIX" } },
-            { "SPACE",    kSpace,    { "CHORUS", "DELAY", "REVERB" } },
+            { "SOUND",      kSound,    0, { "OSC A", "OSC B", "MIX" } },
+            { "FILTER",     kFilter,   0, { "FILTER", "FILTER ENV", "AMP ENV" } },
+            { "MODULATORS", kMovement, SynthPanel::kModulatorsHeight, { kModulatorsGroup, "VOICE" } },
+            { "SPACE",      kSpace,    0, { "CHORUS", "DELAY", "REVERB" } },
         };
         return specs;
     }
@@ -35,115 +35,11 @@ namespace
                     return row.colour;
         return colours::accent;
     }
-}
 
-//==============================================================================
-ParamKnob::ParamKnob (juce::AudioProcessorValueTreeState& apvts, const ParamSpec& spec, bool compact)
-{
-    label.setText (spec.name, juce::dontSendNotification);
-    label.setJustificationType (juce::Justification::centred);
-    label.setFont (juce::Font (juce::FontOptions (11.0f)));
-    label.setColour (juce::Label::textColourId, colours::muted);
-    addAndMakeVisible (label);
-
-    slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-    if (compact)
-        slider.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
-    else
-        slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 58, 15);
-    slider.setTooltip (juce::String (spec.aiHint));
-    slider.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
-    slider.setColour (juce::Slider::textBoxTextColourId, colours::text);
-    addAndMakeVisible (slider);
-
-    attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (apvts, spec.id, slider);
-}
-
-void ParamKnob::setAccent (juce::Colour c)
-{
-    slider.setColour (juce::Slider::rotarySliderFillColourId, c);
-}
-
-void ParamKnob::resized()
-{
-    auto r = getLocalBounds();
-    label.setBounds (r.removeFromTop (14));
-    slider.setBounds (r);
-}
-
-//==============================================================================
-ParamChoice::ParamChoice (juce::AudioProcessorValueTreeState& apvts, const ParamSpec& spec)
-{
-    label.setText (spec.name, juce::dontSendNotification);
-    label.setJustificationType (juce::Justification::centred);
-    label.setFont (juce::Font (juce::FontOptions (11.0f)));
-    label.setColour (juce::Label::textColourId, colours::muted);
-    addAndMakeVisible (label);
-
-    combo.addItemList (*spec.choices, 1);
-    combo.setTooltip (juce::String (spec.aiHint));
-    addAndMakeVisible (combo);
-
-    attachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (apvts, spec.id, combo);
-}
-
-void ParamChoice::resized()
-{
-    auto r = getLocalBounds();
-    label.setBounds (r.removeFromTop (14));
-    combo.setBounds (r.withSizeKeepingCentre (r.getWidth() - 2, 22));
-}
-
-//==============================================================================
-ModMatrixPanel::ModMatrixPanel (juce::AudioProcessorValueTreeState& apvts, juce::Colour accent)
-{
-    for (int i = 0; i < kNumModSlots; ++i)
+    // Groups the modulators area draws itself.
+    bool isModulatorGroup (const juce::String& group)
     {
-        auto& s = slots[(size_t) i];
-        s.source.addItemList (modSourceNames(), 1);
-        s.dest.addItemList (modDestNames(), 1);
-        s.source.setTooltip ("Slot " + juce::String (i + 1) + " source");
-        s.dest.setTooltip ("Slot " + juce::String (i + 1) + " destination");
-        s.amount.setSliderStyle (juce::Slider::LinearHorizontal);
-        s.amount.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
-        s.amount.setPopupDisplayEnabled (true, false, this);
-        s.amount.setTooltip ("Slot " + juce::String (i + 1) + " amount, -1..1 (Pitch x12 semitones, Filter x5 octaves)");
-        s.amount.setColour (juce::Slider::trackColourId, accent);
-        s.amount.setColour (juce::Slider::thumbColourId, colours::text);
-        addAndMakeVisible (s.source);
-        addAndMakeVisible (s.dest);
-        addAndMakeVisible (s.amount);
-        s.sourceAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (apvts, paramId (modSourceParam (i)), s.source);
-        s.destAttachment   = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (apvts, paramId (modDestParam (i)), s.dest);
-        s.amountAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (apvts, paramId (modAmountParam (i)), s.amount);
-    }
-}
-
-void ModMatrixPanel::paint (juce::Graphics& g)
-{
-    // Thin arrows between source and destination make the rows read as "A -> B".
-    g.setColour (colours::muted);
-    g.setFont (juce::Font (juce::FontOptions (11.0f)));
-    for (const auto& s : slots)
-        g.drawText (juce::String::fromUTF8 ("\xe2\x86\x92"), s.source.getRight(), s.source.getY(), s.dest.getX() - s.source.getRight(), s.source.getHeight(),
-                    juce::Justification::centred);
-}
-
-void ModMatrixPanel::resized()
-{
-    const int rowH = 26, columnGap = 14;
-    const int columnWidth = (getWidth() - columnGap) / 2;
-
-    for (int i = 0; i < kNumModSlots; ++i)
-    {
-        auto& s = slots[(size_t) i];
-        const int column = i / 3, rowIndex = i % 3;
-        auto r = juce::Rectangle<int> (column * (columnWidth + columnGap), 4 + rowIndex * rowH, columnWidth, rowH).reduced (0, 2);
-        s.source.setBounds (r.removeFromLeft (96));
-        r.removeFromLeft (16); // arrow
-        s.dest.setBounds (r.removeFromLeft (100));
-        r.removeFromLeft (4);
-        s.amount.setBounds (r);
+        return group.startsWith ("LFO ") || group == "MOD MATRIX" || group == "MOD ENV";
     }
 }
 
@@ -177,10 +73,7 @@ public:
         setSize (12 + (int) controls.size() * SynthPanel::kCell + 12, 20 + SynthPanel::kCellH + 10);
     }
 
-    void paint (juce::Graphics& g) override
-    {
-        g.fillAll (colours::panel);
-    }
+    void paint (juce::Graphics& g) override { g.fillAll (colours::panel); }
 
     void resized() override
     {
@@ -195,14 +88,31 @@ private:
     std::vector<std::unique_ptr<juce::Component>> controls;
 };
 
-SynthPanel::SynthPanel (juce::AudioProcessorValueTreeState& state) : apvts (state)
+//==============================================================================
+SynthPanel::SynthPanel (StacksAudioProcessor& p) : processor (p), apvts (p.apvts)
 {
+    setWantsKeyboardFocus (true);
+
+    // The modulators area is one wide "section" of its own.
+    {
+        sections.push_back (std::make_unique<Section>());
+        auto* section = sections.back().get();
+        section->title = kModulatorsGroup;
+        section->colour = kMovement;
+        section->tall = true;
+        modulators = std::make_unique<ModulatorsPanel> (processor);
+        modulators->onAssignRequest = [this] (int source) { beginAssign (source); };
+        modulators->onAssignCancel  = [this] { endAssign(); };
+        addAndMakeVisible (*modulators);
+        section->controls.emplace_back (modulators.get(), 674);
+    }
+
     // One section per parameter group, controls generated from the table...
     for (const auto& spec : paramSpecs())
     {
         const juce::String group (spec.group);
-        if (group == "MASTER")
-            continue; // lives in the header
+        if (group == "MASTER" || isModulatorGroup (group))
+            continue;
 
         auto* section = findSection (group);
         if (section == nullptr)
@@ -211,17 +121,7 @@ SynthPanel::SynthPanel (juce::AudioProcessorValueTreeState& state) : apvts (stat
             section = sections.back().get();
             section->title = group;
             section->colour = colourForGroup (group);
-
-            if (group == "MOD MATRIX")
-            {
-                auto matrix = std::make_unique<ModMatrixPanel> (apvts, section->colour);
-                addAndMakeVisible (*matrix);
-                section->controls.emplace_back (matrix.get(), ModMatrixPanel::kWidth);
-                controls.push_back (std::move (matrix));
-            }
         }
-        if (group == "MOD MATRIX")
-            continue; // handled by the matrix component
 
         if (isAdvancedParam (spec.id))
         {
@@ -249,6 +149,8 @@ SynthPanel::SynthPanel (juce::AudioProcessorValueTreeState& state) : apvts (stat
         {
             auto knob = std::make_unique<ParamKnob> (apvts, spec);
             knob->setAccent (section->colour);
+            knob->onAssignClick = [this] (int paramIndex) { knobClicked (paramIndex); };
+            knobs.push_back (knob.get());
             control = std::move (knob);
         }
 
@@ -263,12 +165,86 @@ SynthPanel::SynthPanel (juce::AudioProcessorValueTreeState& state) : apvts (stat
         Row row;
         row.caption = spec.caption;
         row.colour = spec.colour;
+        row.height = spec.height > 0 ? spec.height : kTitleH + kCellH + kPad;
         for (auto* g : spec.groups)
             if (auto* section = findSection (g))
                 row.sections.push_back (section);
         if (! row.sections.empty())
             rows.push_back (std::move (row));
     }
+
+    for (int i = 0; i < kNumModSlots; ++i)
+    {
+        apvts.addParameterListener (paramId (modSourceParam (i)), this);
+        apvts.addParameterListener (paramId (modDestParam (i)), this);
+        apvts.addParameterListener (paramId (modAmountParam (i)), this);
+    }
+    refreshModulationDisplay();
+}
+
+SynthPanel::~SynthPanel()
+{
+    cancelPendingUpdate();
+    for (int i = 0; i < kNumModSlots; ++i)
+    {
+        apvts.removeParameterListener (paramId (modSourceParam (i)), this);
+        apvts.removeParameterListener (paramId (modDestParam (i)), this);
+        apvts.removeParameterListener (paramId (modAmountParam (i)), this);
+    }
+}
+
+void SynthPanel::handleAsyncUpdate()
+{
+    refreshModulationDisplay();
+}
+
+void SynthPanel::refreshModulationDisplay()
+{
+    for (auto* knob : knobs)
+        knob->setModulations (processor.modulationsOnParam (knob->parameterIndex()));
+    if (modulators)
+        modulators->refreshConnections();
+}
+
+void SynthPanel::beginAssign (int source)
+{
+    assigningSource = source;
+    for (auto* knob : knobs)
+        knob->setAssignMode (true, modSourceColour (source));
+    modulators->setAssigning (source);
+    grabKeyboardFocus();
+}
+
+void SynthPanel::endAssign()
+{
+    assigningSource = -1;
+    for (auto* knob : knobs)
+        knob->setAssignMode (false, {});
+    modulators->setAssigning (-1);
+}
+
+void SynthPanel::knobClicked (int paramIndex)
+{
+    if (assigningSource < 0)
+        return;
+    processor.addModulation (assigningSource, modTargetForParam (paramIndex));
+    endAssign();
+}
+
+void SynthPanel::mouseDown (const juce::MouseEvent&)
+{
+    if (assigningSource >= 0)
+        endAssign();
+}
+
+bool SynthPanel::keyPressed (const juce::KeyPress& key)
+{
+    if (key == juce::KeyPress::escapeKey && assigningSource >= 0)
+    {
+        endAssign();
+        return true;
+    }
+    return false;
 }
 
 void SynthPanel::showAdvanced (Section& section)
@@ -289,18 +265,20 @@ SynthPanel::Section* SynthPanel::findSection (const juce::String& title)
 
 int SynthPanel::preferredHeight() const
 {
-    const int rowH = kTitleH + kCellH + kPad;
-    return (int) rows.size() * (rowH + kGap) - kGap + 2 * kPad;
+    int h = 2 * kPad;
+    for (const auto& row : rows)
+        h += row.height + kGap;
+    return h - kGap;
 }
 
 void SynthPanel::resized()
 {
-    const int rowH = kTitleH + kCellH + kPad;
+    const int normalH = kTitleH + kCellH + kPad;
     int y = kPad;
 
     for (auto& row : rows)
     {
-        row.bounds = { 0, y, getWidth(), rowH };
+        row.bounds = { 0, y, getWidth(), row.height };
         int x = kBand + kPad;
         for (auto* section : row.sections)
         {
@@ -308,18 +286,20 @@ void SynthPanel::resized()
             for (const auto& [component, cellWidth] : section->controls)
                 w += cellWidth;
 
-            section->bounds = { x, y, w, rowH };
+            const int h = section->tall ? row.height : normalH;
+            section->bounds = { x, y, w, h };
             if (section->moreButton != nullptr)
                 section->moreButton->setBounds (section->bounds.withHeight (kTitleH).removeFromRight (40).reduced (3, 1));
+
             int cx = x + kPad;
             for (const auto& [component, cellWidth] : section->controls)
             {
-                component->setBounds (cx, y + kTitleH, cellWidth, kCellH);
+                component->setBounds (cx, y + kTitleH, cellWidth, section->tall ? h - kTitleH - kPad : kCellH);
                 cx += cellWidth;
             }
             x += w + kGap;
         }
-        y += rowH + kGap;
+        y += row.height + kGap;
     }
 }
 
@@ -346,8 +326,17 @@ void SynthPanel::paint (juce::Graphics& g)
             g.fillRoundedRectangle (section->bounds.toFloat(), 6.0f);
             g.setColour (section->colour);
             g.setFont (juce::Font (juce::FontOptions (10.5f, juce::Font::bold)));
-            g.drawText (section->title, section->bounds.withHeight (kTitleH).reduced (kPad, 0), juce::Justification::centredLeft);
+            const auto title = section->title == kModulatorsGroup ? juce::String ("MODULATORS   -   pick one, press Assign, click a knob") : section->title;
+            g.drawText (title, section->bounds.withHeight (kTitleH).reduced (kPad, 0), juce::Justification::centredLeft);
         }
+    }
+
+    if (assigningSource >= 0)
+    {
+        g.setColour (modSourceColour (assigningSource));
+        g.setFont (juce::Font (juce::FontOptions (12.0f, juce::Font::bold)));
+        g.drawText ("Click a knob to modulate it with " + modSourceNames()[assigningSource] + "   (Esc cancels)",
+                    getLocalBounds().removeFromTop (16).withTrimmedLeft (kBand + 8), juce::Justification::centredLeft);
     }
 }
 

@@ -15,7 +15,7 @@ StacksAudioProcessorEditor::StacksAudioProcessorEditor (StacksAudioProcessor& p)
     : AudioProcessorEditor (&p),
       synthProcessor (p),
       masterKnob (p.apvts, spec (P::master_gain), true),
-      synthPanel (p.apvts),
+      synthPanel (p),
       labPanel (p),
       keyboard (p.keyboardState, juce::MidiKeyboardComponent::horizontalKeyboard)
 {
@@ -62,8 +62,8 @@ StacksAudioProcessorEditor::StacksAudioProcessorEditor (StacksAudioProcessor& p)
     changeListenerCallback (nullptr);
 
     setResizable (true, true);
-    setResizeLimits (1300, 660, 2200, 1400);
-    setSize (1420, 720);
+    setResizeLimits (1300, 640, 2200, 1400);
+    setSize (1420, 700);
 }
 
 StacksAudioProcessorEditor::~StacksAudioProcessorEditor()

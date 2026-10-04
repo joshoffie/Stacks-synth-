@@ -1,5 +1,5 @@
 #include "LabPanel.h"
-#include "SynthPanel.h" // colours
+#include "Controls.h" // colours
 
 namespace stacks
 {
@@ -208,10 +208,6 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p)
     viewport.setScrollBarsShown (true, false);
     addAndMakeVisible (viewport);
 
-    favCurrentButton.setTooltip ("Add the sound you're hearing right now (with your knob tweaks) to the favourites");
-    favCurrentButton.onClick = [this] { processor.favouriteCurrent(); };
-    addAndMakeVisible (favCurrentButton);
-
     saveButton.onClick = [this] { saveCurrent(); };
     addAndMakeVisible (saveButton);
     loadButton.onClick = [this] { loadPatch(); };
@@ -276,8 +272,6 @@ void LabPanel::resized()
     status.setBounds (r.removeFromBottom (18));
     r.removeFromBottom (4);
     auto bottom = r.removeFromBottom (26);
-    favCurrentButton.setBounds (bottom.removeFromLeft (90));
-    bottom.removeFromLeft (6);
     saveButton.setBounds (bottom.removeFromLeft (80));
     bottom.removeFromLeft (6);
     loadButton.setBounds (bottom.removeFromLeft (80));

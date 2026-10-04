@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 
 #include "PluginProcessor.h"
+#include "Controls.h"
 #include "SynthPanel.h"
 #include "LabPanel.h"
 

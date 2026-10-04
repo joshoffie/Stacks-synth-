@@ -97,10 +97,11 @@ void SynthVoice::startNote (int midiNoteNumber, float vel, juce::SynthesiserSoun
         phaseB[u] = ph;
     }
     subPhase = 0.0f;
-    lfoPhase[0] = lfoPhase[1] = 0.0f;
-    lfoHeld[0] = rng.nextFloat() * 2.0f - 1.0f;
-    lfoHeld[1] = rng.nextFloat() * 2.0f - 1.0f;
-    lfoRateMod[0] = lfoRateMod[1] = 0.0f;
+    for (int k = 0; k < kNumLfos; ++k)
+    {
+        lfoNotePhase[k] = 0.0f;
+        lfoHeld[k] = rng.nextFloat() * 2.0f - 1.0f;
+    }
 
     updateEnvelopes (p);
     filter.reset();
@@ -137,28 +138,67 @@ void SynthVoice::controllerMoved (int controllerNumber, int newValue)
         ctx.modWheel.store ((float) newValue / 127.0f);
 }
 
-void SynthVoice::aftertouchChanged (int newValue)       { aftertouch = (float) newValue / 127.0f; }
-void SynthVoice::channelPressureChanged (int newValue)  { aftertouch = (float) newValue / 127.0f; }
-
-float SynthVoice::lfoValue (int shape, float ph, float held) const noexcept
+void SynthVoice::aftertouchChanged (int newValue)
 {
-    switch (shape)
+    aftertouch = (float) newValue / 127.0f;
+    ctx.aftertouch.store (aftertouch);
+}
+
+void SynthVoice::channelPressureChanged (int newValue)
+{
+    aftertouch = (float) newValue / 127.0f;
+    ctx.aftertouch.store (aftertouch);
+}
+
+// Value of LFO k for this sub-block. Free-running LFOs follow the processor's
+// global phase so every voice (and the effects) see the same waveform; Note
+// mode LFOs restart with each key and live in the voice.
+float SynthVoice::lfoValueFor (int k, const SynthParams& p, int sampleInBlock, int blockLen, float& held) noexcept
+{
+    const int shape = p.geti (lfoShapeParam (k));
+    const bool noteMode = p.geti (lfoModeParam (k)) == 1;
+    const float phaseOffset = p.get (lfoPhaseParam (k));
+    const float sr = (float) getSampleRate();
+
+    float rate;
+    const float beats = lfoSyncBeats (p.geti (lfoSyncParam (k)));
+    if (beats > 0.0f)
+        rate = (float) (ctx.bpm / 60.0) / beats;
+    else
+        rate = p.get (lfoRateParam (k));
+
+    float phase;
+    if (noteMode)
     {
-        case 0:  return std::sin (twoPi * ph);
-        case 1:  return 1.0f - 4.0f * std::abs (ph - 0.5f);
-        case 2:  return 1.0f - 2.0f * ph;
-        case 3:  return ph < 0.5f ? 1.0f : -1.0f;
-        default: return held; // sample & hold
+        phase = lfoNotePhase[k];
+        lfoNotePhase[k] += rate * (float) blockLen / sr;
+        if (lfoNotePhase[k] >= 1.0f)
+        {
+            lfoNotePhase[k] = wrap01 (lfoNotePhase[k]);
+            held = rng.nextFloat() * 2.0f - 1.0f;
+        }
+        if (shape == ShapeRandom)
+            return held;
     }
+    else
+    {
+        if (shape == ShapeRandom)
+            return ctx.lfoGlobalValue[k];
+        phase = ctx.lfoBlockPhase[k] + ctx.lfoRateHz[k] * (float) sampleInBlock / sr;
+    }
+
+    return ctx.lfoTables->get (k).at (phase + phaseOffset);
 }
 
 // LFOs, Key and Random are bipolar (-1..1); envelopes and controllers are 0..1.
-float SynthVoice::sourceValue (int source, float lfo1, float lfo2, float filterEnvValue, float modEnvValue) const noexcept
+float SynthVoice::sourceValue (int source, const float* lfo, float filterEnvValue, float modEnvValue) const noexcept
 {
     switch (source)
     {
-        case SrcLfo1:       return lfo1;
-        case SrcLfo2:       return lfo2;
+        case SrcLfo1:       return lfo[0];
+        case SrcLfo2:       return lfo[1];
+        case SrcLfo3:       return lfo[2];
+        case SrcLfo4:       return lfo[3];
         case SrcFilterEnv:  return filterEnvValue;
         case SrcModEnv:     return modEnvValue;
         case SrcVelocity:   return velocity;
@@ -175,56 +215,11 @@ void SynthVoice::renderNextBlock (juce::AudioBuffer<float>& out, int startSample
     if (! isVoiceActive())
         return;
 
-    const auto& p    = *ctx.params;
+    const auto& base = *ctx.params;
     const auto& bank = *ctx.bank;
     const double sr  = getSampleRate();
     const float fsr  = (float) sr;
-
-    updateEnvelopes (p);
-
-    // ---- per-block constants -------------------------------------------
-    const int unison          = juce::jlimit (1, kMaxUnison, p.geti (P::unison_voices));
-    const float detuneCents   = p.get (P::unison_detune);
-    const float spread        = p.get (P::unison_spread);
-    const int waveA           = juce::jlimit (0, WavetableBank::kNumWaves - 1, p.geti (P::oscA_wave));
-    const int waveB           = juce::jlimit (0, WavetableBank::kNumWaves - 1, p.geti (P::oscB_wave));
-    const float levelA        = p.get (P::oscA_level);
-    const float baseLevelB    = p.get (P::oscB_level);
-    const float subLevel      = p.get (P::sub_level);
-    const float baseNoise     = p.get (P::noise_level);
-    const float semisA        = (float) p.geti (P::oscA_coarse) + p.get (P::oscA_fine) / 100.0f;
-    const float baseSemisB    = (float) p.geti (P::oscB_coarse) + p.get (P::oscB_fine) / 100.0f;
-    const int   lfoShape[2]   = { p.geti (P::lfo1_shape), p.geti (P::lfo2_shape) };
-    const float lfoRate[2]    = { p.get (P::lfo1_rate),   p.get (P::lfo2_rate) };
-    const float unisonComp    = 1.0f / std::sqrt ((float) unison);
-
-    int   slotSource[kNumModSlots], slotDest[kNumModSlots];
-    float slotAmount[kNumModSlots];
-    for (int i = 0; i < kNumModSlots; ++i)
-    {
-        slotSource[i] = p.geti (modSourceParam (i));
-        slotDest[i]   = p.geti (modDestParam (i));
-        slotAmount[i] = p.get (modAmountParam (i));
-    }
-
-    float gainL[kMaxUnison], gainR[kMaxUnison], detuneRatio[kMaxUnison];
-    for (int u = 0; u < unison; ++u)
-    {
-        const float offset = unison > 1 ? -1.0f + 2.0f * (float) u / (float) (unison - 1) : 0.0f;
-        const float pan    = offset * spread;
-        gainL[u] = unison > 1 ? std::sqrt (0.5f * (1.0f - pan)) * juce::MathConstants<float>::sqrt2 : 1.0f;
-        gainR[u] = unison > 1 ? std::sqrt (0.5f * (1.0f + pan)) * juce::MathConstants<float>::sqrt2 : 1.0f;
-        detuneRatio[u] = std::exp2 (offset * detuneCents / 1200.0f);
-    }
-
-    // setMode() resets the filter state, so only call it on a real change.
-    const auto wantedMode = filterModeFor (p.geti (P::filter_type));
-    if (wantedMode != filterMode)
-    {
-        filterMode = wantedMode;
-        filter.setMode (filterMode);
-    }
-    filter.setDrive (juce::jmax (1.0f, p.get (P::filter_drive)));
+    const int blockEnd = startSample + numSamples;
 
     auto* scratchL = scratch.getWritePointer (0);
     auto* scratchR = scratch.getWritePointer (1);
@@ -237,66 +232,86 @@ void SynthVoice::renderNextBlock (juce::AudioBuffer<float>& out, int startSample
     {
         const int n = juce::jmin (remaining, kSub);
 
-        // ---- modulation sources, held constant for this sub-block ----------
+        // ---- envelopes & LFOs for this sub-block ------------------------------
         float envF = 0.0f, envM = 0.0f;
         for (int i = 0; i < n; ++i)
         {
             envF = filterEnv.getNextSample();
             envM = modEnv.getNextSample();
         }
+        float lfo[kNumLfos];
+        for (int k = 0; k < kNumLfos; ++k)
+            lfo[k] = lfoValueFor (k, base, pos, n, lfoHeld[k]);
 
-        float lfo[2];
-        for (int l = 0; l < 2; ++l)
-        {
-            lfo[l] = lfoValue (lfoShape[l], lfoPhase[l], lfoHeld[l]);
-            const float rate = lfoRate[l] * std::exp2 (juce::jlimit (-4.0f, 4.0f, lfoRateMod[l]));
-            lfoPhase[l] += rate * (float) n / fsr;
-            if (lfoPhase[l] >= 1.0f)
-            {
-                lfoPhase[l] = wrap01 (lfoPhase[l]);
-                lfoHeld[l]  = rng.nextFloat() * 2.0f - 1.0f;
-            }
-        }
-
-        // ---- the matrix ------------------------------------------------------
-        float mod[kNumModDests] {};
-        float ampGain = 1.0f;
+        // ---- the connections: a modulated copy of every parameter -------------
+        local = base;
+        float pitchMod = 0.0f, pitchBMod = 0.0f, pan = 0.0f, ampGain = 1.0f;
         for (int i = 0; i < kNumModSlots; ++i)
         {
-            const int src = slotSource[i], dst = slotDest[i];
-            const float amount = slotAmount[i];
-            if (src == SrcOff || dst == DestOff || std::abs (amount) < 1.0e-4f)
+            const int src = base.geti (modSourceParam (i));
+            const int target = base.geti (modDestParam (i));
+            const float amount = base.get (modAmountParam (i));
+            if (src == SrcOff || target == TargetOff || std::abs (amount) < 1.0e-4f)
                 continue;
 
-            const float s = sourceValue (src, lfo[0], lfo[1], envF, envM);
-            if (dst == DestAmp)
+            const float s = sourceValue (src, lfo, envF, envM);
+            switch (target)
             {
-                // Attenuation style: velocity/envelope at full amount scale the
-                // level from silence to full; an LFO becomes tremolo.
-                const bool bipolar = src == SrcLfo1 || src == SrcLfo2 || src == SrcKey || src == SrcRandom;
-                float u = bipolar ? 0.5f * (s + 1.0f) : s;
-                if (amount < 0.0f) u = 1.0f - u;
-                ampGain *= 1.0f - std::abs (amount) * (1.0f - juce::jlimit (0.0f, 1.0f, u));
-            }
-            else if (dst > 0 && dst < kNumModDests)
-            {
-                mod[dst] += amount * s;
+                case TargetPitch:  pitchMod  += amount * s * 12.0f; break;
+                case TargetPitchB: pitchBMod += amount * s * 12.0f; break;
+                case TargetPan:    pan       += amount * s; break;
+                case TargetAmp:
+                {
+                    // Attenuation style: velocity/envelope at full amount scale from
+                    // silence to full; an LFO becomes tremolo.
+                    float u = isBipolarSource (src) ? 0.5f * (s + 1.0f) : s;
+                    if (amount < 0.0f) u = 1.0f - u;
+                    ampGain *= 1.0f - std::abs (amount) * (1.0f - juce::jlimit (0.0f, 1.0f, u));
+                    break;
+                }
+                default:
+                {
+                    const int paramIndex = modTargetParamIndex (target);
+                    if (paramIndex >= 0)
+                        nudgeParam (local, paramIndex, amount * s);
+                    break;
+                }
             }
         }
-        lfoRateMod[0] = mod[DestLfo1Rate] * 4.0f;
-        lfoRateMod[1] = mod[DestLfo2Rate] * 4.0f;
+        const auto& p = local;
+        pitchMod  = juce::jlimit (-24.0f, 24.0f, pitchMod);
+        pitchBMod = juce::jlimit (-24.0f, 24.0f, pitchBMod);
+        pan = juce::jlimit (-1.0f, 1.0f, pan);
 
-        const float pitchMod  = juce::jlimit (-24.0f, 24.0f, mod[DestPitch] * 12.0f);
-        const float semisB    = baseSemisB + juce::jlimit (-24.0f, 24.0f, mod[DestPitchB] * 12.0f);
-        const float filterMod = mod[DestFilter] * 5.0f;  // octaves
-        const float resonance = juce::jlimit (0.0f, 1.0f, p.get (P::filter_res) + mod[DestResonance]);
-        const float morphA    = juce::jlimit (0.0f, 1.0f, p.get (P::oscA_morph) + mod[DestMorphA]);
-        const float morphB    = juce::jlimit (0.0f, 1.0f, p.get (P::oscB_morph) + mod[DestMorphB]);
-        const float fm        = juce::jlimit (0.0f, 1.0f, p.get (P::fm_amount) + mod[DestFM]);
-        const float fmDepth   = fm * fm * 2.0f;          // cycles of phase excursion
-        const float levelB    = juce::jlimit (0.0f, 1.0f, baseLevelB + mod[DestBLevel]);
-        const float noiseLevel = juce::jlimit (0.0f, 1.0f, baseNoise + mod[DestNoise]) * 0.5f;
-        const float pan       = juce::jlimit (-1.0f, 1.0f, mod[DestPan]);
+        updateEnvelopes (p);
+
+        // ---- per-sub-block constants, from the modulated copy -----------------
+        const int unison        = juce::jlimit (1, kMaxUnison, p.geti (P::unison_voices));
+        const float detuneCents = p.get (P::unison_detune);
+        const float spread      = p.get (P::unison_spread);
+        const int waveA         = juce::jlimit (0, WavetableBank::kNumWaves - 1, p.geti (P::oscA_wave));
+        const int waveB         = juce::jlimit (0, WavetableBank::kNumWaves - 1, p.geti (P::oscB_wave));
+        const float levelA      = p.get (P::oscA_level);
+        const float levelB      = p.get (P::oscB_level);
+        const float subLevel    = p.get (P::sub_level);
+        const float noiseLevel  = p.get (P::noise_level) * 0.5f;
+        const float semisA      = (float) p.geti (P::oscA_coarse) + p.get (P::oscA_fine) / 100.0f;
+        const float semisB      = (float) p.geti (P::oscB_coarse) + p.get (P::oscB_fine) / 100.0f + pitchBMod;
+        const float morphA      = juce::jlimit (0.0f, 1.0f, p.get (P::oscA_morph));
+        const float morphB      = juce::jlimit (0.0f, 1.0f, p.get (P::oscB_morph));
+        const float fm          = juce::jlimit (0.0f, 1.0f, p.get (P::fm_amount));
+        const float fmDepth     = fm * fm * 2.0f;        // cycles of phase excursion
+        const float unisonComp  = 1.0f / std::sqrt ((float) unison);
+
+        float gainL[kMaxUnison], gainR[kMaxUnison], detuneRatio[kMaxUnison];
+        for (int u = 0; u < unison; ++u)
+        {
+            const float offset = unison > 1 ? -1.0f + 2.0f * (float) u / (float) (unison - 1) : 0.0f;
+            const float upan   = offset * spread;
+            gainL[u] = unison > 1 ? std::sqrt (0.5f * (1.0f - upan)) * juce::MathConstants<float>::sqrt2 : 1.0f;
+            gainR[u] = unison > 1 ? std::sqrt (0.5f * (1.0f + upan)) * juce::MathConstants<float>::sqrt2 : 1.0f;
+            detuneRatio[u] = std::exp2 (offset * detuneCents / 1200.0f);
+        }
 
         // ---- glide --------------------------------------------------------
         if (glideInc != 0.0f)
@@ -350,11 +365,18 @@ void SynthVoice::renderNextBlock (juce::AudioBuffer<float>& out, int startSample
         }
 
         // ---- filter --------------------------------------------------------
+        const auto wantedMode = filterModeFor (p.geti (P::filter_type));
+        if (wantedMode != filterMode)
+        {
+            filterMode = wantedMode;
+            filter.setMode (filterMode); // resets state, so only on a real change
+        }
         const float keyTrack = p.get (P::filter_keytrack) * (currentNote - 60.0f) / 12.0f;
-        float cutoff = p.get (P::filter_cutoff) * std::exp2 (envF * p.get (P::filter_env) + filterMod + keyTrack);
+        float cutoff = p.get (P::filter_cutoff) * std::exp2 (envF * p.get (P::filter_env) + keyTrack);
         cutoff = juce::jlimit (20.0f, juce::jmin (20000.0f, fsr * 0.45f), cutoff);
         filter.setCutoffFrequencyHz (cutoff);
-        filter.setResonance (resonance);
+        filter.setResonance (juce::jlimit (0.0f, 1.0f, p.get (P::filter_res)));
+        filter.setDrive (juce::jmax (1.0f, p.get (P::filter_drive)));
 
         juce::dsp::AudioBlock<float> block (scratch);
         auto subBlock = block.getSubBlock (0, (size_t) n);
@@ -383,6 +405,7 @@ void SynthVoice::renderNextBlock (juce::AudioBuffer<float>& out, int startSample
 
         pos += n;
         remaining -= n;
+        juce::ignoreUnused (blockEnd);
 
         if (! ampEnv.isActive())
         {

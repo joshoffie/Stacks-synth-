@@ -76,7 +76,7 @@ private:
     juce::TextEditor hint;
     juce::Slider variation;
     juce::TextButton newBatchButton { "Fresh ideas" }, evolveButton { "Evolve" }, backButton { "<" };
-    juce::TextButton favCurrentButton { "+ current" }, saveButton { "Save..." }, loadButton { "Load..." };
+    juce::TextButton saveButton { "Save..." }, loadButton { "Load..." };
 
     juce::Viewport viewport;
     juce::Component cardList;

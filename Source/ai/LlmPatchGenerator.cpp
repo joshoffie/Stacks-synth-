@@ -14,9 +14,19 @@ namespace
         return juce::String (v, 3).trimCharactersAtEnd ("0").trimCharactersAtEnd (".");
     }
 
+    // Full values, minus connections that are switched off (saves a lot of tokens).
     juce::String compactParams (const Patch& p)
     {
-        return juce::JSON::toString (p.paramsToVar(), true);
+        auto v = p.paramsToVar();
+        if (auto* obj = v.getDynamicObject())
+            for (int i = 0; i < kNumModSlots; ++i)
+                if ((int) p.get (modSourceParam (i)) == SrcOff)
+                {
+                    obj->removeProperty (paramId (modSourceParam (i)));
+                    obj->removeProperty (paramId (modDestParam (i)));
+                    obj->removeProperty (paramId (modAmountParam (i)));
+                }
+        return juce::JSON::toString (v, true);
     }
 
     // "EchoingPad" -> "Echoing Pad"; models often drop the space.
@@ -173,14 +183,30 @@ juce::String LlmPatchGenerator::systemPrompt()
       << "Two LFOs each modulate one destination. Unison stacks detuned copies of a note for width.\n\n"
       << "Parameters (id: range [unit] - meaning):\n";
 
+    // The four LFOs and twelve connections are described once each as families.
     for (const auto& spec : paramSpecs())
     {
-        if (std::string (spec.id) == "master_gain")
+        juce::String id (spec.id);
+        if (id == "master_gain")
             continue;
 
-        s << spec.id << ": ";
+        juce::String suffix;
+        if (id.startsWith ("lfo"))
+        {
+            if (! id.startsWith ("lfo1_")) continue;
+            id = "lfoN_" + id.fromFirstOccurrenceOf ("_", false, false);
+            suffix = " (N = 1 to 4)";
+        }
+        else if (id.startsWith ("mod") && (id.endsWith ("_source") || id.endsWith ("_dest") || id.endsWith ("_amount")))
+        {
+            if (! id.startsWith ("mod1_")) continue;
+            id = "modN_" + id.fromFirstOccurrenceOf ("_", false, false);
+            suffix = " (N = 1 to 12)";
+        }
+
+        s << id << suffix << ": ";
         if (spec.kind == ParamKind::Choice)
-            s << "one of " << spec.choices->joinIntoString (", ");
+            s << "one of " << spec.choices().joinIntoString (", ");
         else
             s << numberText (spec.min) << " to " << numberText (spec.max) << (spec.unit[0] != 0 ? juce::String (" ") + spec.unit : juce::String());
         s << " - " << spec.aiHint << "\n";
@@ -191,11 +217,12 @@ juce::String LlmPatchGenerator::systemPrompt()
       << "Sync = aggressive hard-sync (morph raises the sync pitch); Organ = drawbars (morph changes the registration); "
       << "Formant = vocal (morph moves the formant up); Glass = sparse bell-like partials; "
       << "Fold = wavefolded sine (morph adds folds, saturated); Grit = noisy random harmonics (digital, lo-fi).\n"
-      << "Modulation is routed with the six matrix slots (modN_source, modN_dest, modN_amount); LFOs do nothing until a slot routes them. "
-      << "Typical routings: LFO 1 > Morph A 0.2-0.5 for slow movement (lfo1_rate 0.05-0.5); LFO 1 > Pitch 0.02-0.05 with lfo1_rate 4-7 for vibrato; "
-      << "Velocity > Filter 0.2-0.5 so playing dynamics matter; Mod Env > FM or Morph A 0.3-0.6 for an evolving attack (set menv_decay 0.2-1, menv_sustain 0); "
-      << "Mod Wheel > Filter 0.3-0.6 for live control; Random > Morph A 0.1-0.3 for subtle per-note variation. "
-      << "Every patch uses at least one matrix slot; Velocity > Filter is the usual minimum.\n"
+      << "Modulation is routed with connections (modN_source, modN_dest, modN_amount); modN_dest is Pitch, Pitch B, Amp, Pan or the exact name of a knob, "
+      << "and the amount is a fraction of that knob's travel (bipolar sources swing both ways). LFOs do nothing until a connection uses them. "
+      << "Typical: LFO 1 > A Morph 0.2-0.4 for slow movement (lfo1_rate 0.05-0.5); LFO 1 > Pitch 0.02-0.05 with lfo1_rate 4-7 for vibrato; "
+      << "Velocity > Cutoff 0.2-0.5 so dynamics matter; Mod Env > FM B>A or A Morph 0.3-0.6 for an evolving attack (menv_decay 0.2-1, menv_sustain 0); "
+      << "Mod Wheel > Cutoff 0.3-0.6 for live control; LFO 2 > Chorus Mix or Reverb Mix 0.2-0.4 for effects that breathe; Random > A Morph 0.1-0.3 for per-note variation. "
+      << "Every patch uses at least one connection; Velocity > Cutoff is the usual minimum.\n"
       << "Effects: reverb_type Shimmer with reverb_shimmer 0.3-0.7 gives a glowing octave-up halo (pads, textures); Hall for long tails, Room for short; "
       << "chorus_mode Ensemble is a lush string-machine, Dimension is wide and subtle, Flanger needs chorus_feedback 0.4-0.8; "
       << "delay_mode Ping-Pong with delay_sync 1/8 or 1/8D suits plucks and leads, Tape is dark and wobbly.\n"
@@ -295,7 +322,7 @@ juce::String LlmPatchGenerator::grammar (int patchCount)
         if (spec.kind == ParamKind::Choice)
         {
             juce::StringArray options;
-            for (const auto& c : *spec.choices)
+            for (const auto& c : spec.choices())
                 options.add (lit ("\"" + c + "\""));
             g << "(" << options.joinIntoString (" | ") << ")";
         }

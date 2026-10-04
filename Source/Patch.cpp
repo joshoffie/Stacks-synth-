@@ -16,7 +16,8 @@ void Patch::set (int index, float v) noexcept
         return;
 
     const auto& s = paramSpecs()[(size_t) index];
-    v = juce::jlimit (s.min, s.max, v);
+    const float maxValue = s.kind == ParamKind::Choice ? (float) (s.choices().size() - 1) : s.max;
+    v = juce::jlimit (s.min, maxValue, v);
     if (s.kind != ParamKind::Float)
         v = std::round (v);
     values[(size_t) index] = v;
@@ -39,6 +40,17 @@ juce::var Patch::toVar() const
     if (origin.isNotEmpty())
         obj->setProperty ("origin", origin);
     obj->setProperty ("params", paramsToVar());
+
+    bool anyShape = false;
+    for (const auto& sh : lfoShapes) anyShape = anyShape || sh.isNotEmpty();
+    if (anyShape)
+    {
+        auto* shapes = new juce::DynamicObject();
+        for (int k = 0; k < kNumLfos; ++k)
+            if (lfoShapes[(size_t) k].isNotEmpty())
+                shapes->setProperty ("lfo" + juce::String (k + 1), juce::JSON::parse (lfoShapes[(size_t) k]));
+        obj->setProperty ("lfoShapes", juce::var (shapes));
+    }
     return juce::var (obj);
 }
 
@@ -56,8 +68,9 @@ juce::var Patch::paramsToVar() const
         {
             case ParamKind::Choice:
             {
-                const int idx = juce::jlimit (0, s.choices->size() - 1, (int) std::round (v));
-                params->setProperty (s.id, (*s.choices)[idx]);
+                const auto& choices = s.choices();
+                const int idx = juce::jlimit (0, choices.size() - 1, (int) std::round (v));
+                params->setProperty (s.id, choices[idx]);
                 break;
             }
             case ParamKind::Int:
@@ -92,6 +105,14 @@ std::optional<Patch> Patch::fromVar (const juce::var& v, const Patch* base)
     if (p.category.isEmpty() && base != nullptr)
         p.category = base->category;
     p.origin = obj->getProperty ("origin").toString().trim();
+    if (base != nullptr)
+        p.lfoShapes = base->lfoShapes;
+    if (auto* shapes = obj->getProperty ("lfoShapes").getDynamicObject())
+        for (int k = 0; k < kNumLfos; ++k)
+        {
+            const auto v = shapes->getProperty ("lfo" + juce::String (k + 1));
+            if (v.isArray()) p.lfoShapes[(size_t) k] = juce::JSON::toString (v, true);
+        }
 
     auto* params = obj->getProperty ("params").getDynamicObject();
     if (params == nullptr)
@@ -111,12 +132,13 @@ std::optional<Patch> Patch::fromVar (const juce::var& v, const Patch* base)
         if (s.kind == ParamKind::Choice && value.isString())
         {
             const auto text = value.toString().trim();
+            const auto& choices = s.choices();
             int idx = -1;
-            for (int i = 0; i < s.choices->size() && idx < 0; ++i)
-                if ((*s.choices)[i].equalsIgnoreCase (text))
+            for (int i = 0; i < choices.size() && idx < 0; ++i)
+                if (choices[i].equalsIgnoreCase (text))
                     idx = i;
-            for (int i = 0; i < s.choices->size() && idx < 0; ++i)
-                if ((*s.choices)[i].containsIgnoreCase (text) || text.containsIgnoreCase ((*s.choices)[i]))
+            for (int i = 0; i < choices.size() && idx < 0; ++i)
+                if (choices[i].containsIgnoreCase (text) || text.containsIgnoreCase (choices[i]))
                     idx = i;
             if (idx >= 0)
                 p.set (index, (float) idx);
@@ -147,6 +169,17 @@ std::optional<Patch> Patch::fromJson (const juce::String& text, const Patch* bas
     return fromVar (parsed, base);
 }
 
+const juce::Identifier& Patch::lfoShapesTreeType()
+{
+    static const juce::Identifier type ("LfoShapes");
+    return type;
+}
+
+juce::Identifier Patch::lfoShapeProperty (int k)
+{
+    return juce::Identifier ("lfo" + juce::String (k + 1));
+}
+
 Patch Patch::capture (const juce::AudioProcessorValueTreeState& apvts)
 {
     Patch p;
@@ -154,6 +187,11 @@ Patch Patch::capture (const juce::AudioProcessorValueTreeState& apvts)
     for (int i = 0; i < kNumParams; ++i)
         if (auto* raw = apvts.getRawParameterValue (specs[(size_t) i].id))
             p.values[(size_t) i] = raw->load();
+
+    auto shapes = apvts.state.getChildWithName (lfoShapesTreeType());
+    if (shapes.isValid())
+        for (int k = 0; k < kNumLfos; ++k)
+            p.lfoShapes[(size_t) k] = shapes.getProperty (lfoShapeProperty (k)).toString();
     return p;
 }
 
@@ -163,6 +201,14 @@ void Patch::applyTo (juce::AudioProcessorValueTreeState& apvts) const
     for (int i = 0; i < kNumParams; ++i)
         if (auto* param = apvts.getParameter (specs[(size_t) i].id))
             param->setValueNotifyingHost (param->convertTo0to1 (values[(size_t) i]));
+
+    auto shapes = apvts.state.getOrCreateChildWithName (lfoShapesTreeType(), nullptr);
+    for (int k = 0; k < kNumLfos; ++k)
+    {
+        const auto& json = lfoShapes[(size_t) k];
+        if (json.isNotEmpty()) shapes.setProperty (lfoShapeProperty (k), json, nullptr);
+        else                   shapes.removeProperty (lfoShapeProperty (k), nullptr);
+    }
 }
 
 //==============================================================================
@@ -200,16 +246,23 @@ void keepPatchInTune (Patch& p)
 
     // Pitch modulation: vibrato, a short attack drop or a performance bend,
     // never a per-note detune (Velocity/Key/Random would put chords out of tune).
+    const int fineA = modTargetForParam ((int) P::oscA_fine), fineB = modTargetForParam ((int) P::oscB_fine);
     for (int i = 0; i < kNumModSlots; ++i)
     {
         const int src = (int) p.get (modSourceParam (i));
         const int dst = (int) p.get (modDestParam (i));
-        if (dst != DestPitch && ! (dst == DestPitchB && audibleB))
+        if (dst == fineA || (dst == fineB && audibleB))
+        {
+            // fine tune as a target: a few cents of wobble at most
+            p.set (modAmountParam (i), juce::jlimit (-0.08f, 0.08f, p.get (modAmountParam (i))));
+            continue;
+        }
+        if (dst != TargetPitch && ! (dst == TargetPitchB && audibleB))
             continue;
         float cap = 0.0f;
         switch (src)
         {
-            case SrcLfo1: case SrcLfo2:            cap = 0.08f; break; // ~1 semitone vibrato
+            case SrcLfo1: case SrcLfo2: case SrcLfo3: case SrcLfo4: cap = 0.08f; break; // ~1 semitone vibrato
             case SrcFilterEnv: case SrcModEnv:     cap = 0.35f; break; // pluck / drum pitch drop
             case SrcModWheel: case SrcAftertouch:  cap = 0.17f; break; // whole-tone bend
             default:                               cap = 0.0f;  break; // Velocity, Key, Random: no
@@ -275,14 +328,14 @@ juce::String describePatch (const Patch& p)
     if (p.get (P::glide) > 0.02f)  parts.add ("glide");
 
     // Motion
-    static const char* shortSource[] = { "", "LFO1", "LFO2", "FEnv", "MEnv", "Vel", "Key", "Wheel", "AT", "Rnd" };
+    static const char* shortSource[] = { "", "LFO1", "LFO2", "LFO3", "LFO4", "FEnv", "MEnv", "Vel", "Key", "Wheel", "AT", "Rnd" };
     for (int i = 0; i < kNumModSlots; ++i)
     {
         const int src = juce::jlimit (0, kNumModSources - 1, (int) p.get (modSourceParam (i)));
-        const int dst = juce::jlimit (0, kNumModDests - 1, (int) p.get (modDestParam (i)));
-        if (src == SrcOff || dst == DestOff || std::abs (p.get (modAmountParam (i))) < 0.02f)
+        const int dst = juce::jlimit (0, modTargetNames().size() - 1, (int) p.get (modDestParam (i)));
+        if (src == SrcOff || dst == TargetOff || std::abs (p.get (modAmountParam (i))) < 0.02f)
             continue;
-        parts.add (juce::String (shortSource[src]) + " > " + modDestNames()[dst]);
+        parts.add (juce::String (shortSource[src]) + " > " + modTargetNames()[dst]);
     }
 
     // Space

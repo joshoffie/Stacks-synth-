@@ -65,8 +65,11 @@ target_sources(Stacks PRIVATE
     Source/ai/LlmPatchGenerator.cpp
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
+    Source/Controls.cpp
     Source/SynthPanel.cpp
-    Source/LabPanel.cpp)
+    Source/ModulatorsPanel.cpp
+    Source/LabPanel.cpp
+    Source/LibraryPanel.cpp)
 
 target_compile_definitions(Stacks PUBLIC
     JUCE_WEB_BROWSER=0

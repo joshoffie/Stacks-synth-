@@ -61,21 +61,37 @@ StacksAudioProcessor::StacksAudioProcessor()
 
     voiceContext.bank = &*bank;
     voiceContext.params = &params;
+    voiceContext.lfoTables = &lfoTables;
 
     for (int i = 0; i < kNumVoices; ++i)
         synth.addVoice (new SynthVoice (voiceContext));
     synth.addSound (new SynthSound());
     synth.setNoteStealingEnabled (true);
 
+    for (int k = 0; k < kNumLfos; ++k)
+        apvts.addParameterListener (paramId (lfoShapeParam (k)), this);
+    attachStateListeners();
+    rebuildLfoTables();
+
     refreshModels();
     loadEngineFromSettings();
     refreshOllamaModels();
+
+    currentFolder = juce::File (settings().getValue ("libraryFolder", libraryRoot().getFullPathName()));
+    if (! currentFolder.isDirectory() || ! currentFolder.isAChildOf (libraryRoot().getParentDirectory()))
+        currentFolder = libraryRoot();
+    libraryRoot().createDirectory();
+
     startTimer (30000);
 }
 
 StacksAudioProcessor::~StacksAudioProcessor()
 {
     stopTimer();
+    cancelPendingUpdate();
+    apvts.state.removeListener (this);
+    for (int k = 0; k < kNumLfos; ++k)
+        apvts.removeParameterListener (paramId (lfoShapeParam (k)), this);
     downloader.reset();
     cancelRequested = true;
     pool.removeAllJobs (true, 8000);
@@ -117,9 +133,59 @@ void StacksAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         if (auto position = playHead->getPosition())
             if (auto bpm = position->getBpm())
                 currentBpm = *bpm;
+    voiceContext.bpm = currentBpm;
+
+    // Free-running LFOs: phase and value at the start of this block, shared by
+    // every voice and by the effects, then advanced past the block.
+    for (int k = 0; k < kNumLfos; ++k)
+    {
+        const float beats = lfoSyncBeats (params.geti (lfoSyncParam (k)));
+        const float rate = beats > 0.0f ? (float) (currentBpm / 60.0) / beats : params.get (lfoRateParam (k));
+        const int shape = params.geti (lfoShapeParam (k));
+
+        voiceContext.lfoRateHz[k] = rate;
+        voiceContext.lfoBlockPhase[k] = lfoPhase[k];
+        voiceContext.lfoGlobalValue[k] = shape == ShapeRandom ? lfoHeld[k]
+                                                              : lfoTables.get (k).at (lfoPhase[k] + params.get (lfoPhaseParam (k)));
+        lfoPhaseForDisplay[k].store (lfoPhase[k]);
+
+        lfoPhase[k] += rate * (float) numSamples / (float) currentSampleRate;
+        if (lfoPhase[k] >= 1.0f)
+        {
+            lfoPhase[k] -= std::floor (lfoPhase[k]);
+            lfoHeld[k] = lfoRng.nextFloat() * 2.0f - 1.0f;
+        }
+    }
 
     synth.renderNextBlock (buffer, midi, 0, numSamples);
+    applyGlobalModulation();
     processEffects (buffer);
+}
+
+// Connections whose target is a knob outside the voices (effects, master) are
+// applied here, from the sources that exist globally.
+void StacksAudioProcessor::applyGlobalModulation()
+{
+    fxParams = params;
+    for (int i = 0; i < kNumModSlots; ++i)
+    {
+        const int src = params.geti (modSourceParam (i));
+        const int target = params.geti (modDestParam (i));
+        const float amount = params.get (modAmountParam (i));
+        const int paramIndex = modTargetParamIndex (target);
+        if (src == SrcOff || paramIndex < 0 || std::abs (amount) < 1.0e-4f)
+            continue;
+
+        float s = 0.0f;
+        switch (src)
+        {
+            case SrcLfo1: case SrcLfo2: case SrcLfo3: case SrcLfo4: s = voiceContext.lfoGlobalValue[src - SrcLfo1]; break;
+            case SrcModWheel:   s = voiceContext.modWheel.load(); break;
+            case SrcAftertouch: s = voiceContext.aftertouch.load(); break;
+            default: continue; // per-note sources have no meaning for a global knob
+        }
+        nudgeParam (fxParams, paramIndex, amount * s);
+    }
 }
 
 void StacksAudioProcessor::processEffects (juce::AudioBuffer<float>& buffer)
@@ -140,40 +206,40 @@ void StacksAudioProcessor::processEffects (juce::AudioBuffer<float>& buffer)
     }
 
     ChorusFx::Params cp;
-    cp.mode = params.geti (P::chorus_mode);
-    cp.rate = params.get (P::chorus_rate);
-    cp.depth = params.get (P::chorus_depth);
-    cp.mix = params.get (P::chorus_mix);
-    cp.voices = params.geti (P::chorus_voices);
-    cp.feedback = params.get (P::chorus_feedback);
-    cp.spread = params.get (P::chorus_spread);
-    cp.toneHz = params.get (P::chorus_tone);
+    cp.mode = fxParams.geti (P::chorus_mode);
+    cp.rate = fxParams.get (P::chorus_rate);
+    cp.depth = fxParams.get (P::chorus_depth);
+    cp.mix = fxParams.get (P::chorus_mix);
+    cp.voices = fxParams.geti (P::chorus_voices);
+    cp.feedback = fxParams.get (P::chorus_feedback);
+    cp.spread = fxParams.get (P::chorus_spread);
+    cp.toneHz = fxParams.get (P::chorus_tone);
     if (cp.mix > 0.0005f)
         chorus.process (*target, cp);
 
     DelayFx::Params dp;
-    dp.mode = params.geti (P::delay_mode);
-    dp.sync = params.geti (P::delay_sync);
-    dp.timeSec = params.get (P::delay_time);
-    dp.feedback = params.get (P::delay_feedback);
-    dp.mix = params.get (P::delay_mix);
-    dp.toneHz = params.get (P::delay_tone);
-    dp.hpfHz = params.get (P::delay_hpf);
-    dp.wow = params.get (P::delay_wow);
-    dp.width = params.get (P::delay_width);
+    dp.mode = fxParams.geti (P::delay_mode);
+    dp.sync = fxParams.geti (P::delay_sync);
+    dp.timeSec = fxParams.get (P::delay_time);
+    dp.feedback = fxParams.get (P::delay_feedback);
+    dp.mix = fxParams.get (P::delay_mix);
+    dp.toneHz = fxParams.get (P::delay_tone);
+    dp.hpfHz = fxParams.get (P::delay_hpf);
+    dp.wow = fxParams.get (P::delay_wow);
+    dp.width = fxParams.get (P::delay_width);
     delay.process (*target, dp, currentBpm); // always runs so repeats ring out when the mix is pulled down
 
     ReverbFx::Params rp;
-    rp.type = params.geti (P::reverb_type);
-    rp.size = params.get (P::reverb_size);
-    rp.damp = params.get (P::reverb_damp);
-    rp.mix = params.get (P::reverb_mix);
-    rp.predelayMs = params.get (P::reverb_predelay);
-    rp.lowCutHz = params.get (P::reverb_lowcut);
-    rp.highCutHz = params.get (P::reverb_highcut);
-    rp.mod = params.get (P::reverb_mod);
-    rp.shimmer = params.get (P::reverb_shimmer);
-    rp.width = params.get (P::reverb_width);
+    rp.type = fxParams.geti (P::reverb_type);
+    rp.size = fxParams.get (P::reverb_size);
+    rp.damp = fxParams.get (P::reverb_damp);
+    rp.mix = fxParams.get (P::reverb_mix);
+    rp.predelayMs = fxParams.get (P::reverb_predelay);
+    rp.lowCutHz = fxParams.get (P::reverb_lowcut);
+    rp.highCutHz = fxParams.get (P::reverb_highcut);
+    rp.mod = fxParams.get (P::reverb_mod);
+    rp.shimmer = fxParams.get (P::reverb_shimmer);
+    rp.width = fxParams.get (P::reverb_width);
     if (rp.mix > 0.0005f)
         reverb.process (*target, rp);
 
@@ -184,7 +250,7 @@ void StacksAudioProcessor::processEffects (juce::AudioBuffer<float>& buffer)
     }
 
     // Master gain + safety clip
-    masterGain.setTargetValue (juce::Decibels::decibelsToGain (params.get (P::master_gain)));
+    masterGain.setTargetValue (juce::Decibels::decibelsToGain (fxParams.get (P::master_gain)));
     for (int i = 0; i < n; ++i)
     {
         const float g = masterGain.getNextValue();
@@ -229,7 +295,11 @@ void StacksAudioProcessor::setStateInformation (const void* data, int sizeInByte
     {
         auto state = root.getChildWithName (apvts.state.getType());
         if (state.isValid())
+        {
             apvts.replaceState (state);
+            attachStateListeners();
+            rebuildLfoTables();
+        }
 
         auto lab = root.getChildWithName ("Lab");
         if (lab.isValid())
@@ -238,9 +308,136 @@ void StacksAudioProcessor::setStateInformation (const void* data, int sizeInByte
     else if (root.hasType (apvts.state.getType()))
     {
         apvts.replaceState (root);
+        attachStateListeners();
+        rebuildLfoTables();
     }
 
     labBroadcaster.sendChangeMessage();
+}
+
+//==============================================================================
+void StacksAudioProcessor::attachStateListeners()
+{
+    apvts.state.removeListener (this);
+    apvts.state.getOrCreateChildWithName (Patch::lfoShapesTreeType(), nullptr);
+    apvts.state.addListener (this);
+}
+
+void StacksAudioProcessor::parameterChanged (const juce::String&, float)     { triggerAsyncUpdate(); }
+void StacksAudioProcessor::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&)
+{
+    if (tree.hasType (Patch::lfoShapesTreeType()))
+        triggerAsyncUpdate();
+}
+void StacksAudioProcessor::valueTreeChildAdded (juce::ValueTree&, juce::ValueTree& child)
+{
+    if (child.hasType (Patch::lfoShapesTreeType()))
+        triggerAsyncUpdate();
+}
+void StacksAudioProcessor::handleAsyncUpdate()                               { rebuildLfoTables(); }
+
+void StacksAudioProcessor::rebuildLfoTables()
+{
+    for (int k = 0; k < kNumLfos; ++k)
+        lfoTables.set (k, (int) rawParams[(size_t) lfoShapeParam (k)]->load(), lfoPoints (k));
+    labBroadcaster.sendChangeMessage();
+}
+
+LfoPoints StacksAudioProcessor::lfoPoints (int k) const
+{
+    auto shapes = apvts.state.getChildWithName (Patch::lfoShapesTreeType());
+    if (! shapes.isValid())
+        return {};
+    return LfoPoints::fromJson (shapes.getProperty (Patch::lfoShapeProperty (k)).toString());
+}
+
+void StacksAudioProcessor::setLfoPoints (int k, const LfoPoints& points)
+{
+    auto shapes = apvts.state.getOrCreateChildWithName (Patch::lfoShapesTreeType(), nullptr);
+    if (points.points.empty())
+        shapes.removeProperty (Patch::lfoShapeProperty (k), nullptr);
+    else
+        shapes.setProperty (Patch::lfoShapeProperty (k), points.toJson(), nullptr);
+
+    // Drawing implies the Custom shape.
+    if (auto* shape = apvts.getParameter (paramId (lfoShapeParam (k))))
+        if ((int) rawParams[(size_t) lfoShapeParam (k)]->load() != ShapeCustom && ! points.points.empty())
+            shape->setValueNotifyingHost (shape->convertTo0to1 ((float) ShapeCustom));
+    rebuildLfoTables();
+}
+
+//==============================================================================
+int StacksAudioProcessor::findModulation (int source, int target) const
+{
+    for (int i = 0; i < kNumModSlots; ++i)
+        if ((int) rawParams[(size_t) modSourceParam (i)]->load() == source
+            && (int) rawParams[(size_t) modDestParam (i)]->load() == target)
+            return i;
+    return -1;
+}
+
+int StacksAudioProcessor::addModulation (int source, int target, float amount)
+{
+    if (source == SrcOff || target == TargetOff)
+        return -1;
+
+    int slot = findModulation (source, target);
+    if (slot < 0)
+        for (int i = 0; i < kNumModSlots && slot < 0; ++i)
+            if ((int) rawParams[(size_t) modSourceParam (i)]->load() == SrcOff
+                || (int) rawParams[(size_t) modDestParam (i)]->load() == TargetOff)
+                slot = i;
+    if (slot < 0)
+        return -1;
+
+    auto set = [this] (P param, float value)
+    {
+        if (auto* p = apvts.getParameter (paramId (param)))
+            p->setValueNotifyingHost (p->convertTo0to1 (value));
+    };
+    set (modSourceParam (slot), (float) source);
+    set (modDestParam (slot), (float) target);
+    set (modAmountParam (slot), amount);
+    return slot;
+}
+
+void StacksAudioProcessor::clearModulation (int slot)
+{
+    if (slot < 0 || slot >= kNumModSlots)
+        return;
+    auto set = [this] (P param, float value)
+    {
+        if (auto* p = apvts.getParameter (paramId (param)))
+            p->setValueNotifyingHost (p->convertTo0to1 (value));
+    };
+    set (modSourceParam (slot), (float) SrcOff);
+    set (modDestParam (slot), (float) TargetOff);
+    set (modAmountParam (slot), 0.0f);
+}
+
+std::vector<int> StacksAudioProcessor::modulationsFor (int source) const
+{
+    std::vector<int> slots;
+    for (int i = 0; i < kNumModSlots; ++i)
+        if ((int) rawParams[(size_t) modSourceParam (i)]->load() == source
+            && (int) rawParams[(size_t) modDestParam (i)]->load() != TargetOff)
+            slots.push_back (i);
+    return slots;
+}
+
+std::vector<std::pair<int, float>> StacksAudioProcessor::modulationsOnParam (int paramIndex) const
+{
+    std::vector<std::pair<int, float>> out;
+    const int target = modTargetForParam (paramIndex);
+    if (target <= 0)
+        return out;
+    for (int i = 0; i < kNumModSlots; ++i)
+    {
+        const int src = (int) rawParams[(size_t) modSourceParam (i)]->load();
+        if (src != SrcOff && (int) rawParams[(size_t) modDestParam (i)]->load() == target)
+            out.emplace_back (src, rawParams[(size_t) modAmountParam (i)]->load());
+    }
+    return out;
 }
 
 //==============================================================================
@@ -588,10 +785,48 @@ void StacksAudioProcessor::audition (int index)
     labBroadcaster.sendChangeMessage();
 }
 
+//==============================================================================
+juce::File StacksAudioProcessor::libraryRoot()
+{
+    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("Stacks Patches");
+}
+
+void StacksAudioProcessor::setLibraryFolder (const juce::File& folder)
+{
+    if (! folder.isDirectory())
+        return;
+    currentFolder = folder;
+    settings().setValue ("libraryFolder", folder.getFullPathName());
+    settings().saveIfNeeded();
+    labBroadcaster.sendChangeMessage();
+}
+
+juce::File StacksAudioProcessor::savePatchToLibrary (Patch& p, const juce::File& folder)
+{
+    folder.createDirectory();
+    juce::File file (p.filePath);
+    if (! file.existsAsFile() || ! file.isAChildOf (folder))
+        file = folder.getNonexistentChildFile (juce::File::createLegalFileName (p.name.isEmpty() ? "Patch" : p.name), ".json", false);
+    file.replaceWithText (p.toJson());
+    p.filePath = file.getFullPathName();
+    return file;
+}
+
 int StacksAudioProcessor::indexOfFavourite (const Patch& p) const
 {
     for (int i = 0; i < (int) labState.favourites.size(); ++i)
-        if (labState.favourites[(size_t) i].sameValuesAs (p))
+    {
+        const auto& f = labState.favourites[(size_t) i];
+        if ((p.filePath.isNotEmpty() && f.filePath == p.filePath) || f.sameValuesAs (p))
+            return i;
+    }
+    return -1;
+}
+
+int StacksAudioProcessor::indexOfFavouriteFile (const juce::File& file) const
+{
+    for (int i = 0; i < (int) labState.favourites.size(); ++i)
+        if (labState.favourites[(size_t) i].filePath == file.getFullPathName())
             return i;
     return -1;
 }
@@ -601,13 +836,52 @@ void StacksAudioProcessor::toggleFavourite (int index)
     if (index < 0 || index >= (int) labState.candidates.size())
         return;
 
-    const auto& candidate = labState.candidates[(size_t) index];
+    auto& candidate = labState.candidates[(size_t) index];
     const int existing = indexOfFavourite (candidate);
     if (existing >= 0)
-        labState.favourites.erase (labState.favourites.begin() + existing);
+    {
+        labState.favourites.erase (labState.favourites.begin() + existing); // stays saved in the library
+    }
     else
+    {
+        if (candidate.filePath.isEmpty() || ! juce::File (candidate.filePath).existsAsFile())
+            savePatchToLibrary (candidate, currentFolder);
         labState.favourites.push_back (candidate);
+        labState.status = "Saved to " + currentFolder.getFileName() + "  -  Evolve breeds from it";
+    }
+    labBroadcaster.sendChangeMessage();
+}
 
+void StacksAudioProcessor::favouriteCurrent()
+{
+    auto p = currentPatch();
+    const int existing = indexOfFavourite (p);
+    if (existing >= 0)
+    {
+        labState.favourites.erase (labState.favourites.begin() + existing);
+    }
+    else
+    {
+        savePatchToLibrary (p, currentFolder);
+        labState.favourites.push_back (p);
+        labState.status = "Saved \"" + p.name + "\" to " + currentFolder.getFileName();
+    }
+    labBroadcaster.sendChangeMessage();
+}
+
+void StacksAudioProcessor::toggleFavouriteFile (const juce::File& file)
+{
+    const int existing = indexOfFavouriteFile (file);
+    if (existing >= 0)
+    {
+        labState.favourites.erase (labState.favourites.begin() + existing);
+    }
+    else if (auto p = Patch::fromJson (file.loadFileAsString()))
+    {
+        p->filePath = file.getFullPathName();
+        if (p->name.isEmpty()) p->name = file.getFileNameWithoutExtension();
+        labState.favourites.push_back (*p);
+    }
     labBroadcaster.sendChangeMessage();
 }
 
@@ -619,12 +893,17 @@ void StacksAudioProcessor::removeFavourite (int favouriteIndex)
     labBroadcaster.sendChangeMessage();
 }
 
-void StacksAudioProcessor::favouriteCurrent()
+bool StacksAudioProcessor::loadLibraryPatch (const juce::File& file)
 {
-    auto p = currentPatch();
-    if (indexOfFavourite (p) < 0)
-        labState.favourites.push_back (std::move (p));
+    auto p = Patch::fromJson (file.loadFileAsString());
+    if (! p)
+        return false;
+    p->filePath = file.getFullPathName();
+    if (p->name.isEmpty()) p->name = file.getFileNameWithoutExtension();
+    applyPatch (*p);
+    labState.auditioned = -1;
     labBroadcaster.sendChangeMessage();
+    return true;
 }
 
 //==============================================================================
@@ -634,7 +913,13 @@ juce::String StacksAudioProcessor::labToJson() const
     {
         juce::Array<juce::var> arr;
         for (const auto& p : patches)
-            arr.add (p.toVar());
+        {
+            auto v = p.toVar();
+            if (p.filePath.isNotEmpty())
+                if (auto* obj = v.getDynamicObject())
+                    obj->setProperty ("file", p.filePath);
+            arr.add (v);
+        }
         return juce::var (arr);
     };
 
@@ -662,7 +947,11 @@ void StacksAudioProcessor::labFromJson (const juce::String& json)
         if (auto* arr = v.getArray())
             for (const auto& item : *arr)
                 if (auto p = Patch::fromVar (item))
+                {
+                    if (auto* obj = item.getDynamicObject())
+                        p->filePath = obj->getProperty ("file").toString();
                     out.push_back (*p);
+                }
         return out;
     };
 

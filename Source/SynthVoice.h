@@ -5,6 +5,7 @@
 
 #include "Parameters.h"
 #include "Wavetable.h"
+#include "LfoTable.h"
 
 namespace stacks
 {
@@ -19,10 +20,26 @@ struct SynthSound : public juce::SynthesiserSound
 struct VoiceContext
 {
     const WavetableBank* bank = nullptr;
-    const SynthParams* params = nullptr;
-    std::atomic<float> lastNote { -1.0f }; // most recent note, for glide
-    std::atomic<float> modWheel { 0.0f };  // CC1, 0..1, shared by all voices
+    const SynthParams* params = nullptr;      // base (unmodulated) values for this block
+    const LfoTableBank* lfoTables = nullptr;
+    std::atomic<float> lastNote { -1.0f };    // most recent note, for glide
+    std::atomic<float> modWheel { 0.0f };     // CC1, 0..1, shared by all voices
+    std::atomic<float> aftertouch { 0.0f };   // last channel pressure, for global targets
+    double bpm = 120.0;
+    float lfoRateHz[kNumLfos] {};             // effective rate (sync applied) for free-running LFOs
+    float lfoBlockPhase[kNumLfos] {};         // free-running phase at the start of this block
+    float lfoGlobalValue[kNumLfos] {};        // free-running value at block start (used for Random shape)
 };
+
+// Applies `delta` (fraction of knob travel) to a float parameter inside its own
+// skewed range, so a cutoff moves musically and a 0..1 knob moves linearly.
+inline void nudgeParam (SynthParams& p, int paramIndex, float delta) noexcept
+{
+    const auto& range = paramRange (paramIndex);
+    float& v = p.v[paramIndex];
+    const float norm = juce::jlimit (0.0f, 1.0f, range.convertTo0to1 (juce::jlimit (range.start, range.end, v)) + delta);
+    v = range.convertFrom0to1 (norm);
+}
 
 // One playing note: 2 wavetable oscillators (B can FM A) x up to 4 unison
 // copies, sub + noise, ladder filter, two envelopes, two LFOs.
@@ -48,7 +65,8 @@ private:
     float lfoValue (int shape, float phase, float held) const noexcept;
     void updateEnvelopes (const SynthParams&);
 
-    float sourceValue (int source, float lfo1, float lfo2, float filterEnvValue, float modEnvValue) const noexcept;
+    float lfoValueFor (int k, const SynthParams& p, int sampleInBlock, int blockLen, float& heldOut) noexcept;
+    float sourceValue (int source, const float* lfo, float filterEnvValue, float modEnvValue) const noexcept;
 
     VoiceContext& ctx;
     juce::ADSR ampEnv, filterEnv, modEnv;
@@ -61,12 +79,12 @@ private:
     float pitchBendSemis = 0.0f;
     float aftertouch = 0.0f;       // 0..1
     float noteRandom = 0.0f;       // -1..1, drawn per note
-    float lfoRateMod[2] {};        // octaves, from the previous sub-block
     float currentNote = 60.0f, targetNote = 60.0f, glideInc = 0.0f;
 
     float phaseA[kMaxUnison] {}, phaseB[kMaxUnison] {};
     float subPhase = 0.0f;
-    float lfoPhase[2] {}, lfoHeld[2] {};
+    float lfoNotePhase[kNumLfos] {}, lfoHeld[kNumLfos] {};
+    SynthParams local;              // this sub-block's modulated copy of the parameters
 };
 
 } // namespace stacks

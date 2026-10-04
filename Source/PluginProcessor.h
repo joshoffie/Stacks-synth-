@@ -6,6 +6,7 @@
 #include "Wavetable.h"
 #include "SynthVoice.h"
 #include "Patch.h"
+#include "LfoTable.h"
 #include "PatchGenerator.h"
 #include "Effects.h"
 #include "ai/ModelManager.h"
@@ -36,7 +37,10 @@ struct EngineChoice
 };
 
 class StacksAudioProcessor : public juce::AudioProcessor,
-                             private juce::Timer
+                             private juce::Timer,
+                             private juce::AudioProcessorValueTreeState::Listener,
+                             private juce::ValueTree::Listener,
+                             private juce::AsyncUpdater
 {
 public:
     StacksAudioProcessor();
@@ -81,10 +85,20 @@ public:
     void cancelGeneration();
     void goBackGeneration();
     void audition (int candidateIndex);
-    void toggleFavourite (int candidateIndex);
+
+    // Library: the heart saves a patch into the current folder and adds it to
+    // the breeding set ("favourites"); the set is what Evolve breeds from.
+    static juce::File libraryRoot();
+    juce::File libraryFolder() const                       { return currentFolder; }
+    void setLibraryFolder (const juce::File&);
+    juce::File savePatchToLibrary (Patch&, const juce::File& folder); // sets patch.filePath, returns the file
+    void toggleFavourite (int candidateIndex);             // save (if needed) + toggle breeding membership
+    void favouriteCurrent();                               // the playing sound: save + toggle
+    void toggleFavouriteFile (const juce::File&);          // from the library browser
     void removeFavourite (int favouriteIndex);
-    void favouriteCurrent();
     int indexOfFavourite (const Patch&) const;
+    int indexOfFavouriteFile (const juce::File&) const;
+    bool loadLibraryPatch (const juce::File&);             // audition a saved patch
 
     Patch currentPatch() const;                            // what is loaded right now, including knob tweaks
     void applyPatch (const Patch&);
@@ -109,6 +123,19 @@ public:
     static constexpr int kBatchSize = 10;
     static constexpr int kAiPatchesPerBatch = 5;           // the rest are instant Random variations
 
+    // Modulation connections (message thread). Returns the slot used, or -1.
+    int addModulation (int source, int target, float amount = 0.3f);
+    void clearModulation (int slot);
+    int findModulation (int source, int target) const;
+    std::vector<int> modulationsFor (int source) const;      // slots using this source
+    std::vector<std::pair<int, float>> modulationsOnParam (int paramIndex) const; // (source, amount)
+
+    // Drawn LFO shapes and the tables the UI can display
+    LfoPoints lfoPoints (int k) const;
+    void setLfoPoints (int k, const LfoPoints&);
+    const LfoTable& lfoTable (int k) const                  { return lfoTables.get (k); }
+    float lfoDisplayPhase (int k) const                     { return lfoPhaseForDisplay[k].load(); }
+
 private:
     void startGeneration (GenerationRequest);
     void addCandidate (int token, Patch);
@@ -117,14 +144,26 @@ private:
     void loadEngineFromSettings();
     void rebuildGenerator();
     void timerCallback() override;                         // frees an idle built-in model
+    void parameterChanged (const juce::String&, float) override;
+    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
+    void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override;
+    void handleAsyncUpdate() override;                     // rebuilds LFO tables on the message thread
+    void rebuildLfoTables();
+    void attachStateListeners();
+    void applyGlobalModulation();                          // modulated copy of the params for the effects
     juce::String labToJson() const;
     void labFromJson (const juce::String&);
     void processEffects (juce::AudioBuffer<float>&);
 
     // Synth engine
     juce::SharedResourcePointer<WavetableBank> bank;      // built once, shared by all instances
-    SynthParams params;
+    SynthParams params;                                   // base values this block
+    SynthParams fxParams;                                 // base + global modulation, read by the effects
     VoiceContext voiceContext;
+    LfoTableBank lfoTables;
+    float lfoPhase[kNumLfos] {}, lfoHeld[kNumLfos] {};
+    std::atomic<float> lfoPhaseForDisplay[kNumLfos] {};
+    juce::Random lfoRng;
     std::array<std::atomic<float>*, kNumParams> rawParams {};
     juce::Synthesiser synth;
 
@@ -148,6 +187,7 @@ private:
     int lastDownloadPercent = -1;
     juce::ThreadPool pool { 2 };
     LabState labState;
+    juce::File currentFolder;
     juce::String patchName { "Init" };
     juce::String patchCategory, patchOrigin;               // of the loaded patch, for the Now Playing card
     int generationToken = 0;                               // bumps per request; stale callbacks are ignored

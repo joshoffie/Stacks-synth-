@@ -18,21 +18,91 @@ const juce::StringArray& filterTypeNames()
 
 const juce::StringArray& lfoShapeNames()
 {
-    static const juce::StringArray names { "Sine", "Triangle", "Saw", "Square", "Random" };
+    static const juce::StringArray names { "Sine", "Triangle", "Saw", "Ramp", "Square", "Random", "Custom" };
+    return names;
+}
+
+const juce::StringArray& lfoSyncNames()
+{
+    static const juce::StringArray names { "Free", "1/16", "1/8T", "1/8", "1/8D", "1/4", "1/2", "1 bar", "2 bars" };
+    return names;
+}
+
+float lfoSyncBeats (int sync)
+{
+    static const float beats[] = { 0.0f, 0.25f, 1.0f / 3.0f, 0.5f, 0.75f, 1.0f, 2.0f, 4.0f, 8.0f };
+    return sync > 0 && sync < 9 ? beats[sync] : 0.0f;
+}
+
+const juce::StringArray& lfoModeNames()
+{
+    static const juce::StringArray names { "Free", "Note" };
     return names;
 }
 
 const juce::StringArray& modSourceNames()
 {
-    static const juce::StringArray names { "Off", "LFO 1", "LFO 2", "Filter Env", "Mod Env", "Velocity", "Key", "Mod Wheel", "Aftertouch", "Random" };
+    static const juce::StringArray names { "Off", "LFO 1", "LFO 2", "LFO 3", "LFO 4", "Filter Env", "Mod Env", "Velocity", "Key", "Mod Wheel", "Aftertouch", "Random" };
     return names;
 }
 
-const juce::StringArray& modDestNames()
+namespace
 {
-    static const juce::StringArray names { "Off", "Pitch", "Pitch B", "Filter", "Resonance", "Morph A", "Morph B", "FM", "Amp", "Pan",
-                                           "LFO1 Rate", "LFO2 Rate", "B Level", "Noise" };
-    return names;
+    // Built once: the virtual targets, then one entry per modulatable parameter.
+    struct TargetTable
+    {
+        juce::StringArray names;
+        std::vector<int> paramForTarget;   // -1 for virtual targets
+        std::vector<int> targetForParam;   // -1 when not modulatable
+
+        TargetTable()
+        {
+            names.addArray ({ "Off", "Pitch", "Pitch B", "Amp", "Pan" });
+            paramForTarget.assign ((size_t) kNumVirtualTargets, -1);
+            targetForParam.assign ((size_t) kNumParams, -1);
+
+            const auto& specs = paramSpecs();
+            for (int i = 0; i < kNumParams; ++i)
+            {
+                const auto& sp = specs[(size_t) i];
+                const juce::String id (sp.id);
+                const bool modSlot = id.startsWith ("mod") && (id.endsWith ("_amount") || id.endsWith ("_source") || id.endsWith ("_dest"));
+                if (sp.kind != ParamKind::Float || modSlot || id == "master_gain")
+                    continue;
+                targetForParam[(size_t) i] = names.size();
+                names.add (sp.name);
+                paramForTarget.push_back (i);
+            }
+        }
+    };
+
+    const TargetTable& targets()
+    {
+        static const TargetTable table;
+        return table;
+    }
+}
+
+const juce::StringArray& modTargetNames()          { return targets().names; }
+int modTargetParamIndex (int target)               { const auto& t = targets().paramForTarget; return target >= 0 && target < (int) t.size() ? t[(size_t) target] : -1; }
+int modTargetForParam (int paramIndex)             { const auto& t = targets().targetForParam; return paramIndex >= 0 && paramIndex < (int) t.size() ? t[(size_t) paramIndex] : -1; }
+bool isModulatableParam (int paramIndex)           { return modTargetForParam (paramIndex) > 0; }
+
+const juce::NormalisableRange<float>& paramRange (int paramIndex)
+{
+    static const std::vector<juce::NormalisableRange<float>> ranges = []
+    {
+        std::vector<juce::NormalisableRange<float>> out;
+        for (const auto& sp : paramSpecs())
+        {
+            juce::NormalisableRange<float> r (sp.min, sp.kind == ParamKind::Choice ? (float) (sp.choices().size() - 1) : sp.max);
+            if (sp.skewCentre > 0.0f)
+                r.setSkewForCentre (sp.skewCentre);
+            out.push_back (r);
+        }
+        return out;
+    }();
+    return ranges[(size_t) juce::jlimit (0, kNumParams - 1, paramIndex)];
 }
 
 const juce::StringArray& chorusModeNames()
@@ -67,23 +137,22 @@ bool isAdvancedParam (const char* id)
     return advanced.contains (id);
 }
 
-P modSourceParam (int slot)
+namespace
 {
-    static const P table[kNumModSlots] = { P::mod1_source, P::mod2_source, P::mod3_source, P::mod4_source, P::mod5_source, P::mod6_source };
-    return table[juce::jlimit (0, kNumModSlots - 1, slot)];
+    // The slot and LFO parameters are laid out contiguously in the table, so
+    // the k-th one is a fixed stride from the first.
+    P offsetFrom (P first, int k, int stride) { return (P) ((int) first + k * stride); }
 }
 
-P modDestParam (int slot)
-{
-    static const P table[kNumModSlots] = { P::mod1_dest, P::mod2_dest, P::mod3_dest, P::mod4_dest, P::mod5_dest, P::mod6_dest };
-    return table[juce::jlimit (0, kNumModSlots - 1, slot)];
-}
+P modSourceParam (int slot) { return offsetFrom (P::mod1_source, juce::jlimit (0, kNumModSlots - 1, slot), 3); }
+P modDestParam (int slot)   { return offsetFrom (P::mod1_dest,   juce::jlimit (0, kNumModSlots - 1, slot), 3); }
+P modAmountParam (int slot) { return offsetFrom (P::mod1_amount, juce::jlimit (0, kNumModSlots - 1, slot), 3); }
 
-P modAmountParam (int slot)
-{
-    static const P table[kNumModSlots] = { P::mod1_amount, P::mod2_amount, P::mod3_amount, P::mod4_amount, P::mod5_amount, P::mod6_amount };
-    return table[juce::jlimit (0, kNumModSlots - 1, slot)];
-}
+P lfoShapeParam (int k) { return offsetFrom (P::lfo1_shape, juce::jlimit (0, kNumLfos - 1, k), 5); }
+P lfoRateParam (int k)  { return offsetFrom (P::lfo1_rate,  juce::jlimit (0, kNumLfos - 1, k), 5); }
+P lfoSyncParam (int k)  { return offsetFrom (P::lfo1_sync,  juce::jlimit (0, kNumLfos - 1, k), 5); }
+P lfoPhaseParam (int k) { return offsetFrom (P::lfo1_phase, juce::jlimit (0, kNumLfos - 1, k), 5); }
+P lfoModeParam (int k)  { return offsetFrom (P::lfo1_mode,  juce::jlimit (0, kNumLfos - 1, k), 5); }
 
 const std::vector<ParamSpec>& paramSpecs()
 {
@@ -168,7 +237,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
             case ParamKind::Choice:
                 jassert (s.choices != nullptr);
                 layout.add (std::make_unique<juce::AudioParameterChoice> (
-                    pid, s.name, *s.choices, (int) s.def));
+                    pid, s.name, s.choices(), (int) s.def));
                 break;
         }
     }
