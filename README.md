@@ -56,6 +56,12 @@ Knobs that a modulator drives show a ring in the modulator's colour and a live
 marker that follows the most recently played note, so you can see an LFO
 moving a parameter while you hold a key.
 
+The header shows the output as a waveform and a spectrum. The FILTER row draws
+the filter's response curve and both envelopes, live. A help line under the
+rows names the control under the mouse and says in plain words what it does;
+with nothing under the mouse it describes the current screen. Every control
+also has a tooltip.
+
 Every generated patch (random or AI) passes a tuning guard: oscillator A only at
 octaves, an audible oscillator B only at octaves, fine detune and pitch
 modulation capped, so nothing comes out of key with what you play.
@@ -87,18 +93,21 @@ While a batch is being written, a progress bar above the tabs shows which patch
 the model is on, its name as soon as it is known, and how many settings it has
 written so far; the Garden draws the same progress as a ring around the seed.
 
-1. **Fresh ideas** — ten new patches from the direction text alone. **Evolve** —
-   ten descendants of the sound you're playing. The sound you're playing is
+1. Type what you want ("mgmt style synth patch", "dark evolving pad") and press
+   Return, or **Generate**: new patches from your description alone, no preset
+   needed. **Evolve** — ten descendants of the sound you're playing, each
+   given its own direction of change (the Variation knob decides how far they
+   may stray, up to changing the category), and pushed apart if the model hands
+   back near-copies. The sound you're playing is
    never replaced; it stays pinned at the top of the LIST as *Now Playing*,
    and the Garden's seed is whatever this generation grew from, so loading
    other sounds (from the library, say) leaves the Garden alone. Click the
    seed to hear the parent again.
 2. Click a leaf or card to load it and play. **♥ Favourite** saves what you're
    hearing into a library folder of your choice and gives it a heart.
-3. Type a direction ("darker", "more movement", "in the style of MGMT") to
-   steer the next round. With an AI engine, the model first writes itself a
-   short *sound brief* about what that direction should sound like, then
-   designs from it.
+3. The direction text also steers Evolve. With an AI engine, the model first
+   writes itself a short *sound brief* about what the direction should sound
+   like, then designs from it.
 4. **Design wavetables** (on by default) lets both the AI and the random
    breeder invent a new wavetable for oscillator A in most patches - written
    as a spectrum (harmonic levels for 2-4 morph frames) and rendered into a
@@ -146,6 +155,17 @@ The engine choice is stored in `~/Library/Application Support/Stacks/`, next to
 `llama.log` (runtime + speed stats), `last-ai-prompt.txt`, `last-ai-reply.txt`
 and `grammar.gbnf` for prompt tuning. Patches are plain JSON (`Save…` / `Load…`,
 default folder `~/Music/Stacks Patches`).
+
+## Benchmarks
+
+`StacksTests --bench "<label>"` runs a fixed prompt set (no prompt, a style
+reference, a pad, a pluck, a bass, plus two Evolve rounds) through the
+installed built-in model and scores delivery, movement, designed tables, hint
+adherence, in-key output before the tuning guard, Evolve diversity and speed
+into a 0–100 figure. Each run lands in `Benchmarks/` as JSON plus a table row,
+so a prompt, grammar or guard change is judged against the previous runs
+rather than by ear alone. `Docs/` holds the competitive research that shaped
+the roadmap.
 
 ## Tests
 

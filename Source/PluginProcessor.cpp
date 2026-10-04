@@ -176,6 +176,29 @@ void StacksAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
     synth.renderNextBlock (buffer, midi, 0, numSamples);
     processEffects (buffer);
+
+    // Feed the scope: a mono mix, written without locks (the display tolerates a torn float).
+    {
+        const int n = buffer.getNumSamples();
+        const float* l = buffer.getReadPointer (0);
+        const float* r = buffer.getNumChannels() > 1 ? buffer.getReadPointer (1) : l;
+        int w = scopeWrite.load (std::memory_order_relaxed);
+        for (int i = 0; i < n; ++i)
+        {
+            scopeRing[(size_t) w] = 0.5f * (l[i] + r[i]);
+            w = (w + 1) % kScopeSize;
+        }
+        scopeWrite.store (w, std::memory_order_release);
+    }
+}
+
+void StacksAudioProcessor::copyRecentOutput (float* dest, int count) const
+{
+    count = juce::jlimit (0, kScopeSize, count);
+    int start = scopeWrite.load (std::memory_order_acquire) - count;
+    if (start < 0) start += kScopeSize;
+    for (int i = 0; i < count; ++i)
+        dest[i] = scopeRing[(size_t) ((start + i) % kScopeSize)];
 }
 
 // Connections whose target is a knob outside the voices (effects, master) are

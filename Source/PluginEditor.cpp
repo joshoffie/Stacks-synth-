@@ -5,7 +5,7 @@ namespace stacks
 
 namespace
 {
-    constexpr int kHeaderHeight = 58;
+    constexpr int kHeaderHeight = 60;
     constexpr int kKeyboardHeight = 64;
     constexpr int kLabWidth = 400;
     constexpr int kMargin = 8;
@@ -15,6 +15,7 @@ StacksAudioProcessorEditor::StacksAudioProcessorEditor (StacksAudioProcessor& p)
     : AudioProcessorEditor (&p),
       synthProcessor (p),
       masterKnob (p.apvts, spec (P::master_gain), true),
+      scope (p),
       synthPanel (p),
       labPanel (p),
       keyboard (p.keyboardState, juce::MidiKeyboardComponent::horizontalKeyboard)
@@ -34,6 +35,7 @@ StacksAudioProcessorEditor::StacksAudioProcessorEditor (StacksAudioProcessor& p)
     addAndMakeVisible (patchName);
 
     addAndMakeVisible (masterKnob);
+    addAndMakeVisible (scope);
     addAndMakeVisible (synthPanel);
     addAndMakeVisible (labPanel);
 
@@ -45,8 +47,8 @@ StacksAudioProcessorEditor::StacksAudioProcessorEditor (StacksAudioProcessor& p)
     changeListenerCallback (nullptr);
 
     setResizable (true, true);
-    setResizeLimits (1340, 640, 2200, 1400);
-    setSize (1460, 700);
+    setResizeLimits (1340, 680, 2200, 1400);
+    setSize (1460, 736);
 }
 
 StacksAudioProcessorEditor::~StacksAudioProcessorEditor()
@@ -62,7 +64,10 @@ void StacksAudioProcessorEditor::changeListenerCallback (juce::ChangeBroadcaster
 
 void StacksAudioProcessorEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (colours::background);
+    // A faint vertical gradient, so the panels read as sitting on a surface.
+    juce::ColourGradient grad (colours::background.brighter (0.06f), 0.0f, 0.0f, colours::background.darker (0.12f), 0.0f, (float) getHeight(), false);
+    g.setGradientFill (grad);
+    g.fillAll();
 }
 
 void StacksAudioProcessorEditor::resized()
@@ -72,7 +77,9 @@ void StacksAudioProcessorEditor::resized()
     auto header = r.removeFromTop (kHeaderHeight);
     masterKnob.setBounds (header.removeFromRight (64));
     title.setBounds (header.removeFromLeft (130).withTrimmedBottom (14));
-    patchName.setBounds (header.reduced (6, 0).withTrimmedBottom (14));
+    patchName.setBounds (header.removeFromLeft (juce::jmin (420, header.getWidth() / 2)).reduced (6, 0).withTrimmedBottom (14));
+    header.removeFromRight (10);
+    scope.setBounds (header.reduced (0, 4));
     r.removeFromTop (kMargin);
 
     labPanel.setBounds (r.removeFromRight (kLabWidth));

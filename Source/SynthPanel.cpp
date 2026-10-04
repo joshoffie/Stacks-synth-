@@ -1,4 +1,6 @@
 #include "SynthPanel.h"
+#include "Displays.h"
+#include "StacksLookAndFeel.h"
 
 namespace stacks
 {
@@ -199,7 +201,7 @@ public:
         g.setColour (row.colour.withAlpha (0.18f));
         g.fillRoundedRectangle (band.reduced (2.0f, 0.0f), 4.0f);
         g.setColour (row.colour);
-        g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
+        g.setFont (StacksLookAndFeel::font (10.0f, true).withExtraKerningFactor (0.12f));
         g.saveState();
         g.addTransform (juce::AffineTransform::rotation (-juce::MathConstants<float>::halfPi, band.getCentreX(), band.getCentreY()));
         g.drawText (row.caption, juce::Rectangle<float> (band.getCentreX() - band.getHeight() * 0.5f, band.getCentreY() - band.getWidth() * 0.5f,
@@ -209,10 +211,14 @@ public:
 
         for (const auto* section : row.sections)
         {
-            g.setColour (colours::panel);
-            g.fillRoundedRectangle (section->bounds.toFloat(), 6.0f);
+            const auto b = section->bounds.toFloat();
+            juce::ColourGradient grad (colours::panel.brighter (0.05f), b.getX(), b.getY(), colours::panel.darker (0.08f), b.getX(), b.getBottom(), false);
+            g.setGradientFill (grad);
+            g.fillRoundedRectangle (b, 7.0f);
+            g.setColour (juce::Colours::white.withAlpha (0.05f));
+            g.drawRoundedRectangle (b.reduced (0.5f), 7.0f, 1.0f);
             g.setColour (section->colour);
-            g.setFont (juce::Font (juce::FontOptions (10.5f, juce::Font::bold)));
+            g.setFont (StacksLookAndFeel::font (10.5f, true).withExtraKerningFactor (0.06f));
             const auto title = section->title == kModulatorsGroup ? juce::String ("MODULATORS   -   pick one, press Assign, click a knob") : section->title;
             g.drawText (title, section->bounds.withHeight (kTitleH).reduced (kPad, 0), juce::Justification::centredLeft);
         }
@@ -223,8 +229,91 @@ private:
 };
 
 //==============================================================================
+// One line of help under the rows: the control under the mouse, named and
+// explained in plain words; otherwise what the current screen is for.
+class SynthPanel::HelpStrip : public juce::Component,
+                              private juce::Timer
+{
+public:
+    explicit HelpStrip (SynthPanel& owner) : panel (owner)
+    {
+        setInterceptsMouseClicks (false, false);
+        startTimerHz (20);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        auto r = getLocalBounds().toFloat();
+        g.setColour (colours::panel.withAlpha (0.7f));
+        g.fillRoundedRectangle (r, 6.0f);
+        juce::AttributedString text;
+        if (title.isNotEmpty())
+        {
+            text.append (title + "   ", StacksLookAndFeel::font (12.0f, true), accent);
+            text.append (body, StacksLookAndFeel::font (12.0f), colours::text.withAlpha (0.9f));
+        }
+        else
+            text.append (body, StacksLookAndFeel::font (12.0f), colours::muted);
+        text.setJustification (juce::Justification::centredLeft);
+        text.setWordWrap (juce::AttributedString::none);
+        text.draw (g, r.reduced (12.0f, 0.0f));
+    }
+
+private:
+    void timerCallback() override
+    {
+        juce::String newTitle, newBody;
+        juce::Colour newAccent = colours::accent;
+        auto* under = juce::Desktop::getInstance().getMainMouseSource().getComponentUnderMouse();
+        for (auto* c = under; c != nullptr && c != &panel; c = c->getParentComponent())
+        {
+            if (auto* knob = dynamic_cast<ParamKnob*> (c))
+            {
+                const auto& s = spec ((P) knob->parameterIndex());
+                newTitle = s.name;
+                newBody = juce::String (s.aiHint).replace (" (advanced)", "");
+                if (s.unit[0] != 0) newBody << "  (" << s.unit << ")";
+                newBody << "   -   drag up/down; double-click to reset; with Assign on, click to modulate it";
+                break;
+            }
+            if (auto* tip = dynamic_cast<juce::SettableTooltipClient*> (c))
+            {
+                if (tip->getTooltip().isNotEmpty()) { newBody = tip->getTooltip(); break; }
+            }
+            if (auto* combo = dynamic_cast<juce::ComboBox*> (c))
+            {
+                if (combo->getTooltip().isNotEmpty()) { newTitle = "Choice"; newBody = combo->getTooltip(); break; }
+            }
+        }
+        if (newBody.isEmpty())
+        {
+            static const char* const screens[] = {
+                "SOUND is where the tone starts: two wavetable oscillators (A and B, B can FM A), a sub for weight and noise for air. Morph slides through each table.",
+                "FILTER shapes the tone: cutoff is brightness, resonance a peak at the cutoff. The filter envelope moves the cutoff per note; the amp envelope shapes loudness.",
+                "MODULATORS make things move: draw an LFO, press Assign and click any knob - it swings around its value. The Mod Env is a spare envelope for anything.",
+                "SPACE is the room: chorus for width and shimmer, delay for echoes (in time with the host), reverb for the tail. The 'more' buttons hold the fine print.",
+            };
+            if (panel.viewMode >= 0 && panel.viewMode < 4) newBody = screens[panel.viewMode];
+            else newBody = "Hover any control to see what it does. The tabs above open one section at a time, larger. Signal flows top to bottom: SOUND > FILTER > MODULATORS > SPACE.";
+        }
+        if (newTitle != title || newBody != body)
+        {
+            title = newTitle; body = newBody; accent = newAccent;
+            repaint();
+        }
+    }
+
+    SynthPanel& panel;
+    juce::String title, body;
+    juce::Colour accent { colours::accent };
+};
+
+//==============================================================================
 SynthPanel::SynthPanel (StacksAudioProcessor& p) : processor (p), apvts (p.apvts)
 {
+    help = std::make_unique<HelpStrip> (*this);
+    addAndMakeVisible (*help);
+
     setWantsKeyboardFocus (true);
 
     // The modulators area is one wide "section" of its own.
@@ -303,6 +392,20 @@ SynthPanel::SynthPanel (StacksAudioProcessor& p) : processor (p), apvts (p.apvts
             controls.push_back (std::move (display));
         }
     }
+
+    // Displays at the front of the filter and envelope sections.
+    auto prepend = [this] (const char* group, std::unique_ptr<juce::Component> display, int width)
+    {
+        if (auto* section = findSection (group))
+        {
+            addAndMakeVisible (*display);
+            section->controls.insert (section->controls.begin(), { display.get(), width });
+            controls.push_back (std::move (display));
+        }
+    };
+    if (auto* f = findSection ("FILTER"))     prepend ("FILTER",     std::make_unique<FilterCurve> (apvts, f->colour), 92);
+    if (auto* f = findSection ("FILTER ENV")) prepend ("FILTER ENV", std::make_unique<EnvelopeDisplay> (apvts, "fenv", f->colour), 84);
+    if (auto* f = findSection ("AMP ENV"))    prepend ("AMP ENV",    std::make_unique<EnvelopeDisplay> (apvts, "aenv", f->colour), 84);
 
     // ...placed in fixed rows that follow the signal path.
     for (const auto& spec : rowSpecs())
@@ -470,7 +573,7 @@ void SynthPanel::setView (int rowIndex)
 
 int SynthPanel::preferredHeight() const
 {
-    int h = 24 + 4 + 2 * kPad;
+    int h = 24 + 4 + 2 * kPad + 28;
     for (const auto& row : rows)
         h += row.height + kGap;
     return h - kGap;
@@ -485,6 +588,8 @@ void SynthPanel::resized()
     for (auto& b : viewButtons)
         b->setBounds (tabs.removeFromLeft (tabW).reduced (1, 0));
     area.removeFromTop (6);
+    help->setBounds (area.removeFromBottom (24));
+    area.removeFromBottom (4);
 
     const int normalH = kTitleH + kCellH + kPad;
 

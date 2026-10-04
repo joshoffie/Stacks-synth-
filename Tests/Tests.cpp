@@ -524,8 +524,259 @@ static int liveTest (const juce::String& hint)
     return out.empty() ? 1 : 0;
 }
 
+//==============================================================================
+// `StacksTests --bench [label]`: a fixed set of prompts through the installed
+// built-in model, scored on what we care about (delivery, movement, designed
+// tables, hint adherence, in-key output before the guard, evolve diversity),
+// written to Benchmarks/ so later changes can be compared against earlier ones.
+namespace bench
+{
+    struct Score
+    {
+        juce::String prompt, mode;
+        int requested = 0, delivered = 0;
+        double seconds = 0.0;
+        double meanConnections = 0.0, lfoShare = 0.0, customShare = 0.0, uniqueNames = 0.0, sanity = 0.0;
+        int distinctCategories = 0, rawViolations = 0;
+        double hintAdherence = -1.0;        // -1 = not applicable
+        double meanDiffFromParent = -1.0, meanDiffBetweenSiblings = -1.0;
+        double waveDiversity = 0.0;
+    };
+
+    // What the model wrote before the tuning guard: counts the mistakes it made.
+    int rawViolations()
+    {
+        const auto text = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                              .getChildFile ("Application Support/Stacks/last-ai-reply.txt").loadFileAsString();
+        auto parsed = juce::JSON::parse (text.upToFirstOccurrenceOf ("----- ERROR -----", false, false));
+        auto* root = parsed.getDynamicObject();
+        if (root == nullptr) return 0;
+        auto* patches = root->getProperty ("patches").getArray();
+        if (patches == nullptr) return 0;
+        int bad = 0;
+        for (const auto& pv : *patches)
+        {
+            auto* p = pv.getDynamicObject();
+            if (p == nullptr) continue;
+            auto* params = p->getProperty ("params").getDynamicObject();
+            if (params == nullptr) continue;
+            const int coarseA = (int) params->getProperty ("oscA_coarse");
+            if (params->hasProperty ("oscA_coarse") && coarseA % 12 != 0) ++bad;
+            const double levelB = params->hasProperty ("oscB_level") ? (double) params->getProperty ("oscB_level") : 0.0;
+            const int coarseB = (int) params->getProperty ("oscB_coarse");
+            if (levelB > 0.05 && coarseB % 12 != 0) ++bad;
+            for (int i = 1; i <= 6; ++i)
+            {
+                const auto src = params->getProperty ("mod" + juce::String (i) + "_source").toString();
+                const auto dst = params->getProperty ("mod" + juce::String (i) + "_dest").toString();
+                if (src.isEmpty() || dst != "Pitch") continue;
+                if (src == "Velocity" || src == "Key" || src == "Random") ++bad;
+                if (src.startsWith ("LFO"))
+                {
+                    const auto shape = params->getProperty ("lfo" + src.getLastCharacters (1) + "_shape").toString();
+                    if (shape == "Square" || shape == "Random" || shape == "Saw" || shape == "Ramp") ++bad;
+                    if (std::abs ((double) params->getProperty ("mod" + juce::String (i) + "_amount")) > 0.05) ++bad;
+                }
+            }
+        }
+        return bad;
+    }
+
+    int categoryForHint (const juce::String& hint)
+    {
+        struct Key { const char* word; const char* category; };
+        static const Key keys[] = { { "pad", "Pad" }, { "pluck", "Pluck" }, { "bass", "Bass" }, { "lead", "Lead" }, { "bell", "Bell" }, { "key", "Keys" }, { "texture", "Texture" }, { "drone", "Drone" } };
+        for (int i = 0; i < (int) std::size (keys); ++i)
+            if (hint.containsIgnoreCase (keys[i].word)) return i;
+        return -1;
+    }
+
+    Score score (const std::vector<Patch>& out, const GenerationRequest& req, double seconds)
+    {
+        Score s;
+        s.prompt = req.hint;
+        s.mode = req.parents.empty() ? "fresh" : "evolve";
+        s.requested = req.count;
+        s.delivered = (int) out.size();
+        s.seconds = seconds;
+        if (out.empty()) return s;
+
+        std::set<juce::String> names, categories;
+        int connections = 0, withLfo = 0, custom = 0, sane = 0, adhering = 0;
+        static const char* const categoryNames[] = { "Pad", "Pluck", "Bass", "Lead", "Bell", "Keys", "Texture", "Drone" };
+        const int wantCategory = categoryForHint (req.hint);
+        std::vector<const WaveSpec*> waves;
+        for (const auto& p : out)
+        {
+            names.insert (p.name.toLowerCase());
+            categories.insert (p.category);
+            bool lfo = false;
+            for (int i = 0; i < kNumModSlots; ++i)
+            {
+                const int src = (int) p.get (modSourceParam (i));
+                if (src == SrcOff || (int) p.get (modDestParam (i)) == TargetOff) continue;
+                ++connections;
+                if (src >= SrcLfo1 && src <= SrcLfo4) lfo = true;
+            }
+            withLfo += lfo ? 1 : 0;
+            if ((int) p.get (P::oscA_wave) == kCustomWave && ! p.waves[0].isEmpty()) { ++custom; waves.push_back (&p.waves[0]); }
+            const bool audible = p.get (P::oscA_level) + p.get (P::oscB_level) + p.get (P::sub_level) > 0.1f;
+            const bool cutoffOk = p.get (P::filter_cutoff) >= 60.0f && p.get (P::filter_cutoff) <= 16000.0f;
+            const bool envOk = p.get (P::aenv_attack) < 4.0f && p.get (P::aenv_release) < 8.0f;
+            sane += (audible && cutoffOk && envOk) ? 1 : 0;
+            if (wantCategory >= 0 && p.category == categoryNames[wantCategory]) ++adhering;
+        }
+        const double n = (double) out.size();
+        s.meanConnections = connections / n;
+        s.lfoShare = withLfo / n;
+        s.customShare = custom / n;
+        s.uniqueNames = (double) names.size() / n;
+        s.distinctCategories = (int) categories.size();
+        s.sanity = sane / n;
+        s.hintAdherence = wantCategory >= 0 ? adhering / n : -1.0;
+        s.rawViolations = rawViolations();
+
+        double waveDist = 0.0; int wavePairs = 0;
+        for (size_t i = 0; i < waves.size(); ++i)
+            for (size_t j = i + 1; j < waves.size(); ++j)
+            {
+                for (int k = 0; k < WaveSpec::kHarmonics; ++k)
+                    waveDist += std::abs (waves[i]->frames[0][(size_t) k] - waves[j]->frames[0][(size_t) k]);
+                ++wavePairs;
+            }
+        s.waveDiversity = wavePairs > 0 ? waveDist / wavePairs / WaveSpec::kHarmonics : 0.0;
+
+        if (! req.parents.empty())
+        {
+            double fromParent = 0.0, between = 0.0; int pairs = 0;
+            for (size_t i = 0; i < out.size(); ++i)
+            {
+                fromParent += countAudibleDifferences (out[i], req.parents.front());
+                for (size_t j = i + 1; j < out.size(); ++j) { between += countAudibleDifferences (out[i], out[j]); ++pairs; }
+            }
+            s.meanDiffFromParent = fromParent / n;
+            s.meanDiffBetweenSiblings = pairs > 0 ? between / pairs : 0.0;
+        }
+        return s;
+    }
+
+    double composite (const std::vector<Score>& scores)
+    {
+        double total = 0.0, weight = 0.0;
+        auto add = [&] (double v, double w) { total += juce::jlimit (0.0, 1.0, v) * w; weight += w; };
+        for (const auto& s : scores)
+        {
+            add (s.requested > 0 ? (double) s.delivered / s.requested : 0.0, 20);
+            add (s.lfoShare, 8);
+            add (s.customShare, 8);
+            add (s.uniqueNames, 6);
+            add (s.sanity, 10);
+            add (s.delivered > 0 ? 1.0 - (double) s.rawViolations / s.delivered : 0.0, 14);
+            if (s.hintAdherence >= 0.0) add (s.hintAdherence, 10);
+            if (s.mode == "fresh" && s.hintAdherence < 0.0) add (s.delivered > 0 ? (double) s.distinctCategories / s.delivered : 0.0, 6);
+            if (s.mode == "evolve") { add (s.meanDiffFromParent / 6.0, 12); add (s.meanDiffBetweenSiblings / 5.0, 6); }
+            add (s.seconds > 0.0 ? juce::jlimit (0.0, 1.0, 25.0 * s.delivered / s.seconds) : 0.0, 6);   // 25 s per patch = full marks
+        }
+        return weight > 0.0 ? 100.0 * total / weight : 0.0;
+    }
+
+    juce::var toVar (const Score& s)
+    {
+        auto* o = new juce::DynamicObject();
+        o->setProperty ("prompt", s.prompt);             o->setProperty ("mode", s.mode);
+        o->setProperty ("requested", s.requested);       o->setProperty ("delivered", s.delivered);
+        o->setProperty ("seconds", std::round (s.seconds * 10.0) / 10.0);
+        o->setProperty ("meanConnections", s.meanConnections); o->setProperty ("lfoShare", s.lfoShare);
+        o->setProperty ("customShare", s.customShare);   o->setProperty ("uniqueNames", s.uniqueNames);
+        o->setProperty ("sanity", s.sanity);             o->setProperty ("distinctCategories", s.distinctCategories);
+        o->setProperty ("rawViolations", s.rawViolations); o->setProperty ("hintAdherence", s.hintAdherence);
+        o->setProperty ("meanDiffFromParent", s.meanDiffFromParent); o->setProperty ("meanDiffBetweenSiblings", s.meanDiffBetweenSiblings);
+        o->setProperty ("waveDiversity", s.waveDiversity);
+        return juce::var (o);
+    }
+}
+
+static int benchmark (const juce::String& label)
+{
+    std::optional<ModelInfo> chosen;
+    for (const auto& m : ModelManager::catalogue())
+        if (m.installed && (! chosen || m.id.containsIgnoreCase ("4b")))
+            chosen = m;
+    if (! chosen) { std::printf ("no built-in model is installed\n"); return 2; }
+
+    auto backend = std::make_shared<LlamaBackend> (chosen->file, chosen->label);
+    LlmPatchGenerator gen (backend, std::make_shared<RandomPatchGenerator>());
+    GenerationProgress quiet;
+
+    const char* const prompts[] = { "", "mgmt style synth patch", "dark evolving pad", "punchy pluck for house", "warm 80s bass" };
+    std::vector<bench::Score> scores;
+    std::vector<Patch> firstResults;
+    for (auto* prompt : prompts)
+    {
+        GenerationRequest r;
+        r.count = 3;
+        r.hint = prompt;
+        r.designWaves = true;
+        const auto t0 = juce::Time::getMillisecondCounterHiRes();
+        auto out = gen.generate (r, quiet);
+        const double sec = (juce::Time::getMillisecondCounterHiRes() - t0) / 1000.0;
+        scores.push_back (bench::score (out, r, sec));
+        std::printf ("fresh  %-26s %d/%d in %3.0f s  conn %.1f  lfo %.0f%%  custom %.0f%%  violations %d\n", prompt[0] ? prompt : "(no prompt)",
+                     (int) out.size(), r.count, sec, scores.back().meanConnections, 100 * scores.back().lfoShare, 100 * scores.back().customShare, scores.back().rawViolations);
+        std::fflush (stdout);
+        if (! out.empty()) firstResults.push_back (out.front());
+    }
+    for (size_t i = 0; i < juce::jmin ((size_t) 2, firstResults.size()); ++i)
+    {
+        GenerationRequest e;
+        e.count = 3;
+        e.parents = { firstResults[i] };
+        e.designWaves = true;
+        const auto t0 = juce::Time::getMillisecondCounterHiRes();
+        auto out = gen.generate (e, quiet);
+        const double sec = (juce::Time::getMillisecondCounterHiRes() - t0) / 1000.0;
+        scores.push_back (bench::score (out, e, sec));
+        scores.back().prompt = "evolve: " + firstResults[i].name;
+        std::printf ("evolve %-26s %d/%d in %3.0f s  diff from parent %.1f  between %.1f  violations %d\n", firstResults[i].name.toRawUTF8(),
+                     (int) out.size(), e.count, sec, scores.back().meanDiffFromParent, scores.back().meanDiffBetweenSiblings, scores.back().rawViolations);
+        std::fflush (stdout);
+    }
+
+    const double total = bench::composite (scores);
+    std::printf ("\nBENCH SCORE %.1f / 100  (%s)\n", total, chosen->label.toRawUTF8());
+
+    // Write the record next to the sources, so the history travels with the repo.
+    auto dir = juce::File::getCurrentWorkingDirectory().getChildFile ("Benchmarks");
+    if (! dir.isDirectory()) dir = juce::File (__FILE__).getParentDirectory().getParentDirectory().getChildFile ("Benchmarks");
+    dir.createDirectory();
+    const auto stamp = juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H.%M");
+    auto* root = new juce::DynamicObject();
+    root->setProperty ("date", stamp);
+    root->setProperty ("label", label);
+    root->setProperty ("model", chosen->label);
+    root->setProperty ("score", std::round (total * 10.0) / 10.0);
+    juce::Array<juce::var> arr;
+    for (const auto& s : scores) arr.add (bench::toVar (s));
+    root->setProperty ("batches", arr);
+    dir.getChildFile ("bench " + stamp + ".json").replaceWithText (juce::JSON::toString (juce::var (root)));
+
+    auto table = dir.getChildFile ("README.md");
+    if (! table.existsAsFile())
+        table.replaceWithText ("# AI benchmarks\n\nRun `StacksTests --bench <label>` after changing the prompt, grammar or guard. "
+                               "Score is 0-100 over delivery, movement, designed tables, hint adherence, in-key output before the guard, "
+                               "evolve diversity and speed (see Tests/Tests.cpp).\n\n| date | label | model | score | notes |\n|---|---|---|---|---|\n");
+    juce::String notes;
+    for (const auto& s : scores)
+        if (s.mode == "fresh") notes << s.delivered << "/" << s.requested << " ";
+    table.appendText ("| " + stamp + " | " + label + " | " + chosen->label + " | " + juce::String (total, 1) + " | fresh " + notes.trim() + " |\n");
+    std::printf ("written to %s\n", dir.getFullPathName().toRawUTF8());
+    return 0;
+}
+
 int main (int argc, char** argv)
 {
+    if (argc > 1 && juce::String (argv[1]) == "--bench")
+        return benchmark (argc > 2 ? juce::String::fromUTF8 (argv[2]) : juce::String ("unlabelled"));
     if (argc > 1 && juce::String (argv[1]) == "--live")
         return liveTest (argc > 2 ? juce::String::fromUTF8 (argv[2]) : juce::String());
 

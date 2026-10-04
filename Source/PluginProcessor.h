@@ -156,6 +156,9 @@ public:
     bool importWavetable (const juce::File&, int slot, juce::String& error); // copies into the folder, loads, names the slot
     int firstFreeUserSlot() const;
 
+    // The last few thousand output samples (mono), for the scope. Any thread may read.
+    void copyRecentOutput (float* dest, int count) const;
+
     // Drawn LFO shapes and the tables the UI can display
     LfoPoints lfoPoints (int k) const;
     void setLfoPoints (int k, const LfoPoints&);
@@ -206,6 +209,9 @@ private:
     DelayFx delay;
     ReverbFx reverb;
     juce::AudioBuffer<float> fxBuffer;                    // stereo scratch when the host gives us mono
+    static constexpr int kScopeSize = 8192;
+    std::array<float, kScopeSize> scopeRing {};
+    std::atomic<int> scopeWrite { 0 };
     juce::SmoothedValue<float> masterGain;
     double currentSampleRate = 44100.0;
     double currentBpm = 120.0;

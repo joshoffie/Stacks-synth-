@@ -60,6 +60,7 @@ public:
 
 private:
     class RowContainer;
+    class HelpStrip;
     struct Section
     {
         juce::String title;
@@ -97,6 +98,7 @@ private:
     std::vector<Row> rows;
     std::unique_ptr<ModulatorsPanel> modulators;
     std::vector<std::unique_ptr<juce::TextButton>> viewButtons;
+    std::unique_ptr<HelpStrip> help;
     int viewMode = -1;                                        // -1 = all
     int assigningSource = -1;
 };

@@ -5,6 +5,7 @@
 #include "PluginProcessor.h"
 #include "Controls.h"
 #include "StacksLookAndFeel.h"
+#include "Displays.h"
 #include "SynthPanel.h"
 #include "LabPanel.h"
 
@@ -30,6 +31,7 @@ private:
 
     juce::Label title, patchName;
     ParamKnob masterKnob;
+    ScopeView scope;
     SynthPanel synthPanel;
     LabPanel labPanel;
     juce::MidiKeyboardComponent keyboard;
