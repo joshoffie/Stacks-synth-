@@ -7,6 +7,7 @@
 #include "SynthVoice.h"
 #include "Patch.h"
 #include "PatchGenerator.h"
+#include "Effects.h"
 #include "ai/ModelManager.h"
 #include "ai/LlamaBackend.h"
 
@@ -110,7 +111,7 @@ public:
 
 private:
     void startGeneration (GenerationRequest);
-    void addCandidate (int token, Patch, bool insertAtTop);
+    void addCandidate (int token, Patch);
     void setStatus (int token, const juce::String&);
     void finishGeneration (int token);
     void loadEngineFromSettings();
@@ -128,14 +129,13 @@ private:
     juce::Synthesiser synth;
 
     // Master effects
-    juce::dsp::Chorus<float> chorus;
-    juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> delay { 96000 };
-    juce::SmoothedValue<float> delaySamples;
-    float delayFeedbackState[2] {};
-    juce::dsp::Reverb reverb;
-    juce::AudioBuffer<float> wetBuffer;
+    ChorusFx chorus;
+    DelayFx delay;
+    ReverbFx reverb;
+    juce::AudioBuffer<float> fxBuffer;                    // stereo scratch when the host gives us mono
     juce::SmoothedValue<float> masterGain;
     double currentSampleRate = 44100.0;
+    double currentBpm = 120.0;
 
     // Lab
     std::shared_ptr<PatchGenerator> randomGenerator;
@@ -149,8 +149,8 @@ private:
     juce::ThreadPool pool { 2 };
     LabState labState;
     juce::String patchName { "Init" };
+    juce::String patchCategory, patchOrigin;               // of the loaded patch, for the Now Playing card
     int generationToken = 0;                               // bumps per request; stale callbacks are ignored
-    int aiInserted = 0;                                    // AI patches placed at the top of the current batch
     std::atomic<bool> cancelRequested { false };
 
     JUCE_DECLARE_WEAK_REFERENCEABLE (StacksAudioProcessor)

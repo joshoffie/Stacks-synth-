@@ -29,10 +29,30 @@ Every build copies the plug-in into `~/Library/Audio/Plug-Ins/Components`
   Hoffman Audio → Stacks. If it is missing, Logic Pro → Settings →
   Plug-in Manager → select Stacks → *Reset & Rescan Selection*, or restart Logic.
 
+## The panel
+
+Controls sit in fixed rows that follow the signal path, each row captioned and
+colour-coded (knob colour = row):
+
+1. **SOUND** — Osc A, Osc B (morphing wavetables), Mix (sub, noise, FM B→A)
+2. **FILTER** — ladder filter, its envelope, the amp envelope
+3. **MOVEMENT** — Mod Env (a free third ADSR), LFO 1, LFO 2, Voice (unison, glide)
+4. **MATRIX** — six modulation slots: source → destination × amount. Sources:
+   LFO 1/2, Filter Env, Mod Env, Velocity, Key, Mod Wheel, Aftertouch, per-note
+   Random. Destinations: Pitch, Pitch B, Filter, Resonance, Morph A/B, FM, Amp,
+   Pan, LFO rates, B Level, Noise.
+5. **SPACE** — chorus, delay, reverb
+
+Every generated patch (random or AI) passes a tuning guard: oscillator A only at
+octaves, an audible oscillator B only at octaves, fine detune and pitch
+modulation capped, so nothing comes out of key with what you play.
+
 ## The AI Lab
 
-1. **New batch** — ten candidate patches. **Evolve** — ten descendants of your
-   favourites (or of whatever you are hearing, if you have no favourites yet).
+1. **Fresh ideas** — ten new patches from the direction text alone. **Evolve** —
+   ten descendants of your ♥ favourites (or of the sound you're playing, if you
+   have none). The sound you're playing is never replaced; it stays pinned at
+   the top as *Now Playing*.
 2. Click a card to load it and play; click its ♥ to keep it as a parent.
 3. Type a direction ("darker", "more movement", "plucky") to steer the next round.
 
@@ -52,8 +72,9 @@ Every build copies the plug-in into `~/Library/Audio/Plug-Ins/Components`
 - *Ollama app* — the same models served by a running [Ollama](https://ollama.com).
   Handy for experiments; friends don't need it.
 
-Per batch the AI designs 5 patches that stream in at the top of the list
-(tagged ✦ AI) while the random breeder fills the other 5 instantly.
+Per batch the AI designs 5 patches that stream into the **✦ AI IDEAS** section
+as they arrive, while the random breeder's 5 land in a folded **RANDOM
+VARIATIONS** section underneath.
 
 The engine choice is stored in `~/Library/Application Support/Stacks/`, next to
 `llama.log` (runtime + speed stats), `last-ai-prompt.txt`, `last-ai-reply.txt`

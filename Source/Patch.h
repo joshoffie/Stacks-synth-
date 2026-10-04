@@ -41,6 +41,11 @@ struct Patch
     void applyTo (juce::AudioProcessorValueTreeState&) const;
 };
 
+// Keeps a patch in tune with the note that is played: oscillator A only at
+// octaves, an audible oscillator B only at octaves (classic FM ratios are
+// allowed when B is a silent modulator), fine detune and pitch-LFO depth capped.
+void keepPatchInTune (Patch&);
+
 // A short, human-readable account of how a patch is built
 // ("Saw + Pulse(-12), 4-voice unison, LP24 @ 1.2 kHz, slow attack, big reverb").
 juce::String describePatch (const Patch&);

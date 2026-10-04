@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <array>
 
 #include "Parameters.h"
 
@@ -24,6 +25,7 @@ class ParamKnob : public juce::Component
 public:
     // compact = no value read-out underneath (used in the header)
     ParamKnob (juce::AudioProcessorValueTreeState&, const ParamSpec&, bool compact = false);
+    void setAccent (juce::Colour);
     void resized() override;
 
 private:
@@ -45,29 +47,62 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> attachment;
 };
 
-// All the synth controls, grouped into sections and flowed into rows.
+// The six modulation slots as a compact source -> destination x amount table.
+class ModMatrixPanel : public juce::Component
+{
+public:
+    static constexpr int kWidth = 616;
+    ModMatrixPanel (juce::AudioProcessorValueTreeState&, juce::Colour accent);
+    void resized() override;
+    void paint (juce::Graphics&) override;
+
+private:
+    struct Slot
+    {
+        juce::ComboBox source, dest;
+        juce::Slider amount;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> sourceAttachment, destAttachment;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> amountAttachment;
+    };
+    std::array<Slot, kNumModSlots> slots;
+};
+
+// All the synth controls in fixed, captioned rows that follow the signal path.
 class SynthPanel : public juce::Component
 {
 public:
-    static constexpr int kCell = 60, kChoiceCell = 82, kCellH = 86, kTitleH = 16, kPad = 6, kGap = 6;
+    static constexpr int kCell = 60, kChoiceCell = 82, kCellH = 86, kTitleH = 16, kPad = 6, kGap = 6, kBand = 20;
 
     explicit SynthPanel (juce::AudioProcessorValueTreeState&);
     void resized() override;
     void paint (juce::Graphics&) override;
-    int heightForWidth (int width);
+    int preferredHeight() const;
 
 private:
     struct Section
     {
         juce::String title;
+        juce::Colour colour;
         std::vector<std::pair<juce::Component*, int>> controls; // component, width
+        std::vector<const ParamSpec*> advanced;                  // shown in a pop-out
+        std::unique_ptr<juce::TextButton> moreButton;
+        juce::Rectangle<int> bounds;
+    };
+    struct Row
+    {
+        juce::String caption;
+        juce::Colour colour;
+        std::vector<Section*> sections;
         juce::Rectangle<int> bounds;
     };
 
-    int layout (int width, bool apply);
+    Section* findSection (const juce::String& title);
+    void showAdvanced (Section&);
 
+    juce::AudioProcessorValueTreeState& apvts;
     std::vector<std::unique_ptr<juce::Component>> controls;
-    std::vector<Section> sections;
+    std::vector<std::unique_ptr<Section>> sections;
+    std::vector<Row> rows;
 };
 
 } // namespace stacks

@@ -191,13 +191,23 @@ juce::String LlmPatchGenerator::systemPrompt()
       << "Sync = aggressive hard-sync (morph raises the sync pitch); Organ = drawbars (morph changes the registration); "
       << "Formant = vocal (morph moves the formant up); Glass = sparse bell-like partials; "
       << "Fold = wavefolded sine (morph adds folds, saturated); Grit = noisy random harmonics (digital, lo-fi).\n"
+      << "Modulation is routed with the six matrix slots (modN_source, modN_dest, modN_amount); LFOs do nothing until a slot routes them. "
+      << "Typical routings: LFO 1 > Morph A 0.2-0.5 for slow movement (lfo1_rate 0.05-0.5); LFO 1 > Pitch 0.02-0.05 with lfo1_rate 4-7 for vibrato; "
+      << "Velocity > Filter 0.2-0.5 so playing dynamics matter; Mod Env > FM or Morph A 0.3-0.6 for an evolving attack (set menv_decay 0.2-1, menv_sustain 0); "
+      << "Mod Wheel > Filter 0.3-0.6 for live control; Random > Morph A 0.1-0.3 for subtle per-note variation.\n"
+      << "Effects: reverb_type Shimmer with reverb_shimmer 0.3-0.7 gives a glowing octave-up halo (pads, textures); Hall for long tails, Room for short; "
+      << "chorus_mode Ensemble is a lush string-machine, Dimension is wide and subtle, Flanger needs chorus_feedback 0.4-0.8; "
+      << "delay_mode Ping-Pong with delay_sync 1/8 or 1/8D suits plucks and leads, Tape is dark and wobbly.\n"
       << "Musical guidance: pads want aenv_attack 0.3-2, long release, unison 3-4, chorus and reverb; "
       << "plucks want aenv_decay 0.1-0.6, aenv_sustain near 0, filter_env 2-4 with fenv_decay 0.05-0.4; "
       << "basses want sub_level, filter_cutoff 80-800, oscA_coarse -12; "
-      << "bells want fm_amount 0.3-0.8 with oscB_coarse 7, 12, 19 or 24 and aenv_sustain 0; "
-      << "leads want glide 0.03-0.15 and vibrato (an LFO on Pitch at 4-7 Hz, amount 0.05-0.15); "
-      << "textures want Grit, Formant or Fold, some noise, LFOs on Morph A or FM, and long delay feedback.\n"
-      << "Avoid filter_res above 0.8 together with filter_drive above 4, aenv_attack above 3, and an LFO on Pitch above amount 0.3 unless a wobble is wanted.\n\n"
+      << "bells want fm_amount 0.3-0.8 with oscB_coarse 7, 12, 19 or 24 (B as a silent modulator) and aenv_sustain 0; "
+      << "leads want glide 0.03-0.15 and vibrato; "
+      << "textures want Grit, Formant or Fold, some noise, LFOs routed to Morph A or FM, and long delay feedback.\n"
+      << "Stay in tune with the played note: oscA_coarse only -24, -12, 0, 12 or 24; oscB_coarse at octaves when oscB_level is above 0.05, "
+      << "or 7, 19 or 24 only when B is a silent FM modulator; keep oscA_fine within -12..12 and oscB_fine within -20..20 cents; "
+      << "a slot to Pitch is only for vibrato (LFO, amount up to 0.08) or an attack pitch drop (Mod Env, amount up to 0.35); never Velocity, Key or Random to Pitch.\n"
+      << "Avoid filter_res above 0.8 together with filter_drive above 4, and aenv_attack above 3.\n\n"
       << "Reply with JSON only, no prose, in exactly this shape:\n"
       << "{\"patches\": [{\"name\": \"Two Words\", \"category\": \"Pad\", \"description\": \"one vivid sentence about how it sounds\", "
       << "\"parent\": 1, \"params\": {\"oscA_wave\": \"Saw\", \"filter_cutoff\": 1200}}]}\n"
@@ -288,6 +298,14 @@ juce::String LlmPatchGenerator::grammar (int patchCount)
                 options.add (lit ("\"" + c + "\""));
             g << "(" << options.joinIntoString (" | ") << ")";
         }
+        else if (std::string (spec.id) == "oscA_coarse")
+        {
+            g << "(\"-24\" | \"-12\" | \"0\" | \"12\" | \"24\")";
+        }
+        else if (std::string (spec.id) == "oscB_coarse")
+        {
+            g << "(\"-24\" | \"-12\" | \"0\" | \"7\" | \"12\" | \"19\" | \"24\")";
+        }
         else if (spec.kind == ParamKind::Int)
         {
             g << "sint";
@@ -369,6 +387,7 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& req, co
             if (parent.name.equalsIgnoreCase (patch->name))
                 patch->name << " II";
 
+        keepPatchInTune (*patch);
         patch->set (P::master_gain, -6.0f);
         patch->origin = "AI";
         patch->name = spaceOutCamelCase (patch->name).substring (0, 28);

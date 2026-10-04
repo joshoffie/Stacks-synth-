@@ -87,23 +87,10 @@ void StacksAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
     currentSampleRate = sampleRate;
     synth.setCurrentPlaybackSampleRate (sampleRate);
 
-    juce::dsp::ProcessSpec spec { sampleRate, (juce::uint32) juce::jmax (1, samplesPerBlock), 2 };
-
-    chorus.prepare (spec);
-    chorus.reset();
-    chorus.setCentreDelay (7.0f);
-    chorus.setFeedback (0.0f);
-
-    delay.prepare (spec);
-    delay.setMaximumDelayInSamples ((int) (2.0 * sampleRate) + 2);
-    delay.reset();
-    delayFeedbackState[0] = delayFeedbackState[1] = 0.0f;
-    delaySamples.reset (sampleRate, 0.05);
-    delaySamples.setCurrentAndTargetValue (rawParams[(size_t) P::delay_time]->load() * (float) sampleRate);
-
-    reverb.prepare (spec);
-    reverb.reset();
-    wetBuffer.setSize (2, juce::jmax (1, samplesPerBlock));
+    chorus.prepare (sampleRate, samplesPerBlock);
+    delay.prepare (sampleRate, samplesPerBlock);
+    reverb.prepare (sampleRate, samplesPerBlock);
+    fxBuffer.setSize (2, juce::jmax (1, samplesPerBlock));
 
     masterGain.reset (sampleRate, 0.02);
     masterGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (rawParams[(size_t) P::master_gain]->load()));
@@ -126,75 +113,74 @@ void StacksAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     for (int i = 0; i < kNumParams; ++i)
         params.v[i] = rawParams[(size_t) i]->load();
 
+    if (auto* playHead = getPlayHead())
+        if (auto position = playHead->getPosition())
+            if (auto bpm = position->getBpm())
+                currentBpm = *bpm;
+
     synth.renderNextBlock (buffer, midi, 0, numSamples);
     processEffects (buffer);
 }
 
 void StacksAudioProcessor::processEffects (juce::AudioBuffer<float>& buffer)
 {
-    const int numCh = juce::jmin (2, buffer.getNumChannels());
     const int n = buffer.getNumSamples();
-    if (numCh == 0 || n == 0)
+    if (buffer.getNumChannels() == 0 || n == 0)
         return;
 
-    juce::dsp::AudioBlock<float> block (buffer);
-    auto mainBlock = block.getSubsetChannelBlock (0, (size_t) numCh);
-
-    // Chorus
-    const float chorusMix = params.get (P::chorus_mix);
-    if (chorusMix > 0.0005f)
+    // The effects are stereo; a mono host gets a mono fold-down of the result.
+    const bool mono = buffer.getNumChannels() < 2;
+    juce::AudioBuffer<float>* target = &buffer;
+    if (mono)
     {
-        chorus.setRate (params.get (P::chorus_rate));
-        chorus.setDepth (params.get (P::chorus_depth));
-        chorus.setMix (chorusMix);
-        juce::dsp::ProcessContextReplacing<float> ctx (mainBlock);
-        chorus.process (ctx);
+        fxBuffer.setSize (2, n, false, false, true);
+        fxBuffer.copyFrom (0, 0, buffer, 0, 0, n);
+        fxBuffer.copyFrom (1, 0, buffer, 0, 0, n);
+        target = &fxBuffer;
     }
 
-    // Delay with a one-pole low-pass in the feedback path
+    ChorusFx::Params cp;
+    cp.mode = params.geti (P::chorus_mode);
+    cp.rate = params.get (P::chorus_rate);
+    cp.depth = params.get (P::chorus_depth);
+    cp.mix = params.get (P::chorus_mix);
+    cp.voices = params.geti (P::chorus_voices);
+    cp.feedback = params.get (P::chorus_feedback);
+    cp.spread = params.get (P::chorus_spread);
+    cp.toneHz = params.get (P::chorus_tone);
+    if (cp.mix > 0.0005f)
+        chorus.process (*target, cp);
+
+    DelayFx::Params dp;
+    dp.mode = params.geti (P::delay_mode);
+    dp.sync = params.geti (P::delay_sync);
+    dp.timeSec = params.get (P::delay_time);
+    dp.feedback = params.get (P::delay_feedback);
+    dp.mix = params.get (P::delay_mix);
+    dp.toneHz = params.get (P::delay_tone);
+    dp.hpfHz = params.get (P::delay_hpf);
+    dp.wow = params.get (P::delay_wow);
+    dp.width = params.get (P::delay_width);
+    delay.process (*target, dp, currentBpm); // always runs so repeats ring out when the mix is pulled down
+
+    ReverbFx::Params rp;
+    rp.type = params.geti (P::reverb_type);
+    rp.size = params.get (P::reverb_size);
+    rp.damp = params.get (P::reverb_damp);
+    rp.mix = params.get (P::reverb_mix);
+    rp.predelayMs = params.get (P::reverb_predelay);
+    rp.lowCutHz = params.get (P::reverb_lowcut);
+    rp.highCutHz = params.get (P::reverb_highcut);
+    rp.mod = params.get (P::reverb_mod);
+    rp.shimmer = params.get (P::reverb_shimmer);
+    rp.width = params.get (P::reverb_width);
+    if (rp.mix > 0.0005f)
+        reverb.process (*target, rp);
+
+    if (mono)
     {
-        const float mix = params.get (P::delay_mix);
-        const float fb  = params.get (P::delay_feedback);
-        delaySamples.setTargetValue (params.get (P::delay_time) * (float) currentSampleRate);
-
-        for (int i = 0; i < n; ++i)
-        {
-            const float d = delaySamples.getNextValue();
-            for (int ch = 0; ch < numCh; ++ch)
-            {
-                auto* x = buffer.getWritePointer (ch);
-                const float in = x[i];
-                delay.pushSample (ch, in + fb * delayFeedbackState[ch]);
-                const float wet = delay.popSample (ch, d);
-                delayFeedbackState[ch] += 0.4f * (wet - delayFeedbackState[ch]);
-                x[i] = in + mix * wet;
-            }
-        }
-    }
-
-    // Reverb, run in parallel and mixed in
-    const float reverbMix = params.get (P::reverb_mix);
-    if (reverbMix > 0.0005f)
-    {
-        juce::Reverb::Parameters rp;
-        rp.roomSize   = params.get (P::reverb_size);
-        rp.damping    = params.get (P::reverb_damp);
-        rp.wetLevel   = 0.33f;
-        rp.dryLevel   = 0.0f;
-        rp.width      = 1.0f;
-        rp.freezeMode = 0.0f;
-        reverb.setParameters (rp);
-
-        wetBuffer.setSize (numCh, n, false, false, true);
-        for (int ch = 0; ch < numCh; ++ch)
-            wetBuffer.copyFrom (ch, 0, buffer, ch, 0, n);
-
-        juce::dsp::AudioBlock<float> wet (wetBuffer);
-        juce::dsp::ProcessContextReplacing<float> ctx (wet);
-        reverb.process (ctx);
-
-        for (int ch = 0; ch < numCh; ++ch)
-            buffer.addFrom (ch, 0, wetBuffer, ch, 0, n, reverbMix);
+        buffer.copyFrom (0, 0, fxBuffer.getReadPointer (0), n, 0.5f);
+        buffer.addFrom (0, 0, fxBuffer, 1, 0, n, 0.5f);
     }
 
     // Master gain + safety clip
@@ -202,7 +188,7 @@ void StacksAudioProcessor::processEffects (juce::AudioBuffer<float>& buffer)
     for (int i = 0; i < n; ++i)
     {
         const float g = masterGain.getNextValue();
-        for (int ch = 0; ch < numCh; ++ch)
+        for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
         {
             auto* x = buffer.getWritePointer (ch);
             x[i] = softClip (x[i] * g);
@@ -262,9 +248,9 @@ Patch StacksAudioProcessor::currentPatch() const
 {
     auto p = Patch::capture (apvts);
     p.name = patchName;
+    p.category = patchCategory;
+    p.origin = patchOrigin;
     p.description = describePatch (p);
-    if (labState.auditioned >= 0 && labState.auditioned < (int) labState.candidates.size())
-        p.category = labState.candidates[(size_t) labState.auditioned].category;
     return p;
 }
 
@@ -272,6 +258,8 @@ void StacksAudioProcessor::applyPatch (const Patch& p)
 {
     p.applyTo (apvts);
     patchName = p.name;
+    patchCategory = p.category;
+    patchOrigin = p.origin;
 }
 
 void StacksAudioProcessor::setCurrentPatchName (const juce::String& name)
@@ -460,9 +448,9 @@ void StacksAudioProcessor::startGeneration (GenerationRequest req)
 
     const int token = ++generationToken;
     cancelRequested = false;
-    aiInserted = 0;
 
-    // The new batch replaces the old one right away so streamed results have somewhere to land.
+    // The new batch replaces the old list right away so streamed results have
+    // somewhere to land. The sound that is loaded stays exactly as it is.
     if (! labState.candidates.empty())
     {
         labState.history.push_back (std::move (labState.candidates));
@@ -478,15 +466,15 @@ void StacksAudioProcessor::startGeneration (GenerationRequest req)
     const bool usingAi = generator != randomGenerator;
     juce::WeakReference<StacksAudioProcessor> weak (this);
 
-    auto makeProgress = [weak, token, this] (bool insertAtTop)
+    auto makeProgress = [weak, token, this]
     {
         GenerationProgress progress;
-        progress.onPatch = [weak, token, insertAtTop] (const Patch& p)
+        progress.onPatch = [weak, token] (const Patch& p)
         {
-            juce::MessageManager::callAsync ([weak, token, insertAtTop, p]
+            juce::MessageManager::callAsync ([weak, token, p]
             {
                 if (auto* self = weak.get())
-                    self->addCandidate (token, p, insertAtTop);
+                    self->addCandidate (token, p);
             });
         };
         progress.onStatus = [weak, token] (const juce::String& s)
@@ -508,13 +496,11 @@ void StacksAudioProcessor::startGeneration (GenerationRequest req)
         quick.count = kBatchSize - kAiPatchesPerBatch;
         for (auto& p : randomGenerator->generate (quick, {}))
             labState.candidates.push_back (std::move (p));
-        if (! labState.candidates.empty())
-            audition (0);
 
         GenerationRequest aiReq = req;
         aiReq.count = kAiPatchesPerBatch;
         auto gen = generator;
-        auto progress = makeProgress (true);
+        auto progress = makeProgress();
         pool.addJob ([gen, aiReq, progress, weak, token]
         {
             gen->generate (aiReq, progress);
@@ -528,7 +514,7 @@ void StacksAudioProcessor::startGeneration (GenerationRequest req)
     else
     {
         auto gen = generator;
-        auto progress = makeProgress (false);
+        auto progress = makeProgress();
         pool.addJob ([gen, req, progress, weak, token]
         {
             gen->generate (req, progress);
@@ -543,28 +529,15 @@ void StacksAudioProcessor::startGeneration (GenerationRequest req)
     labBroadcaster.sendChangeMessage();
 }
 
-void StacksAudioProcessor::addCandidate (int token, Patch p, bool insertAtTop)
+void StacksAudioProcessor::addCandidate (int token, Patch p)
 {
     if (token != generationToken)
         return;
 
-    if (insertAtTop)
-    {
-        const int index = juce::jmin (aiInserted, (int) labState.candidates.size());
-        labState.candidates.insert (labState.candidates.begin() + index, std::move (p));
-        if (labState.auditioned >= index)
-            ++labState.auditioned;
-        ++aiInserted;
-    }
-    else
-    {
-        labState.candidates.push_back (std::move (p));
-    }
-
-    if (labState.auditioned < 0)
-        audition (0);
-    else
-        labBroadcaster.sendChangeMessage();
+    // Appended, never auditioned automatically: the panel groups AI ideas and
+    // random variations, and the player decides what to hear next.
+    labState.candidates.push_back (std::move (p));
+    labBroadcaster.sendChangeMessage();
 }
 
 void StacksAudioProcessor::setStatus (int token, const juce::String& s)
@@ -602,7 +575,7 @@ void StacksAudioProcessor::goBackGeneration()
     labState.generation = juce::jmax (1, labState.generation - 1);
     labState.status = "Generation " + juce::String (labState.generation) + "  (restored)";
     labState.auditioned = -1;
-    audition (0);
+    labBroadcaster.sendChangeMessage();
 }
 
 void StacksAudioProcessor::audition (int index)
@@ -669,6 +642,8 @@ juce::String StacksAudioProcessor::labToJson() const
     obj->setProperty ("generation", labState.generation);
     obj->setProperty ("auditioned", labState.auditioned);
     obj->setProperty ("patchName", patchName);
+    obj->setProperty ("patchCategory", patchCategory);
+    obj->setProperty ("patchOrigin", patchOrigin);
     obj->setProperty ("candidates", toArray (labState.candidates));
     obj->setProperty ("favourites", toArray (labState.favourites));
     return juce::JSON::toString (juce::var (obj), true);
@@ -702,6 +677,8 @@ void StacksAudioProcessor::labFromJson (const juce::String& json)
     const auto savedName = obj->getProperty ("patchName").toString();
     if (savedName.isNotEmpty())
         patchName = savedName;
+    patchCategory = obj->getProperty ("patchCategory").toString();
+    patchOrigin = obj->getProperty ("patchOrigin").toString();
 
     if (labState.auditioned >= (int) labState.candidates.size())
         labState.auditioned = -1;

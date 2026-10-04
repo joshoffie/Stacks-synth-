@@ -22,10 +22,67 @@ const juce::StringArray& lfoShapeNames()
     return names;
 }
 
-const juce::StringArray& lfoDestNames()
+const juce::StringArray& modSourceNames()
 {
-    static const juce::StringArray names { "Off", "Pitch", "Filter", "Morph A", "Morph B", "FM", "Amp", "Pan" };
+    static const juce::StringArray names { "Off", "LFO 1", "LFO 2", "Filter Env", "Mod Env", "Velocity", "Key", "Mod Wheel", "Aftertouch", "Random" };
     return names;
+}
+
+const juce::StringArray& modDestNames()
+{
+    static const juce::StringArray names { "Off", "Pitch", "Pitch B", "Filter", "Resonance", "Morph A", "Morph B", "FM", "Amp", "Pan",
+                                           "LFO1 Rate", "LFO2 Rate", "B Level", "Noise" };
+    return names;
+}
+
+const juce::StringArray& chorusModeNames()
+{
+    static const juce::StringArray names { "Chorus", "Ensemble", "Flanger", "Dimension" };
+    return names;
+}
+
+const juce::StringArray& delayModeNames()
+{
+    static const juce::StringArray names { "Stereo", "Ping-Pong", "Tape" };
+    return names;
+}
+
+const juce::StringArray& delaySyncNames()
+{
+    static const juce::StringArray names { "Free", "1/16", "1/8T", "1/8", "1/8D", "1/4", "1/4D", "1/2" };
+    return names;
+}
+
+const juce::StringArray& reverbTypeNames()
+{
+    static const juce::StringArray names { "Room", "Plate", "Hall", "Shimmer" };
+    return names;
+}
+
+bool isAdvancedParam (const char* id)
+{
+    static const juce::StringArray advanced { "chorus_voices", "chorus_feedback", "chorus_spread", "chorus_tone",
+                                              "delay_tone", "delay_hpf", "delay_wow", "delay_width",
+                                              "reverb_predelay", "reverb_lowcut", "reverb_highcut", "reverb_mod", "reverb_shimmer", "reverb_width" };
+    return advanced.contains (id);
+}
+
+P modSourceParam (int slot)
+{
+    static const P table[kNumModSlots] = { P::mod1_source, P::mod2_source, P::mod3_source, P::mod4_source, P::mod5_source, P::mod6_source };
+    return table[juce::jlimit (0, kNumModSlots - 1, slot)];
+}
+
+P modDestParam (int slot)
+{
+    static const P table[kNumModSlots] = { P::mod1_dest, P::mod2_dest, P::mod3_dest, P::mod4_dest, P::mod5_dest, P::mod6_dest };
+    return table[juce::jlimit (0, kNumModSlots - 1, slot)];
+}
+
+P modAmountParam (int slot)
+{
+    static const P table[kNumModSlots] = { P::mod1_amount, P::mod2_amount, P::mod3_amount, P::mod4_amount, P::mod5_amount, P::mod6_amount };
+    return table[juce::jlimit (0, kNumModSlots - 1, slot)];
 }
 
 const std::vector<ParamSpec>& paramSpecs()
@@ -62,6 +119,7 @@ namespace
             return juce::String (v, 1);
         }
         if (unit == "s")   return v < 1.0f ? juce::String (juce::roundToInt (v * 1000.0f)) + "ms" : juce::String (v, 2) + "s";
+        if (unit == "ms")  return juce::String (juce::roundToInt (v)) + "ms";
         if (unit == "dB")  return juce::String (v, 1) + "dB";
         if (unit == "ct")  return juce::String (v, 1);
         return juce::String (v, 2);

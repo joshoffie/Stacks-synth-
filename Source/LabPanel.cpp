@@ -11,16 +11,22 @@ namespace
     constexpr int kOllamaUnavailableId = 99;
     constexpr int kBuiltinItemBase = 200;
 
+    const juce::Colour kRandomCard { 0xff23262c };
+    const juce::Colour kRandomTag  { 0xff7c828c };
+
     juce::String sizeText (juce::int64 bytes)
     {
         return juce::String ((double) bytes / 1.0e9, 1) + " GB";
     }
+
+    juce::String heart()  { return juce::String::fromUTF8 ("\xe2\x99\xa5"); }   // ♥
+    juce::String spark()  { return juce::String::fromUTF8 ("\xe2\x9c\xa6"); }   // ✦
 }
 
 //==============================================================================
 PatchCard::PatchCard()
 {
-    favButton.setButtonText (juce::String::fromUTF8 ("\xe2\x99\xa5")); // ♥
+    favButton.setButtonText (heart());
     favButton.setTitle ("Favourite");
     favButton.setColour (juce::TextButton::textColourOffId, colours::text);
     favButton.setColour (juce::TextButton::textColourOnId, colours::text);
@@ -28,12 +34,12 @@ PatchCard::PatchCard()
     addAndMakeVisible (favButton);
 }
 
-void PatchCard::set (const Patch& p, bool isAuditioned, bool isFavourite)
+void PatchCard::set (const Patch& p, Style s, bool isAuditioned, bool isFavourite)
 {
     name = p.name;
     description = p.description;
     category = p.category;
-    origin = p.origin;
+    style = s;
     auditioned = isAuditioned;
     favourite = isFavourite;
     favButton.setColour (juce::TextButton::buttonColourId, favourite ? colours::accent : colours::panel);
@@ -55,35 +61,65 @@ void PatchCard::mouseDown (const juce::MouseEvent&)
 void PatchCard::paint (juce::Graphics& g)
 {
     auto r = getLocalBounds().reduced (2).toFloat();
-    g.setColour (auditioned ? colours::accentDim : colours::card);
+    const bool isRandom = style == Style::random;
+    const bool isCurrent = style == Style::nowPlaying;
+
+    g.setColour (auditioned ? colours::accentDim : isRandom ? kRandomCard : colours::card);
     g.fillRoundedRectangle (r, 6.0f);
-    if (auditioned)
+    if (auditioned || isCurrent)
     {
-        g.setColour (colours::accent);
+        g.setColour (isCurrent ? colours::accent.withAlpha (0.7f) : colours::accent);
         g.drawRoundedRectangle (r.reduced (0.75f), 6.0f, 1.5f);
     }
 
     auto area = getLocalBounds().reduced (10, 6).withTrimmedRight (34);
     auto titleRow = area.removeFromTop (18);
 
-    g.setColour (colours::text);
-    g.setFont (juce::Font (juce::FontOptions (14.0f, juce::Font::bold)));
-    const int nameWidth = juce::jmin (titleRow.getWidth() - 70, juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), name) + 4);
+    g.setColour (isRandom ? colours::text.withAlpha (0.8f) : colours::text);
+    g.setFont (juce::Font (juce::FontOptions (isRandom ? 13.0f : 14.0f, juce::Font::bold)));
+    const int nameWidth = juce::jmin (titleRow.getWidth() - 90, juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), name) + 4);
     g.drawText (name, titleRow.removeFromLeft (nameWidth), juce::Justification::centredLeft, true);
 
-    g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
     juce::String tags = category.toUpperCase();
-    if (origin.isNotEmpty())
-        tags << (tags.isEmpty() ? "" : "  ") << juce::String::fromUTF8 ("\xe2\x9c\xa6 ") << origin.toUpperCase(); // ✦ AI
-    if (tags.isNotEmpty())
-    {
-        g.setColour (colours::accent);
-        g.drawText (tags, titleRow.withTrimmedLeft (6), juce::Justification::centredLeft, true);
-    }
+    juce::String badge = isCurrent ? "NOW PLAYING" : isRandom ? "RANDOM" : spark() + " AI";
+    if (tags.isNotEmpty()) tags << "  ";
+    tags << badge;
+
+    g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
+    g.setColour (isRandom ? kRandomTag : colours::accent);
+    g.drawText (tags, titleRow.withTrimmedLeft (6), juce::Justification::centredLeft, true);
 
     g.setColour (colours::muted);
     g.setFont (juce::Font (juce::FontOptions (11.0f)));
-    g.drawFittedText (description, area, juce::Justification::topLeft, 2, 0.9f);
+    g.drawFittedText (description, area, juce::Justification::topLeft, isRandom ? 1 : 2, 0.9f);
+}
+
+//==============================================================================
+void SectionHeader::set (const juce::String& t, bool c, bool e, juce::Colour col)
+{
+    title = t; collapsible = c; expanded = e; colour = col;
+    setMouseCursor (collapsible ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
+    repaint();
+}
+
+void SectionHeader::paint (juce::Graphics& g)
+{
+    auto r = getLocalBounds().reduced (6, 0);
+    g.setColour (colour);
+    g.setFont (juce::Font (juce::FontOptions (10.5f, juce::Font::bold)));
+    if (collapsible)
+    {
+        auto tri = r.removeFromLeft (14).toFloat().reduced (3.0f, 7.0f);
+        juce::Path p;
+        if (expanded)
+            p.addTriangle (tri.getX(), tri.getY(), tri.getRight(), tri.getY(), tri.getCentreX(), tri.getBottom());
+        else
+            p.addTriangle (tri.getX(), tri.getY(), tri.getRight(), tri.getCentreY(), tri.getX(), tri.getBottom());
+        g.fillPath (p);
+    }
+    g.drawText (title, r, juce::Justification::centredLeft);
+    g.setColour (colour.withAlpha (0.25f));
+    g.fillRect (r.removeFromBottom (1));
 }
 
 //==============================================================================
@@ -98,12 +134,12 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p)
     engineLabel.setColour (juce::Label::textColourId, colours::muted);
     addAndMakeVisible (engineLabel);
 
-    engineBox.setTooltip ("Who designs the patches: the built-in random breeder, or a local AI model served by Ollama");
+    engineBox.setTooltip ("Who designs the patches: the built-in random breeder, a model running inside Stacks, or the Ollama app");
     engineBox.onChange = [this] { engineChosen(); };
     addAndMakeVisible (engineBox);
 
     refreshEnginesButton.setButtonText (juce::String::fromUTF8 ("\xe2\x86\xbb")); // ↻
-    refreshEnginesButton.setTooltip ("Look for Ollama models again");
+    refreshEnginesButton.setTooltip ("Look for models again");
     refreshEnginesButton.onClick = [this] { processor.refreshOllamaModels(); };
     addAndMakeVisible (refreshEnginesButton);
 
@@ -125,7 +161,6 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p)
     variation.setTooltip ("How far the children may stray from their parents");
     addAndMakeVisible (variation);
 
-    newBatchButton.setTooltip ("Ten fresh patches from scratch");
     newBatchButton.onClick = [this]
     {
         if (processor.lab().generating)
@@ -151,6 +186,24 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p)
     addAndMakeVisible (favouritesLabel);
     addAndMakeVisible (favouriteStrip);
 
+    nowPlaying.onFavourite = [this]
+    {
+        const int idx = processor.indexOfFavourite (processor.currentPatch());
+        if (idx >= 0) processor.removeFavourite (idx);
+        else          processor.favouriteCurrent();
+    };
+    cardList.addAndMakeVisible (nowPlaying);
+
+    aiHeader.set (spark() + " AI IDEAS", false, true, colours::accent);
+    cardList.addAndMakeVisible (aiHeader);
+    randomHeader.onToggle = [this]
+    {
+        randomExpanded = ! randomExpanded;
+        randomExpandedByUser = true;
+        layoutCards();
+    };
+    cardList.addAndMakeVisible (randomHeader);
+
     viewport.setViewedComponent (&cardList, false);
     viewport.setScrollBarsShown (true, false);
     addAndMakeVisible (viewport);
@@ -171,10 +224,12 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p)
     processor.labBroadcaster.addChangeListener (this);
     rebuildEngineMenu();
     refresh();
+    startTimer (1000);
 }
 
 LabPanel::~LabPanel()
 {
+    stopTimer();
     processor.labBroadcaster.removeChangeListener (this);
 }
 
@@ -209,7 +264,7 @@ void LabPanel::resized()
     auto buttons = r.removeFromTop (28);
     backButton.setBounds (buttons.removeFromLeft (30));
     buttons.removeFromLeft (6);
-    newBatchButton.setBounds (buttons.removeFromLeft (100));
+    newBatchButton.setBounds (buttons.removeFromLeft (104));
     buttons.removeFromLeft (6);
     evolveButton.setBounds (buttons);
     r.removeFromTop (10);
@@ -239,11 +294,65 @@ void LabPanel::resized()
         x += w + 4;
     }
 
-    // Cards
-    const int cardWidth = viewport.getWidth() - (viewport.isVerticalScrollBarShown() ? viewport.getScrollBarThickness() : 0);
-    cardList.setSize (juce::jmax (1, cardWidth), (int) cards.size() * PatchCard::kHeight);
+    layoutCards();
+}
+
+// Now Playing, then the AI ideas, then the (foldable) random variations.
+void LabPanel::layoutCards()
+{
+    const auto& lab = processor.lab();
+    const int width = juce::jmax (1, viewport.getWidth() - (viewport.isVerticalScrollBarShown() ? viewport.getScrollBarThickness() : 0));
+    const bool aiEngine = processor.engine().kind != EngineKind::Random;
+
+    int aiCount = 0, randomCount = 0;
+    for (const auto& c : lab.candidates)
+        (c.origin == "AI" ? aiCount : randomCount)++;
+
+    const bool aiBusy = lab.generating && aiEngine;
+    const bool showAi = aiCount > 0 || aiBusy;
+    const bool expanded = randomExpandedByUser ? randomExpanded : ! showAi;
+
+    int y = 0;
+    nowPlaying.setBounds (0, y, width, PatchCard::kHeight);
+    y += PatchCard::kHeight + 4;
+
+    aiHeader.setVisible (showAi);
+    if (showAi)
+    {
+        juce::String title = spark() + " AI IDEAS";
+        if (aiBusy) title << "   -   designing " << (aiCount + 1) << " of " << StacksAudioProcessor::kAiPatchesPerBatch << "...";
+        aiHeader.set (title, false, true, colours::accent);
+        aiHeader.setBounds (0, y, width, SectionHeader::kHeight);
+        y += SectionHeader::kHeight;
+        for (int i = 0; i < (int) cards.size(); ++i)
+        {
+            if (lab.candidates[(size_t) i].origin != "AI") continue;
+            cards[(size_t) i]->setVisible (true);
+            cards[(size_t) i]->setBounds (0, y, width, PatchCard::kHeight);
+            y += PatchCard::kHeight;
+        }
+        y += 6;
+    }
+
+    randomHeader.setVisible (randomCount > 0);
+    if (randomCount > 0)
+    {
+        randomHeader.set ((showAi ? "RANDOM VARIATIONS (" : "RANDOM PATCHES (") + juce::String (randomCount) + ")", true, expanded, kRandomTag);
+        randomHeader.setBounds (0, y, width, SectionHeader::kHeight);
+        y += SectionHeader::kHeight;
+    }
     for (int i = 0; i < (int) cards.size(); ++i)
-        cards[(size_t) i]->setBounds (0, i * PatchCard::kHeight, cardList.getWidth(), PatchCard::kHeight);
+    {
+        if (lab.candidates[(size_t) i].origin == "AI") continue;
+        cards[(size_t) i]->setVisible (expanded);
+        if (expanded)
+        {
+            cards[(size_t) i]->setBounds (0, y, width, PatchCard::kCompactHeight);
+            y += PatchCard::kCompactHeight;
+        }
+    }
+
+    cardList.setSize (width, juce::jmax (y, 1));
 }
 
 void LabPanel::rebuildEngineMenu()
@@ -339,6 +448,21 @@ void LabPanel::engineChosen()
         processor.setEngine (choice);
 }
 
+void LabPanel::refreshNowPlaying()
+{
+    const auto current = processor.currentPatch();
+    const auto key = current.name + "|" + current.description + "|" + juce::String (processor.indexOfFavourite (current));
+    if (key == shownNowPlaying)
+        return;
+    shownNowPlaying = key;
+    nowPlaying.set (current, PatchCard::Style::nowPlaying, false, processor.indexOfFavourite (current) >= 0);
+}
+
+void LabPanel::timerCallback()
+{
+    refreshNowPlaying(); // knob tweaks change the description without any broadcast
+}
+
 void LabPanel::refresh()
 {
     const auto& lab = processor.lab();
@@ -349,14 +473,19 @@ void LabPanel::refresh()
 
     rebuildEngineMenu();
 
-    const int favCount = (int) lab.favourites.size();
-    evolveButton.setButtonText (favCount > 0 ? "Evolve from " + juce::String (favCount) + (favCount == 1 ? " favourite" : " favourites")
-                                             : "Evolve current sound");
     const bool busy = processor.isBusy();
+    const int favCount = (int) lab.favourites.size();
+    juce::String currentName = processor.currentPatchName();
+    if (currentName.length() > 20) currentName = currentName.substring (0, 19) + juce::String::fromUTF8 ("\xe2\x80\xa6");
+    evolveButton.setButtonText (favCount > 0 ? "Evolve " + juce::String (favCount) + " " + heart()
+                                             : "Evolve: " + currentName);
+    evolveButton.setTooltip (favCount > 0 ? "Ten descendants of your favourites, steered by the direction text"
+                                          : "Ten descendants of the sound you're playing now, steered by the direction text");
     evolveButton.setEnabled (! busy);
-    newBatchButton.setButtonText (busy ? "Stop" : "New batch");
+    newBatchButton.setButtonText (busy ? "Stop" : "Fresh ideas");
     newBatchButton.setTooltip (lab.generating ? "Stop generating; keep what has arrived"
-                             : processor.isDownloading() ? "Cancel the model download" : "Ten fresh patches from scratch");
+                             : processor.isDownloading() ? "Cancel the model download"
+                             : "Ten new patches from scratch. Uses the direction text, not the current sound.");
     backButton.setEnabled (! busy && ! lab.history.empty());
     engineBox.setEnabled (! busy);
 
@@ -389,8 +518,12 @@ void LabPanel::refresh()
     for (int i = 0; i < (int) cards.size(); ++i)
     {
         const auto& c = lab.candidates[(size_t) i];
-        cards[(size_t) i]->set (c, i == lab.auditioned, processor.indexOfFavourite (c) >= 0);
+        cards[(size_t) i]->set (c, c.origin == "AI" ? PatchCard::Style::ai : PatchCard::Style::random,
+                                i == lab.auditioned, processor.indexOfFavourite (c) >= 0);
     }
+
+    shownNowPlaying.clear();
+    refreshNowPlaying();
 
     // A new batch starts at the top of the list.
     if (lab.generation != shownGeneration)
@@ -400,7 +533,7 @@ void LabPanel::refresh()
     }
 
     status.setText (lab.status.isNotEmpty() ? lab.status
-                                            : "Engine: " + processor.engineName() + juce::String (juce::CharPointer_UTF8 ("  \xc2\xb7  press New batch to start")),
+                                            : "Engine: " + processor.engineName() + juce::String (juce::CharPointer_UTF8 ("  \xc2\xb7  press Fresh ideas to start")),
                     juce::dontSendNotification);
 
     resized();

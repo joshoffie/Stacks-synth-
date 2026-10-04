@@ -168,6 +168,61 @@ void Patch::applyTo (juce::AudioProcessorValueTreeState& apvts) const
 //==============================================================================
 namespace
 {
+    float snapTo (float value, std::initializer_list<float> allowed)
+    {
+        float best = *allowed.begin();
+        for (float a : allowed)
+            if (std::abs (a - value) < std::abs (best - value))
+                best = a;
+        return best;
+    }
+}
+
+void keepPatchInTune (Patch& p)
+{
+    // Oscillator A carries the note: octaves only.
+    p.set (P::oscA_coarse, snapTo (p.get (P::oscA_coarse), { -24.0f, -12.0f, 0.0f, 12.0f, 24.0f }));
+    p.set (P::oscA_fine, juce::jlimit (-12.0f, 12.0f, p.get (P::oscA_fine)));
+
+    // Oscillator B: octaves when you can hear it; as a pure FM modulator the
+    // harmonic ratios 1.5x (+7), 3x (+19) and 4x (+24) are fine too.
+    const bool audibleB = p.get (P::oscB_level) > 0.05f;
+    if (audibleB)
+    {
+        p.set (P::oscB_coarse, snapTo (p.get (P::oscB_coarse), { -24.0f, -12.0f, 0.0f, 12.0f, 24.0f }));
+        p.set (P::oscB_fine, juce::jlimit (-20.0f, 20.0f, p.get (P::oscB_fine)));
+    }
+    else
+    {
+        p.set (P::oscB_coarse, snapTo (p.get (P::oscB_coarse), { -24.0f, -12.0f, 0.0f, 7.0f, 12.0f, 19.0f, 24.0f }));
+        p.set (P::oscB_fine, juce::jlimit (-8.0f, 8.0f, p.get (P::oscB_fine)));
+    }
+
+    // Pitch modulation: vibrato, a short attack drop or a performance bend,
+    // never a per-note detune (Velocity/Key/Random would put chords out of tune).
+    for (int i = 0; i < kNumModSlots; ++i)
+    {
+        const int src = (int) p.get (modSourceParam (i));
+        const int dst = (int) p.get (modDestParam (i));
+        if (dst != DestPitch && ! (dst == DestPitchB && audibleB))
+            continue;
+        float cap = 0.0f;
+        switch (src)
+        {
+            case SrcLfo1: case SrcLfo2:            cap = 0.08f; break; // ~1 semitone vibrato
+            case SrcFilterEnv: case SrcModEnv:     cap = 0.35f; break; // pluck / drum pitch drop
+            case SrcModWheel: case SrcAftertouch:  cap = 0.17f; break; // whole-tone bend
+            default:                               cap = 0.0f;  break; // Velocity, Key, Random: no
+        }
+        const float a = p.get (modAmountParam (i));
+        p.set (modAmountParam (i), juce::jlimit (-cap, cap, a));
+    }
+
+    p.set (P::unison_detune, juce::jmin (35.0f, p.get (P::unison_detune)));
+}
+
+namespace
+{
     juce::String hzText (float hz)
     {
         if (hz >= 1000.0f)
@@ -220,11 +275,14 @@ juce::String describePatch (const Patch& p)
     if (p.get (P::glide) > 0.02f)  parts.add ("glide");
 
     // Motion
-    for (auto [dest, amount] : { std::pair { P::lfo1_dest, P::lfo1_amount }, std::pair { P::lfo2_dest, P::lfo2_amount } })
+    static const char* shortSource[] = { "", "LFO1", "LFO2", "FEnv", "MEnv", "Vel", "Key", "Wheel", "AT", "Rnd" };
+    for (int i = 0; i < kNumModSlots; ++i)
     {
-        const int d = (int) p.get (dest);
-        if (d != DestOff && p.get (amount) > 0.02f)
-            parts.add ("LFO > " + lfoDestNames()[juce::jlimit (0, lfoDestNames().size() - 1, d)]);
+        const int src = juce::jlimit (0, kNumModSources - 1, (int) p.get (modSourceParam (i)));
+        const int dst = juce::jlimit (0, kNumModDests - 1, (int) p.get (modDestParam (i)));
+        if (src == SrcOff || dst == DestOff || std::abs (p.get (modAmountParam (i))) < 0.02f)
+            continue;
+        parts.add (juce::String (shortSource[src]) + " > " + modDestNames()[dst]);
     }
 
     // Space

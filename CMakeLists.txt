@@ -57,6 +57,7 @@ target_sources(Stacks PRIVATE
     Source/Wavetable.cpp
     Source/SynthVoice.cpp
     Source/Patch.cpp
+    Source/Effects.cpp
     Source/PatchGenerator.cpp
     Source/ai/OllamaBackend.cpp
     Source/ai/LlamaBackend.cpp
