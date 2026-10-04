@@ -41,7 +41,16 @@ colour-coded (knob colour = row):
    LFO 1/2, Filter Env, Mod Env, Velocity, Key, Mod Wheel, Aftertouch, per-note
    Random. Destinations: Pitch, Pitch B, Filter, Resonance, Morph A/B, FM, Amp,
    Pan, LFO rates, B Level, Noise.
-5. **SPACE** — chorus, delay, reverb
+5. **SPACE** — effects. Core knobs on the panel, the rest behind each
+   section's **more** button:
+   - *Chorus*: Chorus / Ensemble (string machine) / Flanger / Dimension modes;
+     more: voices, feedback, stereo spread, tone.
+   - *Delay*: Stereo / Ping-Pong / Tape modes, tempo sync (1/16 … 1/2, dotted,
+     triplet) or free time; more: tone and high-pass in the feedback path, tape
+     wow, stereo width.
+   - *Reverb*: Dattorro-style plate tank with Room / Plate / Hall / Shimmer
+     types; more: pre-delay, low cut, high cut, tail modulation, octave-up
+     shimmer amount, width.
 
 Every generated patch (random or AI) passes a tuning guard: oscillator A only at
 octaves, an audible oscillator B only at octaves, fine detune and pitch
