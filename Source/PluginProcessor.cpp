@@ -66,6 +66,12 @@ StacksAudioProcessor::StacksAudioProcessor()
     voiceContext.user = &userWaves;
     paramRange (0);   // builds the range table now, not on the audio thread
     installFactoryPresets();
+    {
+        auto wired = Patch::capture (apvts);   // the default sound answers the macros from the first note
+        ensureMacroRoutings (wired);
+        wired.applyTo (apvts);
+        loadedSnapshot = wired;
+    }
     for (auto* param : getParameters())
         param->addListener (this);
     voiceContext.params = &params;
@@ -483,6 +489,11 @@ void StacksAudioProcessor::setStateInformation (const void* data, int sizeInByte
         if (lab.isValid())
             labFromJson (lab["json"].toString());
         loadedSnapshot = currentPatch();   // what was restored counts as unedited
+        {
+            auto wired = loadedSnapshot;
+            ensureMacroRoutings (wired);
+            if (! wired.sameValuesAs (loadedSnapshot)) { wired.applyTo (apvts); loadedSnapshot = wired; }
+        }
     }
     else if (root.hasType (apvts.state.getType()))
     {
