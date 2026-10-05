@@ -52,7 +52,11 @@ StacksAudioProcessorEditor::StacksAudioProcessorEditor (StacksAudioProcessor& p)
     redoButton.setTooltip ("Redo (Shift+Cmd+Z)");
     redoButton.onClick = [this] { synthProcessor.redo(); };
     addAndMakeVisible (redoButton);
+    // Keys reach the editor itself (undo/redo shortcuts) and otherwise pass on to
+    // the host, so Logic's musical typing keeps working; no child is focused
+    // until it is clicked.
     setWantsKeyboardFocus (true);
+    setFocusContainerType (juce::Component::FocusContainerType::keyboardFocusContainer);
     addAndMakeVisible (synthPanel);
     addAndMakeVisible (labPanel);
 
@@ -79,6 +83,21 @@ void StacksAudioProcessorEditor::changeListenerCallback (juce::ChangeBroadcaster
     patchName.setText (synthProcessor.currentPatchName(), juce::dontSendNotification);
     undoButton.setEnabled (synthProcessor.canUndo());
     redoButton.setEnabled (synthProcessor.canRedo());
+}
+
+namespace
+{
+    // Tab still walks the controls, but when the window comes to the front no
+    // child is chosen automatically.
+    struct NoAutoFocusTraverser : public juce::KeyboardFocusTraverser
+    {
+        juce::Component* getDefaultComponent (juce::Component*) override { return nullptr; }
+    };
+}
+
+std::unique_ptr<juce::ComponentTraverser> StacksAudioProcessorEditor::createKeyboardFocusTraverser()
+{
+    return std::make_unique<NoAutoFocusTraverser>();
 }
 
 bool StacksAudioProcessorEditor::keyPressed (const juce::KeyPress& key)

@@ -25,6 +25,7 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
     bool keyPressed (const juce::KeyPress&) override;
+    std::unique_ptr<juce::ComponentTraverser> createKeyboardFocusTraverser() override;   // no automatic focus target
 
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;

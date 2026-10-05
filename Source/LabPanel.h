@@ -71,6 +71,29 @@ private:
 };
 
 // The generate -> audition -> pick -> evolve workflow.
+// The prompt box. It never takes the keyboard on its own (a host's musical
+// typing must keep working when the plug-in window comes to the front); it
+// takes focus when you click it and gives it back when you click away or press
+// Escape.
+class PromptEditor : public juce::TextEditor
+{
+public:
+    PromptEditor() { setWantsKeyboardFocus (false); }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        setWantsKeyboardFocus (true);
+        grabKeyboardFocus();
+        juce::TextEditor::mouseDown (e);
+    }
+
+    void focusLost (FocusChangeType cause) override
+    {
+        juce::TextEditor::focusLost (cause);
+        setWantsKeyboardFocus (false);
+    }
+};
+
 class LabPanel : public juce::Component,
                  public juce::FileDragAndDropTarget,
                  private juce::ChangeListener,
@@ -100,7 +123,7 @@ private:
 
     juce::Label header, variationLabel, status;
     ProgressStrip progressStrip;
-    juce::TextEditor hint;
+    PromptEditor hint;
     juce::Slider variation;
     juce::ToggleButton designWavesToggle { "Design wavetables" };
     juce::TextButton savePresetButton;

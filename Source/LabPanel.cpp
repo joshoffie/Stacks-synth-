@@ -195,6 +195,7 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
     hint.setMultiLine (false);
     hint.setReturnKeyStartsNewLine (false);
     hint.onReturnKey = [this] { newBatchButton.triggerClick(); };   // a prompt stands on its own: no preset needed
+    hint.onEscapeKey = [this] { hint.giveAwayKeyboardFocus(); };    // back to the host's keyboard
     addAndMakeVisible (hint);
 
     variationLabel.setText ("Variation", juce::dontSendNotification);

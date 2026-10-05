@@ -19,6 +19,7 @@ ExplainView::ExplainView (StacksAudioProcessor& p) : processor (p)
 
     text.setMultiLine (true, true);
     text.setReadOnly (true);
+    text.setWantsKeyboardFocus (false);   // read-only: never steal the host's keyboard
     text.setScrollbarsShown (true);
     text.setCaretVisible (false);
     text.setFont (StacksLookAndFeel::font (12.5f));
