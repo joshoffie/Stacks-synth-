@@ -1114,7 +1114,7 @@ static void testSongAnalyser()
 
 // `--song file`: analyse a track and let the model design for it. `--recreate file`:
 // analyse a recording, print the imitation, evolve it. Both print what the player would see.
-static int audioMode (const juce::String& mode, const juce::File& file)
+static int audioMode (const juce::String& mode, const juce::File& file, bool noModel)
 {
     juce::String error;
     GenerationRequest req;
@@ -1129,8 +1129,11 @@ static int audioMode (const juce::String& mode, const juce::File& file)
         std::printf ("track: %.0f s, %.1f BPM (conf %.2f), %s (conf %.2f), centroid %.0f Hz, %.1f onsets/s, dynamics %.1f dB, width %.2f\n",
                      song.duration, song.bpm, song.tempoConfidence, song.keyName().toRawUTF8(), song.keyConfidence, song.centroidHz, song.onsetsPerSecond, song.dynamicsDb, song.width);
         for (int b = 0; b < SongAnalysis::kBands; ++b) std::printf ("  %-24s %+5.1f dB%s\n", SongAnalysis::bandName (b), song.bandDb[b], b == song.openBand ? "  <- room" : b == song.fullBand ? "  <- full" : "");
+        static const char* pcs[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+        std::printf ("  chroma:"); for (int i = 0; i < 12; ++i) std::printf (" %s %.2f", pcs[i], song.chroma[i]); std::printf ("\n");
         std::printf ("brief: %s\n", song.brief.toRawUTF8());
         req.hint = song.brief;
+        if (noModel) return 0;
     }
     else
     {
@@ -1144,6 +1147,7 @@ static int audioMode (const juce::String& mode, const juce::File& file)
         std::printf ("imitation: %s [%s] %s\n", seed.name.toRawUTF8(), seed.category.toRawUTF8(), describePatch (seed).toRawUTF8());
         std::printf ("brief: %s\n", a.brief.toRawUTF8());
         req.hint = a.brief;
+        if (noModel) return 0;
         req.parents = { seed };
         req.count = 2;
     }
@@ -1306,7 +1310,7 @@ static int buildFactory (int perPrompt)
 int main (int argc, char** argv)
 {
     if (argc > 2 && (juce::String (argv[1]) == "--song" || juce::String (argv[1]) == "--recreate"))
-        return audioMode (argv[1], juce::File::getCurrentWorkingDirectory().getChildFile (juce::String::fromUTF8 (argv[2])));
+        return audioMode (argv[1], juce::File::getCurrentWorkingDirectory().getChildFile (juce::String::fromUTF8 (argv[2])), argc > 3 && juce::String (argv[3]) == "nomodel");
     if (argc > 1 && juce::String (argv[1]) == "--retouch")
         return retouchFactory();
     if (argc > 1 && juce::String (argv[1]) == "--factory")

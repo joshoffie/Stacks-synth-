@@ -17,6 +17,7 @@ struct SongAnalysis
     int keyRoot = -1;                      // 0 = C .. 11 = B, -1 unknown
     bool minor = false;
     float keyConfidence = 0.0f;
+    float chroma[12] {};                   // pitch-class weights, normalised to the strongest
     static constexpr int kBands = 6;       // sub, bass, low mids, mids, upper mids, air
     float bandDb[kBands] {};               // energy per octave, dB relative to the median band
     int openBand = 3;                      // the emptiest band: where a new sound has room
