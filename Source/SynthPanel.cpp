@@ -699,75 +699,130 @@ void SynthPanel::resized()
     macroPage->setBounds (area);
 
     const int normalH = kTitleH + kCellH + kPad;
-
-    // The dense ALL view drops the response/envelope displays when a row would
-    // not fit the panel otherwise; a single-row view always has room for them.
     auto isOptional = [this] (juce::Component* c) { return std::find (optionalDisplays.begin(), optionalDisplays.end(), c) != optionalDisplays.end(); };
-    bool compact = false;
-    if (viewMode < 0)
-        for (const auto& row : rows)
+    auto sectionWidth = [&] (const Section* section, bool compact)
+    {
+        int w = 2 * kPad;
+        for (const auto& [component, cellWidth] : section->controls)
+            w += compact && isOptional (component) ? 0 : cellWidth;
+        return w;
+    };
+    auto hasTall = [] (const Row& row) { for (auto* section : row.sections) if (section->tall) return true; return false; };
+
+    // Packs a row's sections into lines no wider than maxLineW (in unscaled
+    // pixels); a row with the modulators area never wraps. Returns the line of
+    // each section, the number of lines and the widest line.
+    struct Packing { std::vector<int> lineOf; int lines = 1, widest = 0; };
+    auto pack = [&] (const Row& row, bool compact, int maxLineW)
+    {
+        Packing pk;
+        const bool wrap = ! hasTall (row);
+        int x = kBand + kPad;
+        for (size_t i = 0; i < row.sections.size(); ++i)
         {
-            int full = kBand + kPad;
-            for (auto* section : row.sections)
+            const int w = sectionWidth (row.sections[i], compact);
+            if (wrap && i > 0 && x + w > maxLineW)
             {
-                full += 2 * kPad + kGap;
-                for (const auto& [component, cellWidth] : section->controls) full += cellWidth;
+                pk.widest = juce::jmax (pk.widest, x);
+                ++pk.lines;
+                x = kBand + kPad;
             }
-            if ((float) full * 0.85f > (float) (area.getWidth() - 8)) compact = true;
+            pk.lineOf.push_back (pk.lines - 1);
+            x += w + kGap;
         }
+        pk.widest = juce::jmax (pk.widest, x);
+        return pk;
+    };
+    auto rowHeight = [&] (const Row& row, int lines) { return hasTall (row) ? row.height : lines * normalH + (lines - 1) * kGap; };
+
+    // The rows on show, and the largest scale at which they all fit the panel,
+    // wrapping wide rows onto two lines rather than shrinking everything.
+    std::vector<Row*> shown;
+    if (viewMode < 0)                           for (auto& row : rows) shown.push_back (&row);
+    else if (viewMode < (int) rows.size())      shown.push_back (&rows[(size_t) viewMode]);
+    const bool single = viewMode >= 0;
+    const int availW = area.getWidth() - 8, availH = area.getHeight() - 8;
+    auto fits = [&] (float scale, bool compact, int maxLines)
+    {
+        int totalH = 2 * kPad;
+        for (auto* row : shown)
+        {
+            const auto pk = pack (*row, compact, (int) ((float) availW / scale));
+            if (pk.lines > maxLines || (float) pk.widest * scale > (float) availW)
+                return false;
+            totalH += rowHeight (*row, pk.lines) + kGap;
+        }
+        return (float) totalH * scale <= (float) availH;
+    };
+    auto bestScale = [&] (bool compact, int maxLines, float smin, float smax)
+    {
+        for (float scale = smax; scale > smin; scale -= 0.02f)
+            if (fits (scale, compact, maxLines))
+                return scale;
+        return smin;
+    };
+    float scale;
+    bool compact = false;
+    if (single)
+        scale = bestScale (false, 2, 0.6f, 2.2f);
+    else
+    {
+        scale = bestScale (false, 2, 0.5f, 1.0f);
+        if (scale < 0.85f)                       // dense: drop the optional displays if that buys room
+        {
+            const float compactScale = bestScale (true, 2, 0.5f, 1.0f);
+            if (compactScale > scale + 0.02f) { scale = compactScale; compact = true; }
+        }
+    }
 
     // Lay every row out in its own container at natural size...
+    const int maxLineW = (int) ((float) availW / scale);
     for (auto& row : rows)
     {
-        int x = kBand + kPad;
-        for (auto* section : row.sections)
+        const auto pk = pack (row, compact, maxLineW);
+        const int h = rowHeight (row, pk.lines);
+        int x = kBand + kPad, line = 0;
+        for (size_t i = 0; i < row.sections.size(); ++i)
         {
-            auto widthOf = [&] (juce::Component* c, int cellWidth) { return compact && isOptional (c) ? 0 : cellWidth; };
-            int w = 2 * kPad;
-            for (const auto& [component, cellWidth] : section->controls)
-                w += widthOf (component, cellWidth);
-            const int h = section->tall ? row.height : normalH;
-            section->bounds = { x, 0, w, h };
+            auto* section = row.sections[i];
+            if (pk.lineOf[i] != line) { line = pk.lineOf[i]; x = kBand + kPad; }
+            const int y = line * (normalH + kGap);
+            const int w = sectionWidth (section, compact);
+            const int sh = section->tall ? row.height : normalH;
+            section->bounds = { x, y, w, sh };
             if (section->moreButton != nullptr)
                 section->moreButton->setBounds (section->bounds.withHeight (kTitleH).removeFromRight (40).reduced (3, 1));
             int cx = x + kPad;
             for (const auto& [component, cellWidth] : section->controls)
             {
-                const int cw = widthOf (component, cellWidth);
+                const int cw = compact && isOptional (component) ? 0 : cellWidth;
                 component->setVisible (cw > 0);
                 if (cw > 0)
-                    component->setBounds (cx, kTitleH, cw, section->tall ? h - kTitleH - kPad : kCellH);
+                    component->setBounds (cx, y + kTitleH, cw, section->tall ? sh - kTitleH - kPad : kCellH);
                 cx += cw;
             }
             x += w + kGap;
         }
-        row.naturalWidth = x;
-        row.container->setSize (row.naturalWidth, row.height);
+        row.naturalWidth = pk.widest;
+        row.container->setSize (pk.widest, h);
     }
 
-    // ...then place them: stacked for ALL (scaled down together if they don't
-    // fit), or one row scaled to fill.
-    if (viewMode < 0)
+    // ...then place them: stacked for ALL, or one row centred, at the shared scale.
+    if (! single)
     {
-        int totalH = 2 * kPad, maxW = 1;
-        for (const auto& row : rows) { totalH += row.height + kGap; maxW = juce::jmax (maxW, row.naturalWidth); }
-        const float scale = juce::jmin (1.0f, (float) (area.getWidth() - 4) / (float) maxW, (float) (area.getHeight() - 4) / (float) totalH);
         float y = (float) area.getY() + kPad * scale;
         for (auto& row : rows)
         {
             row.container->setTopLeftPosition (0, 0);
             row.container->setTransform (juce::AffineTransform::scale (scale).translated ((float) area.getX(), y));
-            y += (row.height + kGap) * scale;
+            y += (row.container->getHeight() + kGap) * scale;
         }
     }
-    else if (viewMode < (int) rows.size())
+    else if (! shown.empty())
     {
-        auto& row = rows[(size_t) viewMode];
-        // Fill the panel: larger when there is room, smaller when a row with its displays is wider than the panel.
-        const float scale = juce::jlimit (0.6f, 2.2f, juce::jmin ((float) (area.getWidth() - 8) / (float) row.naturalWidth,
-                                                                   (float) (area.getHeight() - 8) / (float) row.height));
-        const float px = (float) area.getX() + ((float) area.getWidth() - row.naturalWidth * scale) * 0.5f;
-        const float py = (float) area.getY() + juce::jmax (4.0f, ((float) area.getHeight() - row.height * scale) * 0.35f);
+        auto& row = *shown.front();
+        const float px = (float) area.getX() + ((float) area.getWidth() - row.container->getWidth() * scale) * 0.5f;
+        const float py = (float) area.getY() + juce::jmax (4.0f, ((float) area.getHeight() - row.container->getHeight() * scale) * 0.35f);
         row.container->setTopLeftPosition (0, 0);
         row.container->setTransform (juce::AffineTransform::scale (scale).translated (px, py));
     }
