@@ -23,6 +23,18 @@ const juce::StringArray& filterRoutingNames()
     return names;
 }
 
+const juce::StringArray& sampleModeNames()
+{
+    static const juce::StringArray names { "Off", "Pitched", "Granular" };
+    return names;
+}
+
+const juce::StringArray& onOffNames()
+{
+    static const juce::StringArray names { "Off", "On" };
+    return names;
+}
+
 const juce::StringArray& distModeNames()
 {
     static const juce::StringArray names { "Soft", "Hard", "Tube", "Fold", "Crush" };
@@ -173,7 +185,8 @@ bool isAdvancedParam (const char* id)
     static const juce::StringArray advanced { "chorus_voices", "chorus_feedback", "chorus_spread", "chorus_tone",
                                               "delay_tone", "delay_hpf", "delay_wow", "delay_width",
                                               "reverb_predelay", "reverb_lowcut", "reverb_highcut", "reverb_mod", "reverb_shimmer", "reverb_width",
-                                              "dist_tone", "eq_low_freq", "eq_mid_freq", "eq_mid_q", "eq_high_freq", "comp_attack", "comp_release", "arp_swing", "bend_range", "filter2_drive" };
+                                              "dist_tone", "eq_low_freq", "eq_mid_freq", "eq_mid_q", "eq_high_freq", "comp_attack", "comp_release", "arp_swing", "bend_range", "filter2_drive",
+                                              "smp_fine", "grain_pitch", "grain_spread" };
     return advanced.contains (id);
 }
 

@@ -15,6 +15,7 @@
 #include "ai/LlamaBackend.h"
 #include "ai/ModelManager.h"
 #include "Arpeggiator.h"
+#include "Sampler.h"
 
 using namespace stacks;
 
@@ -964,6 +965,77 @@ static void testWarpsAndSources()
     CHECK (countAudibleDifferences (a, b) == 2);
 }
 
+// The sample oscillator: pitched playback lands on the note, granular output is
+// a finite cloud near the file's pitch, the file travels with the patch JSON.
+static void testSampler()
+{
+    std::printf ("sampler\n");
+    const double sr = 48000.0;
+    SampleData sine;
+    sine.name = "A440";
+    sine.sampleRate = sr;
+    sine.audio.setSize (1, (int) sr);
+    for (int i = 0; i < (int) sr; ++i)
+        sine.audio.setSample (0, i, 0.8f * std::sin (6.2831853f * 440.0f * (float) i / (float) sr));
+
+    auto zeroCrossingsHz = [] (const std::vector<float>& x, double rate)
+    {
+        int crossings = 0;
+        for (size_t i = 1; i < x.size(); ++i)
+            if ((x[i - 1] < 0.0f) != (x[i] < 0.0f)) ++crossings;
+        return 0.5 * crossings * rate / (double) x.size();
+    };
+    auto renderSeconds = [&] (int note, const SamplerParams& sp, double seconds)
+    {
+        SampleVoice v;
+        juce::Random rng (7);
+        v.start (&sine, sr, note);
+        const int n = (int) (seconds * sr);
+        std::vector<float> l ((size_t) n, 0.0f), r ((size_t) n, 0.0f);
+        for (int pos = 0; pos < n; pos += 64)
+            v.render (l.data() + pos, r.data() + pos, juce::jmin (64, n - pos), sp, 0.0f, rng);
+        return l;
+    };
+
+    SamplerParams pitched;
+    pitched.mode = 1; pitched.level = 1.0f; pitched.loop = true;
+    const auto at60 = renderSeconds (60, pitched, 0.5);
+    const auto at72 = renderSeconds (72, pitched, 0.5);
+    const double hz60 = zeroCrossingsHz (at60, sr), hz72 = zeroCrossingsHz (at72, sr);
+    CHECK (std::abs (hz60 - 440.0) < 440.0 * 0.03);      // the root key plays the file as recorded
+    CHECK (std::abs (hz72 - 880.0) < 880.0 * 0.03);      // an octave up doubles it
+    float peak = 0.0f;
+    for (float x : at60) peak = juce::jmax (peak, std::abs (x));
+    CHECK (peak > 0.7f && peak <= 0.81f);
+
+    SamplerParams onceOnly = pitched;
+    onceOnly.loop = false;
+    onceOnly.semitones = 24.0f;                          // 4x speed: the 1 s file ends after 0.25 s
+    const auto once = renderSeconds (60, onceOnly, 0.5);
+    float tail = 0.0f;
+    for (size_t i = once.size() / 2; i < once.size(); ++i) tail = juce::jmax (tail, std::abs (once[i]));
+    CHECK (tail == 0.0f);
+
+    SamplerParams granular;
+    granular.mode = 2; granular.level = 1.0f; granular.start = 0.3f; granular.spray = 0.0f; granular.pitchRand = 0.0f; granular.spread = 0.0f;
+    granular.grainMs = 80.0f; granular.grainsPerSecond = 25.0f;
+    const auto cloud = renderSeconds (60, granular, 1.0);
+    double rms = 0.0; bool finite = true;
+    for (float x : cloud) { rms += x * x; finite = finite && std::isfinite (x); }
+    rms = std::sqrt (rms / (double) cloud.size());
+    CHECK (finite && rms > 0.1 && rms < 1.0);
+    CHECK (std::abs (zeroCrossingsHz (cloud, sr) - 440.0) < 440.0 * 0.12);   // grains keep the pitch
+
+    Patch p;
+    p.sampleFile = "Breath.wav";
+    p.set (P::smp_mode, 2.0f);
+    const auto json = p.toJson();
+    CHECK (json.contains ("\"sample\": \"Breath.wav\"") || json.contains ("\"sample\":\"Breath.wav\""));
+    if (auto back = Patch::fromJson (json)) CHECK (back->sampleFile == "Breath.wav" && (int) back->get (P::smp_mode) == 2); else CHECK (false);
+    CHECK (sampleModeNames().size() == 3 && isAdvancedParam ("grain_pitch") && ! isAdvancedParam ("grain_size"));
+    CHECK (modTargetNames().contains ("Start") && modTargetNames().contains ("Spray"));
+}
+
 // Re-applies the prompt cues to every preset in Factory/ (after the rules change).
 static int retouchFactory()
 {
@@ -1126,6 +1198,7 @@ int main (int argc, char** argv)
     testMacroRoutings();
     testWarpsAndSources();
     testPromptCues();
+    testSampler();
     testRandomGenerator();
     testLlmGenerator();
     std::printf ("\n%d checks, %d failures\n", checks, failures);

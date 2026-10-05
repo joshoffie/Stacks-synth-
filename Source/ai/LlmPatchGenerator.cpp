@@ -99,7 +99,7 @@ namespace
     bool isExtraParam (const char* id)
     {
         const juce::String s (id);
-        if (s == "master_gain" || s == "bend_range" || isCoreParam (id) || s.startsWith ("mod") || s.startsWith ("lfo3_") || s.startsWith ("lfo4_") || s.startsWith ("macro") || s.startsWith ("arp_"))
+        if (s == "master_gain" || s == "bend_range" || s.startsWith ("smp_") || s.startsWith ("grain_") || isCoreParam (id) || s.startsWith ("mod") || s.startsWith ("lfo3_") || s.startsWith ("lfo4_") || s.startsWith ("macro") || s.startsWith ("arp_"))
             return false;
         if ((s.startsWith ("lfo1_") || s.startsWith ("lfo2_")) && (s.endsWith ("_shape") || s.endsWith ("_rate") || s.endsWith ("_sync")))
             return false;

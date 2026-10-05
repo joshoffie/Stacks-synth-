@@ -36,6 +36,31 @@ private:
     std::unique_ptr<juce::FileChooser> chooser;
 };
 
+// The sample oscillator's file as an overview with the Start marker. Click to
+// load a file, right-click to remove it.
+class SampleDisplay : public juce::Component,
+                      public juce::SettableTooltipClient,
+                      private juce::Timer
+{
+public:
+    SampleDisplay (StacksAudioProcessor&, juce::AudioProcessorValueTreeState&, juce::Colour);
+    ~SampleDisplay() override;
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+
+private:
+    void timerCallback() override;
+
+    StacksAudioProcessor& processor;
+    juce::Colour colour;
+    std::atomic<float>* start = nullptr;
+    std::atomic<float>* mode = nullptr;
+    const SampleData* shown = nullptr;
+    float shownStart = -1.0f;
+    int shownMode = -1;
+    std::unique_ptr<juce::FileChooser> chooser;
+};
+
 // All the synth controls in fixed, captioned rows that follow the signal path,
 // plus the modulators area. Owns the "assign a modulator to a knob" flow.
 class SynthPanel : public juce::Component,

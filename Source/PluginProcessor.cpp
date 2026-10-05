@@ -80,6 +80,7 @@ StacksAudioProcessor::StacksAudioProcessor()
     voiceContext.params = &params;
     voiceContext.lfoTables = &lfoTables;
     voiceContext.liveValues = liveValues.data();
+    voiceContext.samples = &samples;
 
     for (int i = 0; i < kNumVoices; ++i)
         synth.addVoice (new SynthVoice (voiceContext));
@@ -575,18 +576,19 @@ void StacksAudioProcessor::attachStateListeners()
     apvts.state.getOrCreateChildWithName (Patch::lfoShapesTreeType(), nullptr);
     apvts.state.getOrCreateChildWithName (Patch::userWavesTreeType(), nullptr);
     apvts.state.getOrCreateChildWithName (Patch::customWavesTreeType(), nullptr);
+    apvts.state.getOrCreateChildWithName (Patch::sampleTreeType(), nullptr);
     apvts.state.addListener (this);
 }
 
 void StacksAudioProcessor::parameterChanged (const juce::String&, float)     { triggerAsyncUpdate(); }
 void StacksAudioProcessor::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&)
 {
-    if (tree.hasType (Patch::lfoShapesTreeType()) || tree.hasType (Patch::userWavesTreeType()) || tree.hasType (Patch::customWavesTreeType()))
+    if (tree.hasType (Patch::lfoShapesTreeType()) || tree.hasType (Patch::userWavesTreeType()) || tree.hasType (Patch::customWavesTreeType()) || tree.hasType (Patch::sampleTreeType()))
         triggerAsyncUpdate();
 }
 void StacksAudioProcessor::valueTreeChildAdded (juce::ValueTree&, juce::ValueTree& child)
 {
-    if (child.hasType (Patch::lfoShapesTreeType()) || child.hasType (Patch::userWavesTreeType()) || child.hasType (Patch::customWavesTreeType()))
+    if (child.hasType (Patch::lfoShapesTreeType()) || child.hasType (Patch::userWavesTreeType()) || child.hasType (Patch::customWavesTreeType()) || child.hasType (Patch::sampleTreeType()))
         triggerAsyncUpdate();
 }
 void StacksAudioProcessor::handleAsyncUpdate()
@@ -594,6 +596,7 @@ void StacksAudioProcessor::handleAsyncUpdate()
     rebuildLfoTables();
     reloadUserWaves();
     reloadCustomWaves();
+    reloadSample();
 }
 
 void StacksAudioProcessor::rebuildLfoTables()
@@ -948,6 +951,75 @@ void StacksAudioProcessor::reloadCustomWaves()
         customSpecs[osc] = spec;
         userWaves.set (slot, spec.isEmpty() ? nullptr : buildSpectralTable (spec));
     }
+}
+
+juce::File StacksAudioProcessor::samplesDirectory()
+{
+    return libraryRoot().getChildFile ("Samples");
+}
+
+// The sample lives with the patch as a file name inside the Samples folder (or
+// a full path for a file left where it was); loading it is a message-thread
+// job triggered by the state tree, like the designed tables.
+void StacksAudioProcessor::reloadSample()
+{
+    auto tree = apvts.state.getChildWithName (Patch::sampleTreeType());
+    const auto wanted = tree.isValid() ? tree.getProperty (Patch::sampleFileProperty()).toString() : juce::String();
+    if (wanted == loadedSampleFile && (wanted.isEmpty() || samples.current() != nullptr))
+        return;
+    loadedSampleFile = wanted;
+    if (wanted.isEmpty())
+    {
+        samples.clear();
+        labBroadcaster.sendChangeMessage();
+        return;
+    }
+    const auto file = juce::File::isAbsolutePath (wanted) ? juce::File (wanted) : samplesDirectory().getChildFile (wanted);
+    juce::String error;
+    if (auto data = samples.read (file, error))
+        samples.setActive (std::move (data));
+    else
+        samples.clear();
+    labBroadcaster.sendChangeMessage();
+}
+
+bool StacksAudioProcessor::importSample (const juce::File& source, juce::String& error)
+{
+    if (! source.existsAsFile())
+    {
+        error = "file not found";
+        return false;
+    }
+    const auto dir = samplesDirectory();
+    dir.createDirectory();
+    auto target = dir.getChildFile (source.getFileName());
+    if (! source.isAChildOf (dir) && (! target.existsAsFile() || target.getSize() != source.getSize()))
+        if (! source.copyFileTo (target))
+        {
+            error = "could not copy the file into the Stacks Samples folder";
+            return false;
+        }
+    auto data = samples.read (target, error);
+    if (data == nullptr)
+        return false;
+    pushUndoSnapshot();
+    samples.setActive (std::move (data));
+    loadedSampleFile = target.getFileName();
+    apvts.state.getOrCreateChildWithName (Patch::sampleTreeType(), nullptr).setProperty (Patch::sampleFileProperty(), target.getFileName(), nullptr);
+    if (params.geti (P::smp_mode) == 0)   // make it audible straight away
+        if (auto* mode = apvts.getParameter (paramId (P::smp_mode)))
+            mode->setValueNotifyingHost (mode->convertTo0to1 (1.0f));
+    labBroadcaster.sendChangeMessage();
+    return true;
+}
+
+void StacksAudioProcessor::clearSample()
+{
+    pushUndoSnapshot();
+    samples.clear();
+    loadedSampleFile.clear();
+    apvts.state.getOrCreateChildWithName (Patch::sampleTreeType(), nullptr).removeProperty (Patch::sampleFileProperty(), nullptr);
+    labBroadcaster.sendChangeMessage();
 }
 
 void StacksAudioProcessor::setCalmMode (bool shouldBeCalm)

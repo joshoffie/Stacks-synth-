@@ -26,11 +26,12 @@ namespace colours
     inline juce::Colour rowSpace    { 0xff7fa7d8 }; // blue
     inline juce::Colour rowShape    { 0xffd08ab8 }; // rose
     inline juce::Colour rowMacro    { 0xffe0c070 }; // gold
+    inline juce::Colour rowSample   { 0xff9ad17b }; // green
 }
 
 // Reads a theme file: a JSON object of hex colours ("rrggbb" or "aarrggbb")
 // under any of the keys background, panel, card, accent, accentDim, text,
-// muted, rowSound, rowFilter, rowMovement, rowSpace, rowShape, rowMacro.
+// muted, rowSound, rowFilter, rowMovement, rowSpace, rowShape, rowMacro, rowSample.
 // Missing keys keep the default. Call before any window is created.
 void loadThemeFile (const juce::File&);
 

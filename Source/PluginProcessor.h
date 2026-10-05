@@ -10,6 +10,7 @@
 #include "PatchGenerator.h"
 #include "Effects.h"
 #include "Arpeggiator.h"
+#include "Sampler.h"
 #include "ai/ModelManager.h"
 #include "ai/LlamaBackend.h"
 
@@ -175,6 +176,12 @@ public:
     void setPreviewOnClick (bool);
     void playPreview (const Patch&);                       // queues the phrase for the audio thread
 
+    // The sample oscillator's file: copied into ~/Music/Stacks Patches/Samples, stored with the patch.
+    const SampleBank& sampleBank() const                   { return samples; }
+    bool importSample (const juce::File&, juce::String& error);
+    void clearSample();
+    static juce::File samplesDirectory();
+
     // Let the generators invent new wavetables ("Custom") instead of only picking built-ins. Persisted.
     bool designWavetables() const                          { return designWaves; }
     void setDesignWavetables (bool);
@@ -247,7 +254,10 @@ private:
     // Synth engine
     juce::SharedResourcePointer<WavetableBank> bank;      // built once, shared by all instances
     UserWavetables userWaves;                             // per instance, named in the state tree
-    WaveSpec customSpecs[kNumOscs];                              // what the Custom slots were built from
+    WaveSpec customSpecs[kNumOscs];
+    SampleBank samples;
+    juce::String loadedSampleFile;                         // what the bank holds, to skip reloads
+    void reloadSample();                              // what the Custom slots were built from
     bool designWaves = true;
     SynthParams params;                                   // base values this block
     SynthParams fxParams;                                 // base + global modulation, read by the effects

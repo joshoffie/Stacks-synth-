@@ -65,6 +65,8 @@ juce::var Patch::toVar() const
     for (int osc = 0; osc < kNumOscs; ++osc)
         if (! this->waves[(size_t) osc].isEmpty())
             obj->setProperty (waveKey (osc), this->waves[(size_t) osc].toVar());
+    if (sampleFile.isNotEmpty())
+        obj->setProperty ("sample", sampleFile);
 
     bool anyShape = false;
     for (const auto& sh : lfoShapes) anyShape = anyShape || sh.isNotEmpty();
@@ -164,6 +166,7 @@ std::optional<Patch> Patch::fromVar (const juce::var& v, const Patch* base)
     for (int osc = 0; osc < kNumOscs; ++osc)
         if (auto w = WaveSpec::fromVar (obj->getProperty (waveKey (osc))))
             p.waves[(size_t) osc] = *w;
+    p.sampleFile = obj->getProperty ("sample").toString();
 
     auto* params = obj->getProperty ("params").getDynamicObject();
     if (params == nullptr)
@@ -253,6 +256,18 @@ juce::Identifier Patch::customWaveProperty (int osc)
     return juce::Identifier (waveKey (osc));
 }
 
+const juce::Identifier& Patch::sampleTreeType()
+{
+    static const juce::Identifier type ("Sample");
+    return type;
+}
+
+const juce::Identifier& Patch::sampleFileProperty()
+{
+    static const juce::Identifier prop ("file");
+    return prop;
+}
+
 Patch Patch::capture (const juce::AudioProcessorValueTreeState& apvts)
 {
     Patch p;
@@ -276,6 +291,9 @@ Patch Patch::capture (const juce::AudioProcessorValueTreeState& apvts)
         for (int osc = 0; osc < kNumOscs; ++osc)
             if (auto w = WaveSpec::fromJson (custom.getProperty (customWaveProperty (osc)).toString()))
                 p.waves[(size_t) osc] = *w;
+    auto sample = apvts.state.getChildWithName (sampleTreeType());
+    if (sample.isValid())
+        p.sampleFile = sample.getProperty (sampleFileProperty()).toString();
     return p;
 }
 
@@ -309,6 +327,10 @@ void Patch::applyTo (juce::AudioProcessorValueTreeState& apvts) const
         if (! w.isEmpty()) custom.setProperty (customWaveProperty (osc), w.toJson(), nullptr);
         else               custom.removeProperty (customWaveProperty (osc), nullptr);
     }
+
+    auto sample = apvts.state.getOrCreateChildWithName (sampleTreeType(), nullptr);
+    if (sampleFile.isNotEmpty()) sample.setProperty (sampleFileProperty(), sampleFile, nullptr);
+    else                         sample.removeProperty (sampleFileProperty(), nullptr);
 }
 
 //==============================================================================

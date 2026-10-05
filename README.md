@@ -16,6 +16,12 @@ CMake project; JUCE is fetched when `/Applications/JUCE` is absent. The GitHub A
 workflow in `.github/workflows/build.yml` builds both platforms and runs the tests. The
 Windows build is not yet tested on real hardware.
 
+**Pro Tools (AAX).** Avid only hands the AAX SDK to registered developers
+(developer.avid.com). Once you have it: configure with
+`-DSTACKS_AAX_SDK_PATH=/path/to/aax-sdk` and the AAX format builds alongside the
+others. Pro Tools release builds additionally need PACE/iLok signing through
+Avid; unsigned AAX only loads in the Pro Tools Developer build.
+
 ## Build
 
 ```bash
@@ -43,20 +49,28 @@ Space, Width, Length, each wired per patch by the model or by sensible
 defaults), **ALL** (every row at once, scaled to fit) and one row at a time,
 enlarged to fill the panel:
 
-1. **SOUND** — Osc A, Osc B (morphing wavetables, importable "User 1-4"
+1. **SOUND** — Osc A, B and C (morphing wavetables, importable "User 1-4"
    tables via each oscillator's Shape cell, and **Custom**: a table the AI or
    the random breeder designed for this patch), each with a **Warp** (Sync,
    Bend, PWM, Mirror, Fold, Quantize; the Shape cell shows the warped wave),
-   Mix (sub, noise, FM B→A)
-2. **FILTER** — ladder filter (LP/HP/BP, 12 or 24 dB) plus Notch, Comb and
-   Formant modes, its envelope, the amp envelope
-3. **MODULATORS** — LFO 1-4 with drawable shapes, the Mod Env, Assign, Voice
+   Mix (sub, noise, FM B→A). Wide rows wrap onto two lines.
+2. **SAMPLE** — a sample oscillator: click the display to load a file (wav,
+   aiff, flac, mp3; copied into `~/Music/Stacks Patches/Samples` and saved
+   with the patch). **Pitched** plays it at the note (root C3, loop or once,
+   from **Start**); **Granular** sows short Hann-windowed grains around Start
+   with Grain Size, Grain Rate, Spray, random pitch and stereo spread. Start is
+   a modulation target, so an LFO scans the file. The AI never touches it.
+3. **FILTER** — ladder filter (LP/HP/BP, 12 or 24 dB) plus Notch, Comb and
+   Formant modes, a **second filter** with Routing (Series, Parallel, or Split:
+   A, sub and noise through 1, B and C through 2), its envelope, the amp
+   envelope. The response display draws the combined curve.
+4. **MODULATORS** — LFO 1-4 with drawable shapes, the Mod Env, Assign, Voice
    (unison up to 16 voices with **Uni Morph** spreading the copies across the
    table, glide, Bend Range under *more*) and the **Arp** (up/down/up-down/random/as-played, synced
    rates, octaves, gate, swing). See *Modulators* below.
-4. **SHAPE** — oversampled distortion (soft, hard, tube, fold, crush), a
+5. **SHAPE** — oversampled distortion (soft, hard, tube, fold, crush), a
    three-band EQ, and a compressor at the end of the chain (parallel mix).
-5. **SPACE** — effects. Core knobs on the panel, the rest behind each
+6. **SPACE** — effects. Core knobs on the panel, the rest behind each
    section's **more** button:
    - *Chorus*: Chorus / Ensemble (string machine) / Flanger / Dimension modes;
      more: voices, feedback, stereo spread, tone.
@@ -107,6 +121,11 @@ Osmose, Linnstrument and friends: channels 2-16 carry one note each with a
 48-semitone bend, per-note pressure (the Aftertouch source) and slide (the
 **Slide** source, CC74). Channel 1 stays the master; Bend Range (VOICE > more)
 sets its wheel and ordinary MIDI. Logic: set the track's MIDI input to MPE.
+
+**MTS-ESP.** Microtuning via the ODDSound client (`ThirdParty/MTS-ESP`): run
+any MTS-ESP master (the free MTS-ESP Mini, Scala, Surge XT as master) and every
+note in Stacks follows its scale, keys the scale leaves out stay silent. Nothing
+to set up; Settings shows the connected scale.
 
 ## The AI Lab
 
@@ -249,7 +268,8 @@ Source/
   Parameters.*     the parameter table: ids, ranges, defaults, groups, AI hints
   Wavetable.*      10 band-limited morphing wavetables plus 4 user slots (WAV import), built at startup
   LfoTable.h       drawable LFO shapes (points -> 512-sample tables)
-  SynthVoice.*     one voice: 2 wavetable oscs (B can FM A, 6 warps), sub, noise, filters, 3 env, 4 LFO, 20 connections, 16-voice unison
+  SynthVoice.*     one voice: 3 wavetable oscs (B can FM A, 6 warps), sample osc, sub, noise, 2 filters, 3 env, 4 LFO, 20 connections, 16-voice unison
+  Sampler.*        the sample oscillator: file bank (lock-free handoff) and the pitched / granular player
   Effects.*        chorus/ensemble/flanger/dimension, stereo/ping-pong/tape delay, Dattorro reverb with shimmer
   Patch.*          a named set of parameter values; JSON in/out; apply/capture
   PatchGenerator.* generators: Random (archetypes + crossover/mutation)

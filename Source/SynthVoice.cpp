@@ -121,6 +121,7 @@ void SynthVoice::startNote (int midiNoteNumber, float vel, juce::SynthesiserSoun
 
     updateEnvelopes (p);
     for (auto& f : filters) f.reset();
+    sampler.start (ctx.samples != nullptr ? ctx.samples->current() : nullptr, getSampleRate(), midiNoteNumber);
     ampEnv.noteOn();
     filterEnv.noteOn();
     modEnv.noteOn();
@@ -137,6 +138,7 @@ void SynthVoice::stopNote (float, bool allowTailOff)
     else
     {
         clearCurrentNote();
+        sampler.stop();
         ampEnv.reset();
         filterEnv.reset();
         modEnv.reset();
@@ -541,6 +543,23 @@ void SynthVoice::renderNextBlock (juce::AudioBuffer<float>& out, int startSample
             scratch2R[i] = r2 * unisonComp;
         }
 
+        // ---- the sample oscillator joins bus 1 ---------------------------------
+        if (sampler.isActive() && p.geti (P::smp_mode) > 0)
+        {
+            SamplerParams sp;
+            sp.mode = p.geti (P::smp_mode);
+            sp.level = p.get (P::smp_level);
+            sp.start = juce::jlimit (0.0f, 1.0f, p.get (P::smp_start));
+            sp.loop = p.geti (P::smp_loop) == 1;
+            sp.semitones = (float) p.geti (P::smp_coarse) + p.get (P::smp_fine) / 100.0f;
+            sp.grainMs = p.get (P::grain_size);
+            sp.grainsPerSecond = p.get (P::grain_rate);
+            sp.spray = p.get (P::grain_spray);
+            sp.pitchRand = p.get (P::grain_pitch);
+            sp.spread = p.get (P::grain_spread);
+            sampler.render (scratchL, scratchR, n, sp, note - (float) sampler.startedNote(), rng);
+        }
+
         // ---- filters -------------------------------------------------------
         const float keyTrack = p.get (P::filter_keytrack) * (currentNote - 60.0f) / 12.0f;
         const float maxHz    = juce::jmin (20000.0f, fsr * 0.45f);
@@ -596,6 +615,7 @@ void SynthVoice::renderNextBlock (juce::AudioBuffer<float>& out, int startSample
         {
             clearCurrentNote();
             for (auto& f : filters) f.reset();
+            sampler.stop();
             break;
         }
     }

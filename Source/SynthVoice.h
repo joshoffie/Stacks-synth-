@@ -8,6 +8,7 @@
 #include "Effects.h"
 #include "LfoTable.h"
 #include "libMTSClient.h"
+#include "Sampler.h"
 
 namespace stacks
 {
@@ -31,6 +32,7 @@ struct VoiceContext
     std::atomic<float> slide { 0.0f };        // last CC74 (MPE slide) on any channel, for global targets
     std::atomic<bool> mpe { false };          // MPE: channel 1 is the master, 2-16 carry one note each
     MTSClient* mts = nullptr;                 // MTS-ESP: retunes every note when a master is running
+    const SampleBank* samples = nullptr;      // the sample oscillator's file
     float masterBend = 0.0f;                  // semitones from channel 1's wheel (MPE master), audio thread only
     float masterPressure = 0.0f;              // channel 1's pressure
     float channelSlide[16] {};                // per channel, so a note that starts after the controller moved begins right
@@ -111,6 +113,7 @@ private:
         void processExtra (int type, float cutoff, float res, juce::AudioBuffer<float>& buffer, int n, float fsr) noexcept;
     };
     FilterUnit filters[2];
+    SampleVoice sampler;
     juce::AudioBuffer<float> scratch { 2, kSub }, scratch2 { 2, kSub };   // the filter 1 bus and the filter 2 bus (Parallel / Split)
     juce::Random rng;
 

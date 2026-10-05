@@ -15,6 +15,7 @@ namespace
     const juce::Colour& kSpace    = colours::rowSpace;
     const juce::Colour& kShape    = colours::rowShape;
     const juce::Colour& kMacro    = colours::rowMacro;
+    const juce::Colour& kSample   = colours::rowSample;
 
     const char* kModulatorsGroup = "__MODULATORS__";
 
@@ -24,6 +25,7 @@ namespace
     {
         static const std::vector<RowSpec> specs = {
             { "SOUND",      kSound,    0, { "OSC A", "OSC B", "OSC C", "MIX" } },
+            { "SAMPLE",     kSample,   0, { "SAMPLE", "GRAIN" } },
             { "FILTER",     kFilter,   0, { "FILTER", "FILTER 2", "FILTER ENV", "AMP ENV" } },
             { "MODULATORS", kMovement, SynthPanel::kModulatorsHeight, { kModulatorsGroup, "VOICE", "ARP" } },
             { "SHAPE",      kShape,    0, { "DISTORTION", "EQ", "COMPRESSOR" } },
@@ -197,6 +199,95 @@ void WaveDisplay::importWavetable()
 }
 
 //==============================================================================
+SampleDisplay::SampleDisplay (StacksAudioProcessor& p, juce::AudioProcessorValueTreeState& apvts, juce::Colour c) : processor (p), colour (c)
+{
+    start = apvts.getRawParameterValue (paramId (P::smp_start));
+    mode = apvts.getRawParameterValue (paramId (P::smp_mode));
+    setTooltip ("The sample oscillator's file. Click to load one (wav, aiff, flac, mp3; up to a minute is kept); right-click to remove it. The marker is Start.");
+    setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    startTimerHz (12);
+}
+
+SampleDisplay::~SampleDisplay()
+{
+    stopTimer();
+}
+
+void SampleDisplay::timerCallback()
+{
+    const auto* current = processor.sampleBank().current();
+    const float st = start->load();
+    const int md = (int) mode->load();
+    if (current != shown || std::abs (st - shownStart) > 0.002f || md != shownMode)
+    {
+        shown = current;
+        shownStart = st;
+        shownMode = md;
+        repaint();
+    }
+}
+
+void SampleDisplay::paint (juce::Graphics& g)
+{
+    auto r = getLocalBounds().toFloat().reduced (1.0f, 15.0f).withTrimmedBottom (2.0f);
+    g.setColour (colours::background);
+    g.fillRoundedRectangle (r, 4.0f);
+    g.setColour (colours::muted);
+    g.setFont (juce::Font (juce::FontOptions (9.5f)));
+    g.drawText ("Sample", getLocalBounds().removeFromTop (14), juce::Justification::centred, true);
+
+    const auto* s = shown;
+    if (s == nullptr || s->length() < 2)
+    {
+        g.drawFittedText ("click to load\na sample", r.toNearestInt().reduced (4), juce::Justification::centred, 2);
+        return;
+    }
+    // Overview: the peak of each pixel column.
+    const int columns = juce::jmax (1, (int) r.getWidth() - 4);
+    const int len = s->length();
+    const float* a = s->audio.getReadPointer (0);
+    const float midY = r.getCentreY(), half = r.getHeight() * 0.5f - 3.0f;
+    g.setColour (shownMode == 0 ? colours::muted : colour);
+    for (int c = 0; c < columns; ++c)
+    {
+        const int i0 = (int) ((juce::int64) c * len / columns), i1 = juce::jmax (i0 + 1, (int) ((juce::int64) (c + 1) * len / columns));
+        float peak = 0.0f;
+        for (int i = i0; i < i1 && i < len; i += juce::jmax (1, (i1 - i0) / 64))
+            peak = juce::jmax (peak, std::abs (a[i]));
+        const float x = r.getX() + 2.0f + (float) c;
+        g.drawVerticalLine ((int) x, midY - peak * half, midY + peak * half + 1.0f);
+    }
+    const float sx = r.getX() + 2.0f + juce::jlimit (0.0f, 1.0f, shownStart) * (float) (columns - 1);
+    g.setColour (colours::text.withAlpha (0.85f));
+    g.drawVerticalLine ((int) sx, r.getY() + 1.0f, r.getBottom() - 1.0f);
+    g.setColour (colours::muted);
+    g.drawText (s->name, getLocalBounds().removeFromBottom (14), juce::Justification::centred, true);
+}
+
+void SampleDisplay::mouseDown (const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu())
+    {
+        if (processor.sampleBank().current() != nullptr)
+            processor.clearSample();
+        return;
+    }
+    chooser = std::make_unique<juce::FileChooser> ("Load a sample for the sample oscillator",
+                                                   juce::File::getSpecialLocation (juce::File::userHomeDirectory), "*.wav;*.aif;*.aiff;*.flac;*.mp3;*.ogg");
+    chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                          [this] (const juce::FileChooser& fc)
+                          {
+                              auto file = fc.getResult();
+                              if (! file.existsAsFile())
+                                  return;
+                              juce::String error;
+                              if (! processor.importSample (file, error))
+                                  juce::NativeMessageBox::showAsync (juce::MessageBoxOptions().withIconType (juce::MessageBoxIconType::WarningIcon)
+                                                                         .withTitle ("Couldn't load that sample").withMessage (error).withButton ("OK"), nullptr);
+                          });
+}
+
+//==============================================================================
 // One row of sections, drawn with its caption band. In the single-row views
 // the whole container is scaled up to fill the panel.
 class SynthPanel::RowContainer : public juce::Component
@@ -298,13 +389,14 @@ private:
         {
             static const char* const screens[] = {
                 "SOUND is where the tone starts: three wavetable oscillators (A, B and C; B can FM A), a sub for weight and noise for air. Morph slides through each table; Warp bends it (Sync, Bend, PWM, Mirror, Fold, Quantize).",
+                "SAMPLE adds a recording to the sound: click the display to load a file. Pitched plays it at the note (loop or once, Start sets where). Granular sows short grains from around Start: Grain Size and Rate set the texture, Spray scatters them, an LFO on Start scans the file.",
                 "FILTER shapes the tone: cutoff is brightness, resonance a peak at the cutoff (Notch, Comb and Formant are special flavours). Routing turns on a second filter: series, parallel, or split (A through 1, B and C through 2). The filter envelope moves both cutoffs per note; the amp envelope shapes loudness.",
                 "MODULATORS make things move: draw an LFO, press Assign and click any knob - it swings around its value. The Arp plays held notes as a pattern in time with the host.",
                 "SHAPE adds character: distortion (soft, hard, tube, fold, crush), a three-band EQ, and a compressor at the end of the chain for glue.",
                 "SPACE is the room: chorus for width and shimmer, delay for echoes (in time with the host), reverb for the tail. The 'more' buttons hold the fine print.",
             };
             if (panel.viewMode == -2) newBody = "MACROS: six big knobs wired for this sound. Brightness opens the filter, Movement adds motion, Grit adds dirt, Space adds room, Width spreads it, Length holds it.";
-            else if (panel.viewMode >= 0 && panel.viewMode < 5) newBody = screens[panel.viewMode];
+            else if (panel.viewMode >= 0 && panel.viewMode < 6) newBody = screens[panel.viewMode];
             else newBody = "Hover any control to see what it does. The tabs above open one section at a time, larger. Signal flows top to bottom: SOUND > FILTER > MODULATORS > SPACE.";
         }
         if (newTitle != title || newBody != body)
@@ -479,6 +571,13 @@ SynthPanel::SynthPanel (StacksAudioProcessor& p) : processor (p), apvts (p.apvts
         controls.push_back (std::move (control));
 
         const juce::String id (spec.id);
+        if (id == "smp_mode")
+        {
+            auto display = std::make_unique<SampleDisplay> (processor, apvts, section->colour);
+            addAndMakeVisible (*display);
+            section->controls.emplace_back (display.get(), 2 * kCell);
+            controls.push_back (std::move (display));
+        }
         if (id == "oscA_wave" || id == "oscB_wave" || id == "oscC_wave")
         {
             auto display = std::make_unique<WaveDisplay> (processor, id == "oscA_wave" ? 0 : id == "oscB_wave" ? 1 : 2, section->colour);

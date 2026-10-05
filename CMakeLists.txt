@@ -60,6 +60,16 @@ else()
     set(STACKS_COPY_PLUGIN FALSE)   # no system plug-in folder to write to on a build machine
 endif()
 
+# Pro Tools (AAX) needs Avid's SDK, which only an Avid developer account can
+# download. Point STACKS_AAX_SDK_PATH at it and the AAX format is built too
+# (release builds also need PACE signing; see the README).
+set(STACKS_AAX_SDK_PATH "" CACHE PATH "Avid AAX SDK folder (enables the AAX format)")
+if(STACKS_AAX_SDK_PATH AND EXISTS "${STACKS_AAX_SDK_PATH}")
+    juce_set_aax_sdk_path("${STACKS_AAX_SDK_PATH}")
+    list(APPEND STACKS_FORMATS AAX)
+    message(STATUS "AAX format enabled with SDK at ${STACKS_AAX_SDK_PATH}")
+endif()
+
 juce_add_plugin(Stacks
     PRODUCT_NAME "Stacks"
     COMPANY_NAME "Hoffman Audio"
@@ -121,6 +131,7 @@ target_sources(Stacks PRIVATE
     Source/Patch.cpp
     Source/Effects.cpp
     Source/Arpeggiator.cpp
+    Source/Sampler.cpp
     ThirdParty/MTS-ESP/libMTSClient.cpp
     Source/PatchGenerator.cpp
     Source/ai/OllamaBackend.cpp
@@ -169,6 +180,7 @@ target_sources(StacksTests PRIVATE
     Source/Patch.cpp
     Source/PatchGenerator.cpp
     Source/Arpeggiator.cpp
+    Source/Sampler.cpp
     ThirdParty/MTS-ESP/libMTSClient.cpp
     Source/ai/LlmPatchGenerator.cpp
     Source/ai/LlamaBackend.cpp

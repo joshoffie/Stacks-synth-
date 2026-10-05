@@ -27,6 +27,8 @@ struct ParamSpec
 const juce::StringArray& waveNames();
 const juce::StringArray& filterTypeNames();
 const juce::StringArray& filterRoutingNames();   // second filter: Off, Series, Parallel, Split
+const juce::StringArray& sampleModeNames();      // sample oscillator: Off, Pitched, Granular
+const juce::StringArray& onOffNames();
 const juce::StringArray& distModeNames();
 const juce::StringArray& warpNames();     // oscillator warps: Off, Sync, Bend, PWM, Mirror, Fold, Quantize
 const juce::StringArray& arpModeNames();
@@ -87,6 +89,17 @@ inline bool isBipolarSource (int src) noexcept
  X(oscC_level,     "C Level",      "OSC C",      Float,   0,     1,     0,     0,     "",   nullptr,            "oscillator C volume, 0 = off") \
  X(oscC_warp,      "C Warp",       "OSC C",      Choice,  0,     6,     0,     0,     "",   warpNames,          "warp for table C, same modes as A Warp") \
  X(oscC_warp_amt,  "C Warp Amt",   "OSC C",      Float,   0,     1,     0,     0,     "",   nullptr,            "how far the C warp goes") \
+ X(smp_mode,       "Sample Mode",  "SAMPLE",     Choice,  0,     2,     0,     0,     "",   sampleModeNames,    "sample oscillator: Off; Pitched plays the loaded file at the note (root C3); Granular sows short grains from around Start") \
+ X(smp_level,      "Sample Level", "SAMPLE",     Float,   0,     1,     0.8,   0,     "",   nullptr,            "sample oscillator volume") \
+ X(smp_start,      "Start",        "SAMPLE",     Float,   0,     1,     0,     0,     "",   nullptr,            "where in the file playback or the grain cloud sits, 0 = beginning; sweep it with an LFO to scan") \
+ X(smp_loop,       "Loop",         "SAMPLE",     Choice,  0,     1,     1,     0,     "",   onOffNames,         "Pitched mode: loop the file from Start, or play it once") \
+ X(smp_coarse,     "Sample Pitch", "SAMPLE",     Int,    -24,    24,    0,     0,     "st", nullptr,            "transposes the sample in semitones") \
+ X(smp_fine,       "Sample Fine",  "SAMPLE",     Float,  -100,   100,   0,     0,     "ct", nullptr,            "sample detune in cents (advanced)") \
+ X(grain_size,     "Grain Size",   "GRAIN",      Float,   10,    500,   80,    80,    "ms", nullptr,            "length of each grain: short = buzzy and pitched, long = smooth") \
+ X(grain_rate,     "Grain Rate",   "GRAIN",      Float,   2,     100,   20,    20,    "/s", nullptr,            "grains per second: more = a denser, smoother cloud") \
+ X(grain_spray,    "Spray",        "GRAIN",      Float,   0,     1,     0.1,   0,     "",   nullptr,            "how far grains scatter around Start, 0 = all from one spot") \
+ X(grain_pitch,    "Grain Pitch",  "GRAIN",      Float,   0,     12,    0,     0,     "st", nullptr,            "random detune per grain in semitones (advanced)") \
+ X(grain_spread,   "Grain Spread", "GRAIN",      Float,   0,     1,     0.5,   0,     "",   nullptr,            "stereo scatter of the grains (advanced)") \
  X(sub_level,      "Sub",          "MIX",        Float,   0,     1,     0,     0,     "",   nullptr,            "sine sub-oscillator one octave below") \
  X(noise_level,    "Noise",        "MIX",        Float,   0,     1,     0,     0,     "",   nullptr,            "white noise level") \
  X(fm_amount,      "FM B>A",       "MIX",        Float,   0,     1,     0,     0,     "",   nullptr,            "how much B frequency-modulates A: 0 none, 0.1 warm, 0.3+ metallic") \

@@ -32,6 +32,7 @@ void loadThemeFile (const juce::File& file)
     pick ("rowSpace",    colours::rowSpace);
     pick ("rowShape",    colours::rowShape);
     pick ("rowMacro",    colours::rowMacro);
+    pick ("rowSample",   colours::rowSample);
 }
 
 juce::Colour modSourceColour (int source)

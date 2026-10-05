@@ -24,6 +24,7 @@ struct Patch
     std::array<float, kNumParams> values;  // real-world values; Choice params hold the index
     std::array<juce::String, kNumLfos> lfoShapes; // drawn LFO shapes as point JSON, empty = none
     std::array<juce::String, 4> userWaves;        // file names of the imported wavetables in User 1-4
+    juce::String sampleFile;                       // the sample oscillator's file (name in the Samples folder, or a full path)
     std::array<WaveSpec, kNumOscs> waves;         // designed tables behind "Custom" for osc A, B and C
     static const char* waveKey (int osc) noexcept { return osc == 0 ? "waveA" : osc == 1 ? "waveB" : "waveC"; }   // JSON keys
     juce::StringArray tags;                // lowercase words a producer would search for
@@ -58,6 +59,8 @@ struct Patch
     static juce::Identifier userWaveProperty (int slot);
     static const juce::Identifier& customWavesTreeType();   // the designed tables, as JSON per oscillator
     static juce::Identifier customWaveProperty (int osc);
+    static const juce::Identifier& sampleTreeType();        // the sample oscillator's file
+    static const juce::Identifier& sampleFileProperty();
 };
 
 // Keeps a patch in tune with the note that is played: oscillator A only at

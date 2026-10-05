@@ -419,7 +419,8 @@ namespace
         for (int i = 0; i < kNumParams; ++i)
         {
             const auto& s = specs[(size_t) i];
-            if (std::strcmp (s.id, "master_gain") == 0 || std::strcmp (s.group, "MACROS") == 0 || std::strcmp (s.group, "ARP") == 0)
+            if (std::strcmp (s.id, "master_gain") == 0 || std::strcmp (s.group, "MACROS") == 0 || std::strcmp (s.group, "ARP") == 0
+                || std::strcmp (s.group, "SAMPLE") == 0 || std::strcmp (s.group, "GRAIN") == 0)   // the player picks the sample
                 continue;
 
             if (s.kind == ParamKind::Choice)
@@ -634,7 +635,7 @@ int countAudibleDifferences (const Patch& a, const Patch& b)
     {
         const juce::String id (specs[(size_t) i].id);
         const juce::String group (specs[(size_t) i].group);
-        if (id == "master_gain" || id == "bend_range" || id.startsWith ("mod") || group == "MACROS" || group == "ARP")
+        if (id == "master_gain" || id == "bend_range" || id.startsWith ("mod") || group == "MACROS" || group == "ARP" || group == "SAMPLE" || group == "GRAIN")
             continue;
         if (specs[(size_t) i].kind == ParamKind::Choice)
         {
