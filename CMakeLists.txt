@@ -89,6 +89,30 @@ if(APPLE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Factory")
     endforeach()
 endif()
 
+# iCloud Drive leaves extended attributes on files copied out of the project
+# (the factory presets among them) and codesign refuses a bundle carrying that
+# "detritus", which left every bundle with a broken seal. After JUCE's own
+# sign-and-copy, strip the attributes and re-sign ad hoc: the built bundle and,
+# for the plug-ins, the copy in ~/Library/Audio/Plug-Ins.
+if(APPLE)
+    foreach(fmt IN ITEMS Standalone AU VST3)
+        if(NOT TARGET Stacks_${fmt})
+            continue()
+        endif()
+        set(bundles "$<TARGET_BUNDLE_DIR:Stacks_${fmt}>")
+        if(fmt STREQUAL "AU")
+            list(APPEND bundles "$ENV{HOME}/Library/Audio/Plug-Ins/Components/Stacks.component")
+        elseif(fmt STREQUAL "VST3")
+            list(APPEND bundles "$ENV{HOME}/Library/Audio/Plug-Ins/VST3/Stacks.vst3")
+        endif()
+        foreach(bundle IN LISTS bundles)
+            add_custom_command(TARGET Stacks_${fmt} POST_BUILD
+                COMMAND sh -c "if [ -d '${bundle}' ]; then for i in 1 2 3 4 5; do xattr -cr '${bundle}'; if codesign --force --deep --sign - '${bundle}' 2>/dev/null; then break; fi; sleep 1; done; codesign --verify --deep --strict '${bundle}' || echo 'warning: could not seal ${bundle} (iCloud attributes); it still loads, the seal is cosmetic'; fi"
+                VERBATIM)
+        endforeach()
+    endforeach()
+endif()
+
 target_sources(Stacks PRIVATE
     Source/Parameters.cpp
     Source/Wavetable.cpp
