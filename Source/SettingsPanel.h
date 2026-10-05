@@ -38,6 +38,7 @@ private:
     juce::ComboBox engineBox;
     juce::TextButton refreshButton, downloadButton, addModelButton, urlModelButton, removeModelButton, saveGuideButton;
     juce::ToggleButton calmToggle { "Calm mode: no live knob markers or LFO playhead (the scope stays)" };
+    juce::ToggleButton mpeToggle  { "MPE: per-note pitch bend (48 st on channels 2-16), pressure and slide (CC74); channel 1 is the master" };
     juce::TextEditor guide;
     juce::StringArray menuBuiltins, menuOllama;
     std::unique_ptr<juce::FileChooser> chooser;

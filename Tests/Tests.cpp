@@ -900,6 +900,101 @@ static int benchmark (const juce::String& label)
 // uniquely named and audibly different from everything kept so far. Written
 // to Factory/<Category>/<Name>.json next to the sources; the plug-in installs
 // that folder into the library on first run.
+
+// Oscillator warps and the modulation sources that came with MPE.
+static void testWarpsAndSources()
+{
+    std::printf ("warps and sources\n");
+    for (int mode = 0; mode < kNumWarpModes; ++mode)
+        for (int i = 0; i <= 20; ++i)
+        {
+            const float p = (float) i / 20.0f * 0.999f;
+            CHECK (std::abs (warpPhase (mode, p, 0.0f) - p) < 1.0e-5f);          // every warp is the identity at 0
+            const float q = warpPhase (mode, p, 1.0f);
+            CHECK (q >= 0.0f && q < 1.0f);                                       // and still a phase at full
+            const float s = std::sin (6.2831853f * p);
+            CHECK (std::abs (warpSample (mode, s, 0.0f) - s) < 0.02f);           // Quantize at 0 is 128 levels
+            CHECK (std::abs (warpSample (mode, s, 1.0f)) <= 1.0f + 1.0e-5f);
+        }
+    CHECK (warpPhase (WarpPwm, 0.9f, 1.0f) > 0.99f);                             // the tail of the cycle is held
+    CHECK (std::abs (warpPhase (WarpMirror, 0.75f, 1.0f) - 0.5f) < 1.0e-5f);     // mirrored back toward the middle
+    CHECK (std::abs (warpPhase (WarpSync, 0.5f, 1.0f)) < 1.0e-5f);               // 8 cycles per cycle: 0.5 lands on a restart
+    CHECK (warpRateFactor (WarpSync, 1.0f) == 8.0f && warpRateFactor (WarpFold, 1.0f) == 1.0f);
+    CHECK (warpNames().size() == kNumWarpModes);
+
+    CHECK (modSourceNames().size() == kNumModSources && modSourceNames()[SrcSlide] == "Slide");
+    CHECK (! isMacroSource (SrcSlide) && ! isBipolarSource (SrcSlide));
+    for (int i = 0; i < kNumModSlots; ++i)
+        CHECK (spec (modSourceParam (i)).choices().size() == kNumModSources);
+    CHECK (spec (P::unison_voices).max == 16.0f && spec (P::bend_range).def == 2.0f);
+    CHECK (isAdvancedParam ("bend_range") && ! isAdvancedParam ("oscA_warp_amt"));
+    CHECK (modTargetNames().contains ("A Warp Amt") && modTargetNames().contains ("Uni Morph") && ! modTargetNames().contains ("Bend Range"));
+
+    // A patch with a warp reads as one; Bend Range stays out of the AI's hands.
+    Patch p;
+    p.set (P::oscA_warp, (float) WarpFold);
+    p.set (P::oscA_warp_amt, 0.6f);
+    CHECK (describePatch (p).contains ("fold warp on A"));
+
+    // A warp mode on its own is silent; with its amount up it counts (mode + amount).
+    Patch a, b;
+    b.set (P::oscA_warp, (float) WarpSync);
+    CHECK (countAudibleDifferences (a, b) == 0);
+    b.set (P::oscA_warp_amt, 0.5f);
+    CHECK (countAudibleDifferences (a, b) == 2);
+}
+
+// Re-applies the prompt cues to every preset in Factory/ (after the rules change).
+static int retouchFactory()
+{
+    const auto factory = juce::File (__FILE__).getParentDirectory().getParentDirectory().getChildFile ("Factory");
+    int changed = 0, seen = 0;
+    for (const auto& file : factory.findChildFiles (juce::File::findFiles, true, "*.json"))
+    {
+        auto p = Patch::fromJson (file.loadFileAsString());
+        if (! p || p->prompt.isEmpty()) continue;
+        ++seen;
+        const auto before = p->toJson();
+        applyPromptCues (p->prompt, *p);
+        const auto after = p->toJson();
+        if (after != before)
+        {
+            file.replaceWithText (after);
+            ++changed;
+            std::printf ("  %-28s <- %s\n", p->name.toRawUTF8(), p->prompt.toRawUTF8());
+        }
+    }
+    std::printf ("retouched %d of %d presets\n", changed, seen);
+    return 0;
+}
+
+static void testPromptCues()
+{
+    std::printf ("prompt cues\n");
+    Patch p;
+    applyPromptCues ("80s synthwave pad, lush chorus with delay and a long tail", p);
+    CHECK (p.get (P::chorus_mix) >= 0.4f && p.get (P::delay_mix) >= 0.3f && p.get (P::reverb_mix) >= 0.35f && p.get (P::reverb_size) >= 0.7f);
+    Patch q;
+    q.set (P::chorus_mix, 0.8f);
+    applyPromptCues ("lush chorus", q);
+    CHECK (q.get (P::chorus_mix) == 0.8f);                       // never lowered
+    Patch r;
+    applyPromptCues ("subtle pad", r);
+    CHECK (r.get (P::sub_level) == spec (P::sub_level).def);     // "subtle" is not "sub"
+    Patch s;
+    applyPromptCues ("deep clean sub bass", s);
+    CHECK (s.get (P::sub_level) >= 0.5f);
+    Patch t;
+    applyPromptCues ("stab chord for house, short and punchy", t);
+    CHECK (t.get (P::aenv_release) <= 0.3f);
+    Patch u;
+    applyPromptCues ("lo-fi dusty pluck with tape wobble", u);
+    CHECK ((int) u.get (P::dist_mode) == distModeNames().indexOf ("Crush") && (int) u.get (P::delay_mode) == delayModeNames().indexOf ("Tape") && u.get (P::delay_wow) >= 0.3f);
+    Patch v;
+    applyPromptCues ("", v);
+    CHECK (v.sameValuesAs (Patch()));                            // nothing asked, nothing changed
+}
+
 static int buildFactory (int perPrompt)
 {
     std::optional<ModelInfo> chosen;
@@ -973,6 +1068,7 @@ static int buildFactory (int perPrompt)
             p.filePath.clear();
             if (p.tags.isEmpty()) p.tags = autoTags (p);
             if (! p.tags.contains ("factory")) p.tags.add ("factory");
+            applyPromptCues (prompt, p);
             ensureMacroRoutings (p);
             const auto folder = factory.getChildFile (p.category.isNotEmpty() ? p.category : juce::String ("Other"));
             folder.createDirectory();
@@ -991,6 +1087,8 @@ static int buildFactory (int perPrompt)
 
 int main (int argc, char** argv)
 {
+    if (argc > 1 && juce::String (argv[1]) == "--retouch")
+        return retouchFactory();
     if (argc > 1 && juce::String (argv[1]) == "--factory")
         return buildFactory (argc > 2 ? juce::jlimit (1, 4, juce::String (argv[2]).getIntValue()) : 2);
     if (argc > 1 && juce::String (argv[1]) == "--bench")
@@ -1006,6 +1104,8 @@ int main (int argc, char** argv)
     testGrammarAndPrompt();
     testArpeggiator();
     testMacroRoutings();
+    testWarpsAndSources();
+    testPromptCues();
     testRandomGenerator();
     testLlmGenerator();
     std::printf ("\n%d checks, %d failures\n", checks, failures);

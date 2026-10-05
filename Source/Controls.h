@@ -7,16 +7,32 @@
 namespace stacks
 {
 
+// The palette. Mutable so a theme file can recolour the whole UI at startup
+// (see loadThemeFile); every component reads these when it paints.
 namespace colours
 {
-    const juce::Colour background { 0xff1b1d22 };
-    const juce::Colour panel      { 0xff24272e };
-    const juce::Colour card       { 0xff2b2f37 };
-    const juce::Colour accent     { 0xfff2a541 };
-    const juce::Colour accentDim  { 0xff4d3a1f };
-    const juce::Colour text       { 0xffe8e8e8 };
-    const juce::Colour muted      { 0xff8a8f99 };
+    inline juce::Colour background { 0xff1b1d22 };
+    inline juce::Colour panel      { 0xff24272e };
+    inline juce::Colour card       { 0xff2b2f37 };
+    inline juce::Colour accent     { 0xfff2a541 };
+    inline juce::Colour accentDim  { 0xff4d3a1f };
+    inline juce::Colour text       { 0xffe8e8e8 };
+    inline juce::Colour muted      { 0xff8a8f99 };
+
+    // One hue per row of the panel (knob colour = row).
+    inline juce::Colour rowSound    { 0xfff2a541 }; // amber
+    inline juce::Colour rowFilter   { 0xffe8775a }; // coral
+    inline juce::Colour rowMovement { 0xff5ec8c0 }; // teal
+    inline juce::Colour rowSpace    { 0xff7fa7d8 }; // blue
+    inline juce::Colour rowShape    { 0xffd08ab8 }; // rose
+    inline juce::Colour rowMacro    { 0xffe0c070 }; // gold
 }
+
+// Reads a theme file: a JSON object of hex colours ("rrggbb" or "aarrggbb")
+// under any of the keys background, panel, card, accent, accentDim, text,
+// muted, rowSound, rowFilter, rowMovement, rowSpace, rowShape, rowMacro.
+// Missing keys keep the default. Call before any window is created.
+void loadThemeFile (const juce::File&);
 
 // One colour per modulation source, used for rings, editors and tabs.
 juce::Colour modSourceColour (int source);

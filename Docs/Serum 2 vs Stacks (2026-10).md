@@ -17,27 +17,27 @@ From a delegated research pass over Xfer's site and manual, MusicTech, MusicRada
 | Serum 2 feature | Stacks | Solo-dev call |
 |---|---|---|
 | 3 oscillators | partial (2) | cheap, moderate value |
-| Wavetable warps (sync, bend, PWM, mirror, fold), dual warp | partial (morph + B→A FM) | add 4–6 warps: cheap, high value |
-| 16-voice unison with WT-pos spread | partial (4 voices) | cheap, high value |
+| Wavetable warps (sync, bend, PWM, mirror, fold), dual warp | yes: Sync, Bend, PWM, Mirror, Fold, Quantize per oscillator (one warp each), shown in the Shape cell | done 2026-10-04 |
+| 16-voice unison with WT-pos spread | yes: up to 16 voices, Uni Morph spreads the table position | done 2026-10-04 |
 | Sample / multisample / granular / spectral oscillators | no | expensive; the AI spectral-recipe tables cover part of the "design by spectrum" case |
 | Wavetable editor | no | a harmonic-bar editor is cheap and pairs with the recipe tables |
 | Two filters, series/parallel, per-osc routing | no (one ladder) | medium, high value |
-| Big filter set (comb, formant, notch, vintage) | partial (LP/HP/BP) | SVF notch/comb/formant: cheap to medium |
-| 8 macros | no | cheap, high value |
+| Big filter set (comb, formant, notch, vintage) | LP/HP/BP 12/24 plus Notch, Comb, Formant | done 2026-10-04 (vintage models open) |
+| 8 macros | 6 named macros, wired per patch by the model or defaults, MACROS page first | done 2026-10-04 |
 | Drag-drop matrix, bypass, curve remap, audio-rate sources | partial (12 fixed slots, drag-to-knob) | bypass + curves cheap; audio-rate skip |
-| Live modulation arcs on knobs | partial (rings + live marker) | animated arc: cheap, high value |
-| 13-effect modular rack, aux busses, splitters | partial (chorus, delay, reverb) | distortion, EQ, compressor: cheap, high value; busses medium |
+| Live modulation arcs on knobs | rings + live marker, calm mode toggle | partial |
+| 13-effect modular rack, aux busses, splitters | distortion, EQ, chorus, delay, reverb, compressor in a fixed order | effects done 2026-10-04; rack order and busses open |
 | Bode shifter, convolution | no | low priority |
-| Arpeggiator | no | medium effort, high value |
+| Arpeggiator | yes: up/down/up-down/random/as-played, synced rates, octaves, gate, swing | done 2026-10-04 |
 | Clip sequencer with MIDI out | no | expensive; skip |
-| MPE | no | medium (JUCE helps) |
-| MTS-ESP microtuning | no | cheap via the client library; niche |
-| Resizable vector UI, theme file | partial (window scaling) | theme file cheap |
-| Undo / redo | no | cheap, high value |
-| Tagged browser with ratings and audition previews | partial (folders, hearts, tags for user content) | factory tags + audition: cheap, high value |
-| Factory library (626 presets, 288 tables) | no | batch-generate with the AI Lab and curate |
+| MPE | yes: Settings > MPE, 48 st member bend, pressure, Slide (CC74) source | done 2026-10-04 |
+| MTS-ESP microtuning | no | needs the ODDSound client vendored (a download to approve) |
+| Resizable vector UI, theme file | yes: resizable vector UI, theme.json in the library folder | done 2026-10-04 |
+| Undo / redo | yes: every load, drag and knob gesture | done 2026-10-04 |
+| Tagged browser with ratings and audition previews | folders, hearts, tags on every preset, audition phrase on click | done 2026-10-04 (ratings beyond hearts open) |
+| Factory library (626 presets, 288 tables) | 85 AI-generated presets in 8 categories, each with its own designed table, tags and a prompt-cue pass | done 2026-10-04; grows with every run |
 | SFZ / IR / PNG / MIDI import | partial (WAV tables) | skip for now |
-| Windows / AAX / Linux | no (macOS AU/VST3) | Windows later |
+| Windows / AAX / Linux | Windows VST3/Standalone builds in CI (untested on hardware); AAX needs the Avid SDK | partial |
 
 ## What matters most day to day
 

@@ -9,12 +9,12 @@ namespace
 {
     // Row colours: one hue per stage of the signal path, so a knob's colour
     // says what part of the synth it belongs to.
-    const juce::Colour kSound    { 0xfff2a541 }; // amber
-    const juce::Colour kFilter   { 0xffe8775a }; // coral
-    const juce::Colour kMovement { 0xff5ec8c0 }; // teal
-    const juce::Colour kSpace    { 0xff7fa7d8 }; // blue
-    const juce::Colour kShape    { 0xffd08ab8 }; // rose
-    const juce::Colour kMacro    { 0xffe0c070 }; // gold
+    const juce::Colour& kSound    = colours::rowSound;
+    const juce::Colour& kFilter   = colours::rowFilter;
+    const juce::Colour& kMovement = colours::rowMovement;
+    const juce::Colour& kSpace    = colours::rowSpace;
+    const juce::Colour& kShape    = colours::rowShape;
+    const juce::Colour& kMacro    = colours::rowMacro;
 
     const char* kModulatorsGroup = "__MODULATORS__";
 
@@ -110,13 +110,17 @@ void WaveDisplay::timerCallback()
 {
     const int wave = (int) processor.apvts.getRawParameterValue (paramId (oscB ? P::oscB_wave : P::oscA_wave))->load();
     const float morph = processor.apvts.getRawParameterValue (paramId (oscB ? P::oscB_morph : P::oscA_morph))->load();
+    const int warp = (int) processor.apvts.getRawParameterValue (paramId (oscB ? P::oscB_warp : P::oscA_warp))->load();
+    const float warpAmt = processor.apvts.getRawParameterValue (paramId (oscB ? P::oscB_warp_amt : P::oscA_warp_amt))->load();
     const int slot = wave >= kCustomWave ? UserWavetables::customSlot (oscB ? 1 : 0) : wave - WavetableBank::kNumBuiltIn;
     const auto name = wave >= WavetableBank::kNumBuiltIn ? processor.userWaveName (slot) : juce::String();
-    if (wave != shownWave || std::abs (morph - shownMorph) > 0.002f || name != shownName)
+    if (wave != shownWave || std::abs (morph - shownMorph) > 0.002f || name != shownName || warp != shownWarp || std::abs (warpAmt - shownWarpAmt) > 0.002f)
     {
         shownWave = wave;
         shownMorph = morph;
         shownName = name;
+        shownWarp = warp;
+        shownWarpAmt = warpAmt;
         repaint();
     }
 }
@@ -138,10 +142,12 @@ void WaveDisplay::paint (juce::Graphics& g)
     for (int i = 0; i <= steps; ++i)
     {
         const float phase = (float) i / (float) steps;
+        const float wp = warpPhase (shownWarp, phase >= 1.0f ? 0.999f : phase, shownWarpAmt);   // the display shows the warp too
         float y = 0.0f;
-        if (user < 0)           y = processor.builtInWavetables().read (wave, 0, morph, phase >= 1.0f ? 0.999f : phase);
-        else if (table != nullptr) y = table->read (0, morph, phase >= 1.0f ? 0.999f : phase);
-        else                    y = std::sin (juce::MathConstants<float>::twoPi * phase);
+        if (user < 0)           y = processor.builtInWavetables().read (wave, 0, morph, wp);
+        else if (table != nullptr) y = table->read (0, morph, wp);
+        else                    y = std::sin (juce::MathConstants<float>::twoPi * wp);
+        y = warpSample (shownWarp, y, shownWarpAmt);
         const float px = r.getX() + 2.0f + phase * (r.getWidth() - 4.0f);
         const float py = r.getCentreY() - y * (r.getHeight() * 0.5f - 3.0f);
         if (i == 0) path.startNewSubPath (px, py); else path.lineTo (px, py);
@@ -291,7 +297,7 @@ private:
         if (newBody.isEmpty())
         {
             static const char* const screens[] = {
-                "SOUND is where the tone starts: two wavetable oscillators (A and B, B can FM A), a sub for weight and noise for air. Morph slides through each table.",
+                "SOUND is where the tone starts: two wavetable oscillators (A and B, B can FM A), a sub for weight and noise for air. Morph slides through each table; Warp bends it (Sync, Bend, PWM, Mirror, Fold, Quantize).",
                 "FILTER shapes the tone: cutoff is brightness, resonance a peak at the cutoff (Notch, Comb and Formant are special flavours). The filter envelope moves the cutoff per note; the amp envelope shapes loudness.",
                 "MODULATORS make things move: draw an LFO, press Assign and click any knob - it swings around its value. The Arp plays held notes as a pattern in time with the host.",
                 "SHAPE adds character: distortion (soft, hard, tube, fold, crush), a three-band EQ, and a compressor at the end of the chain for glue.",

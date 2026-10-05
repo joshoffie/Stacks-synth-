@@ -52,6 +52,12 @@ void mutatePatch (Patch&, float amount, juce::int64 seed);
 // changed, a knob moved more than 12% of its travel, or a connection that
 // differs (source/target). The Lab uses it to keep descendants apart.
 int countAudibleDifferences (const Patch&, const Patch&);
+
+// Honours what a prompt asks for by name: "lush chorus", "with delay", "tape",
+// "shimmer", "distorted", "wide", "sub bass", "portamento", "punchy", "riser",
+// "arp". Raises the settings those words call for and never lowers what the
+// model chose (except the release for "punchy"/"stab"/"short").
+void applyPromptCues (const juce::String& hint, Patch&);
 WaveSpec mutateWave (const WaveSpec&, float amount, juce::int64 seed);
 
 // No AI: archetype-based random patches, plus crossover + mutation of the

@@ -1,0 +1,48 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  macos:
+    name: macOS (AU, VST3, Standalone, tests)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: deps-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
+      - run: brew install ninja
+      - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build build --target Stacks_AU Stacks_VST3 Stacks_Standalone StacksTests
+      - run: ./build/StacksTests_artefacts/Release/StacksTests
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Stacks-macOS
+          path: |
+            build/Stacks_artefacts/Release/AU
+            build/Stacks_artefacts/Release/VST3
+            build/Stacks_artefacts/Release/Standalone
+
+  windows:
+    name: Windows (VST3, Standalone, tests)
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: deps-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
+      - run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+      - run: cmake --build build --config Release --target Stacks_VST3 Stacks_Standalone StacksTests
+      - run: ./build/StacksTests_artefacts/Release/StacksTests.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Stacks-Windows
+          path: |
+            build/Stacks_artefacts/Release/VST3
+            build/Stacks_artefacts/Release/Standalone

@@ -77,6 +77,14 @@ void SynthVoice::startNote (int midiNoteNumber, float vel, juce::SynthesiserSoun
     ctx.displayVoice.store (serial);
     pitchWheelMoved (currentPitchWheelPosition);
 
+    // The Synthesiser set our channel before calling us: start with that
+    // channel's current slide and pressure (an MPE controller sends them first).
+    channel = 1;
+    for (int ch = 1; ch <= 16; ++ch)
+        if (isPlayingChannel (ch)) { channel = ch; break; }
+    slide = ctx.channelSlide[channel - 1];
+    aftertouch = ctx.channelPressure[channel - 1];
+
     // Glide starts from whatever note was played last, on any voice.
     targetNote = (float) midiNoteNumber;
     const float glideTime = p.get (P::glide);
@@ -137,13 +145,18 @@ void SynthVoice::stopNote (float, bool allowTailOff)
 
 void SynthVoice::pitchWheelMoved (int newPitchWheelValue)
 {
-    pitchBendSemis = (float) (newPitchWheelValue - 8192) / 8192.0f * 2.0f;
+    bendNorm = (float) (newPitchWheelValue - 8192) / 8192.0f;
 }
 
 void SynthVoice::controllerMoved (int controllerNumber, int newValue)
 {
     if (controllerNumber == 1)
         ctx.modWheel.store ((float) newValue / 127.0f);
+    else if (controllerNumber == 74)   // MPE slide, per note
+    {
+        slide = (float) newValue / 127.0f;
+        ctx.slide.store (slide);
+    }
 }
 
 void SynthVoice::aftertouchChanged (int newValue)
@@ -277,7 +290,8 @@ float SynthVoice::sourceValue (int source, const float* lfo, float filterEnvValu
         case SrcVelocity:   return velocity;
         case SrcKey:        return juce::jlimit (-1.0f, 1.0f, (currentNote - 60.0f) / 36.0f);
         case SrcModWheel:   return ctx.modWheel.load();
-        case SrcAftertouch: return aftertouch;
+        case SrcAftertouch: return juce::jmax (aftertouch, ctx.mpe.load (std::memory_order_relaxed) ? ctx.masterPressure : 0.0f);
+        case SrcSlide:      return slide;
         case SrcRandom:     return noteRandom;
         case SrcMacro1: case SrcMacro2: case SrcMacro3: case SrcMacro4: case SrcMacro5: case SrcMacro6:
                             return ctx.params->get (macroParam (source - SrcMacro1));   // the big knobs, shared by every voice
@@ -378,13 +392,20 @@ void SynthVoice::renderNextBlock (juce::AudioBuffer<float>& out, int startSample
         const float morphA      = juce::jlimit (0.0f, 1.0f, p.get (P::oscA_morph));
         const float morphB      = juce::jlimit (0.0f, 1.0f, p.get (P::oscB_morph));
         const float fm          = juce::jlimit (0.0f, 1.0f, p.get (P::fm_amount));
+        const int warpA         = juce::jlimit (0, kNumWarpModes - 1, p.geti (P::oscA_warp));
+        const int warpB         = juce::jlimit (0, kNumWarpModes - 1, p.geti (P::oscB_warp));
+        const float warpAmtA    = juce::jlimit (0.0f, 1.0f, p.get (P::oscA_warp_amt));
+        const float warpAmtB    = juce::jlimit (0.0f, 1.0f, p.get (P::oscB_warp_amt));
+        const float uniMorph    = p.get (P::unison_morph);
         const float fmDepth     = fm * fm * 2.0f;        // cycles of phase excursion
         const float unisonComp  = 1.0f / std::sqrt ((float) unison);
 
-        float gainL[kMaxUnison], gainR[kMaxUnison], detuneRatio[kMaxUnison];
+        float gainL[kMaxUnison], gainR[kMaxUnison], detuneRatio[kMaxUnison], morphAu[kMaxUnison], morphBu[kMaxUnison];
         for (int u = 0; u < unison; ++u)
         {
             const float offset = unison > 1 ? -1.0f + 2.0f * (float) u / (float) (unison - 1) : 0.0f;
+            morphAu[u] = juce::jlimit (0.0f, 1.0f, morphA + 0.5f * uniMorph * offset);   // Uni Morph: each copy at its own table position
+            morphBu[u] = juce::jlimit (0.0f, 1.0f, morphB + 0.5f * uniMorph * offset);
             const float upan   = offset * spread;
             gainL[u] = unison > 1 ? std::sqrt (0.5f * (1.0f - upan)) * juce::MathConstants<float>::sqrt2 : 1.0f;
             gainR[u] = unison > 1 ? std::sqrt (0.5f * (1.0f + upan)) * juce::MathConstants<float>::sqrt2 : 1.0f;
@@ -402,12 +423,17 @@ void SynthVoice::renderNextBlock (juce::AudioBuffer<float>& out, int startSample
             }
         }
 
+        // Pitch wheel: Bend Range on ordinary channels; in MPE mode a member
+        // channel (2-16) bends 48 semitones per note and channel 1 bends everything.
+        const bool mpe     = ctx.mpe.load (std::memory_order_relaxed);
+        const bool member  = mpe && channel != 1;
+        const float pitchBendSemis = bendNorm * (member ? 48.0f : (float) p.geti (P::bend_range)) + (member ? ctx.masterBend : 0.0f);
         const float note   = currentNote + pitchBendSemis + pitchMod;
         const float baseHz = midiToHz (note);
         const float hzA    = baseHz * std::exp2 (semisA / 12.0f);
         const float hzB    = baseHz * std::exp2 (semisB / 12.0f);
-        const int mipA     = WavetableBank::levelFor (hzA * (1.0f + 3.0f * fm), sr); // FM widens A's spectrum
-        const int mipB     = WavetableBank::levelFor (hzB, sr);
+        const int mipA     = WavetableBank::levelFor (hzA * (1.0f + 3.0f * fm) * warpRateFactor (warpA, warpAmtA), sr); // FM and Sync widen A's spectrum
+        const int mipB     = WavetableBank::levelFor (hzB * warpRateFactor (warpB, warpAmtB), sr);
 
         float incA[kMaxUnison], incB[kMaxUnison];
         for (int u = 0; u < unison; ++u)
@@ -423,9 +449,9 @@ void SynthVoice::renderNextBlock (juce::AudioBuffer<float>& out, int startSample
             float l = 0.0f, r = 0.0f;
             for (int u = 0; u < unison; ++u)
             {
-                const float sB = readWave (1, waveB, mipB, morphB, phaseB[u]);
-                const float pa = wrap01 (phaseA[u] + fmDepth * sB);
-                const float sA = readWave (0, waveA, mipA, morphA, pa);
+                const float sB = warpSample (warpB, readWave (1, waveB, mipB, morphBu[u], warpPhase (warpB, phaseB[u], warpAmtB)), warpAmtB);
+                const float pa = warpPhase (warpA, wrap01 (phaseA[u] + fmDepth * sB), warpAmtA);
+                const float sA = warpSample (warpA, readWave (0, waveA, mipA, morphAu[u], pa), warpAmtA);
                 const float s  = sA * levelA + sB * levelB;
                 l += s * gainL[u];
                 r += s * gainR[u];

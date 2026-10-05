@@ -27,6 +27,12 @@ struct VoiceContext
     std::atomic<float> lastNote { -1.0f };    // most recent note, for glide
     std::atomic<float> modWheel { 0.0f };     // CC1, 0..1, shared by all voices
     std::atomic<float> aftertouch { 0.0f };   // last channel pressure, for global targets
+    std::atomic<float> slide { 0.0f };        // last CC74 (MPE slide) on any channel, for global targets
+    std::atomic<bool> mpe { false };          // MPE: channel 1 is the master, 2-16 carry one note each
+    float masterBend = 0.0f;                  // semitones from channel 1's wheel (MPE master), audio thread only
+    float masterPressure = 0.0f;              // channel 1's pressure
+    float channelSlide[16] {};                // per channel, so a note that starts after the controller moved begins right
+    float channelPressure[16] {};
     std::atomic<float>* liveValues = nullptr;  // kNumParams, what the UI's markers show
     std::atomic<int> voiceCounter { 0 };       // hands out serial numbers at note-on
     std::atomic<int> displayVoice { -1 };      // the newest voice publishes its values
@@ -46,8 +52,8 @@ inline void nudgeParam (SynthParams& p, int paramIndex, float delta) noexcept
     v = range.convertFrom0to1 (norm);
 }
 
-// One playing note: 2 wavetable oscillators (B can FM A) x up to 4 unison
-// copies, sub + noise, ladder filter, two envelopes, two LFOs.
+// One playing note: 2 wavetable oscillators (B can FM A, each with a warp) x
+// up to 16 unison copies, sub + noise, filters, three envelopes, four LFOs.
 class SynthVoice : public juce::SynthesiserVoice
 {
 public:
@@ -65,7 +71,7 @@ public:
 
 private:
     static constexpr int kSub = 32;       // modulation is updated every kSub samples
-    static constexpr int kMaxUnison = 4;
+    static constexpr int kMaxUnison = 16;
 
     float lfoValue (int shape, float phase, float held) const noexcept;
     void updateEnvelopes (const SynthParams&);
@@ -101,8 +107,10 @@ private:
 
     int serial = -1;               // this note's serial, see VoiceContext::displayVoice
     float velocity = 1.0f, velocityGain = 1.0f;
-    float pitchBendSemis = 0.0f;
+    float bendNorm = 0.0f;         // wheel position -1..1; the range is applied per block
     float aftertouch = 0.0f;       // 0..1
+    float slide = 0.0f;            // CC74, 0..1
+    int channel = 1;               // MIDI channel of this note
     float noteRandom = 0.0f;       // -1..1, drawn per note
     float currentNote = 60.0f, targetNote = 60.0f, glideInc = 0.0f;
 

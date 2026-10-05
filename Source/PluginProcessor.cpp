@@ -1,4 +1,5 @@
 #include "PluginProcessor.h"
+#include "Controls.h"
 #include "PluginEditor.h"
 #include "ai/PatchExplainer.h"
 #include "ai/LlmPatchGenerator.h"
@@ -55,6 +56,7 @@ StacksAudioProcessor::StacksAudioProcessor()
       randomGenerator (std::make_shared<RandomPatchGenerator>()),
       generator (randomGenerator)
 {
+    loadThemeFile (libraryRoot().getChildFile ("theme.json"));   // optional recolouring, before any window exists
     const auto& specs = paramSpecs();
     for (int i = 0; i < kNumParams; ++i)
     {
@@ -149,6 +151,32 @@ void StacksAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     const int numSamples = buffer.getNumSamples();
     keyboardState.processNextMidiBuffer (midi, 0, numSamples, true);
 
+    // Audition preview: a queued phrase becomes real notes in this stream, cut
+    // off after its length (or at once when the next preview arrives).
+    if (previewPending.load (std::memory_order_acquire))
+    {
+        previewPending.store (false, std::memory_order_relaxed);
+        for (int n : previewNotes)
+            if (n >= 0) midi.addEvent (juce::MidiMessage::noteOff (1, n), 0);
+        for (int k = 0; k < 3; ++k)
+        {
+            previewNotes[k] = previewRequest.notes[k];
+            if (previewNotes[k] >= 0) midi.addEvent (juce::MidiMessage::noteOn (1, previewNotes[k], 0.8f), 0);
+        }
+        previewRemaining = juce::jmax (1, previewRequest.lengthSamples);
+    }
+    else if (previewRemaining > 0)
+    {
+        if (previewRemaining <= numSamples)
+        {
+            for (int& n : previewNotes)
+                if (n >= 0) { midi.addEvent (juce::MidiMessage::noteOff (1, n), previewRemaining - 1); n = -1; }
+            previewRemaining = 0;
+        }
+        else
+            previewRemaining -= numSamples;
+    }
+
     for (int i = 0; i < kNumParams; ++i)
         params.v[i] = rawParams[(size_t) i]->load();
 
@@ -207,6 +235,32 @@ void StacksAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
             lfoPhase[k] -= std::floor (lfoPhase[k]);
             lfoHeld[k] = lfoRng.nextFloat() * 2.0f - 1.0f;
         }
+    }
+
+    // Per-channel controller state: slide (CC74) and pressure, so a note that
+    // starts after the controller moved begins at the right value, and channel
+    // 1's wheel as the master bend in MPE mode.
+    for (const auto metadata : midi)
+    {
+        const auto m = metadata.getMessage();
+        const int ch = m.getChannel();
+        if (ch < 1)
+            continue;
+        if (m.isController() && m.getControllerNumber() == 74)
+        {
+            const float v = (float) m.getControllerValue() / 127.0f;
+            voiceContext.channelSlide[ch - 1] = v;
+            voiceContext.slide.store (v);
+        }
+        else if (m.isChannelPressure())
+        {
+            const float v = (float) m.getChannelPressureValue() / 127.0f;
+            voiceContext.channelPressure[ch - 1] = v;
+            if (ch == 1)
+                voiceContext.masterPressure = v;
+        }
+        else if (m.isPitchWheel() && ch == 1)
+            voiceContext.masterBend = (float) (m.getPitchWheelValue() - 8192) / 8192.0f * (float) params.geti (P::bend_range);
     }
 
     synth.renderNextBlock (buffer, midi, 0, numSamples);
@@ -338,6 +392,7 @@ void StacksAudioProcessor::applyGlobalModulation()
             case SrcLfo1: case SrcLfo2: case SrcLfo3: case SrcLfo4: s = voiceContext.lfoGlobalValue[src - SrcLfo1]; break;
             case SrcModWheel:   s = voiceContext.modWheel.load(); break;
             case SrcAftertouch: s = voiceContext.aftertouch.load(); break;
+            case SrcSlide:      s = voiceContext.slide.load(); break;
             case SrcMacro1: case SrcMacro2: case SrcMacro3: case SrcMacro4: case SrcMacro5: case SrcMacro6:
                                 s = params.get (macroParam (src - SrcMacro1)); break;
             default: continue; // per-note sources have no meaning for a global knob
@@ -752,6 +807,9 @@ void StacksAudioProcessor::loadEngineFromSettings()
     auto& s = settings();
     designWaves = s.getBoolValue ("designWaves", true);
     calm = s.getBoolValue ("calm", false);
+    mpe = s.getBoolValue ("mpe", false);
+    previewClicks = s.getBoolValue ("previewOnClick", true);
+    voiceContext.mpe.store (mpe);
     EngineChoice choice;
     const auto kind = s.getValue ("engine", "builtin");   // Qwen3 4B out of the box; it downloads itself on first use
     choice.kind  = kind == "ollama" ? EngineKind::Ollama : kind == "builtin" ? EngineKind::Builtin : EngineKind::Random;
@@ -893,6 +951,41 @@ void StacksAudioProcessor::setCalmMode (bool shouldBeCalm)
     s.setValue ("calm", shouldBeCalm);
     s.saveIfNeeded();
     labBroadcaster.sendChangeMessage();
+}
+
+void StacksAudioProcessor::setMpeMode (bool shouldUseMpe)
+{
+    mpe = shouldUseMpe;
+    voiceContext.mpe.store (shouldUseMpe);
+    auto& s = settings();
+    s.setValue ("mpe", shouldUseMpe);
+    s.saveIfNeeded();
+    labBroadcaster.sendChangeMessage();
+}
+
+void StacksAudioProcessor::setPreviewOnClick (bool shouldPlay)
+{
+    previewClicks = shouldPlay;
+    auto& s = settings();
+    s.setValue ("previewOnClick", shouldPlay);
+    s.saveIfNeeded();
+}
+
+// A phrase that suits the sound: a low note for a bass, a chord for a pad, a
+// triad for keys and bells, one mid note for everything else.
+void StacksAudioProcessor::playPreview (const Patch& p)
+{
+    if (! previewClicks)
+        return;
+    const double sr = currentSampleRate > 0.0 ? currentSampleRate : 48000.0;
+    const auto cat = p.category.toLowerCase();
+    PreviewPhrase ph;
+    if (cat == "bass")                                          { ph.notes[0] = 40; ph.lengthSamples = (int) (0.9 * sr); }
+    else if (cat == "pad" || cat == "texture" || cat == "drone") { ph.notes[0] = 55; ph.notes[1] = 59; ph.notes[2] = 62; ph.lengthSamples = (int) (1.8 * sr); }
+    else if (cat == "keys" || cat == "bell" || cat == "pluck")   { ph.notes[0] = 60; ph.notes[1] = 64; ph.notes[2] = 67; ph.lengthSamples = (int) (1.0 * sr); }
+    else                                                         { ph.notes[0] = 62; ph.lengthSamples = (int) (1.0 * sr); }
+    previewRequest = ph;
+    previewPending.store (true, std::memory_order_release);
 }
 
 void StacksAudioProcessor::setDesignWavetables (bool shouldDesign)
@@ -1254,6 +1347,7 @@ void StacksAudioProcessor::audition (int index)
 
     applyPatch (labState.candidates[(size_t) index]);
     labState.auditioned = index;
+    playPreview (labState.candidates[(size_t) index]);
     labBroadcaster.sendChangeMessage();
 }
 
@@ -1269,12 +1363,14 @@ void StacksAudioProcessor::auditionFromTree (int generation, int candidate)
         if (! seedIsPatch) return;
         applyPatch (seed);
         labState.auditioned = -1;
+        playPreview (seed);
     }
     else
     {
         if (candidate >= (int) candidates.size()) return;
         applyPatch (candidates[(size_t) candidate]);
         labState.auditioned = current ? candidate : -1;
+        playPreview (candidates[(size_t) candidate]);
     }
     labBroadcaster.sendChangeMessage();
 }
@@ -1416,6 +1512,7 @@ void StacksAudioProcessor::auditionSeed()
         return;
     applyPatch (labState.seed);
     labState.auditioned = -1;
+    playPreview (labState.seed);
     labBroadcaster.sendChangeMessage();
 }
 
@@ -1436,13 +1533,29 @@ juce::File StacksAudioProcessor::historyRoot()
 // are copied into the library the first time, so they behave like any folder.
 static void installFactoryPresets()
 {
+    // Copies whatever the bundle ships that the library doesn't have yet. A
+    // preset the player edited or deleted is left alone (only missing files are
+    // written), so a newer build adds presets without undoing anything.
     const auto target = StacksAudioProcessor::libraryRoot().getChildFile ("Factory");
-    if (target.isDirectory())
-        return;
     const auto bundle = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getParentDirectory().getParentDirectory();
     const auto source = bundle.getChildFile ("Resources").getChildFile ("Factory");
-    if (source.isDirectory())
-        source.copyDirectoryTo (target);
+    if (! source.isDirectory())
+        return;
+    const auto marker = target.getChildFile (".installed");
+    const auto stamp = juce::String (source.getChildFile ("..").getLastModificationTime().toMilliseconds()) + " " + juce::String (source.getNumberOfChildFiles (juce::File::findFiles, "*.json"));
+    if (marker.existsAsFile() && marker.loadFileAsString().trim() == stamp)
+        return;   // this build's set was installed already
+    for (const auto& file : source.findChildFiles (juce::File::findFiles, true, "*.json"))
+    {
+        const auto dest = target.getChildFile (file.getRelativePathFrom (source));
+        if (! dest.existsAsFile())
+        {
+            dest.getParentDirectory().createDirectory();
+            file.copyFileTo (dest);
+        }
+    }
+    target.createDirectory();
+    marker.replaceWithText (stamp);
 }
 
 void StacksAudioProcessor::setLibraryFolder (const juce::File& folder)
@@ -1555,6 +1668,7 @@ bool StacksAudioProcessor::loadLibraryPatch (const juce::File& file)
     if (p->name.isEmpty()) p->name = file.getFileNameWithoutExtension();
     applyPatch (*p);
     labState.auditioned = -1;
+    playPreview (*p);
     labBroadcaster.sendChangeMessage();
     return true;
 }

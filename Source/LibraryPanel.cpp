@@ -161,6 +161,13 @@ LibraryPanel::LibraryPanel (StacksAudioProcessor& p) : processor (p)
     favouritesOnly.onClick = [this] { showFavouritesOnly = favouritesOnly.getToggleState(); refresh(); };
     addAndMakeVisible (favouritesOnly);
 
+    playOnClick.setTooltip ("Play: clicking a patch plays a short phrase that suits it (a low note for a bass, a chord for a pad) so you can browse without the keyboard. Click to turn it off.");
+    playOnClick.setClickingTogglesState (true);
+    playOnClick.setColour (juce::TextButton::buttonOnColourId, colours::accent);
+    playOnClick.setToggleState (processor.previewOnClick(), juce::dontSendNotification);
+    playOnClick.onClick = [this] { processor.setPreviewOnClick (playOnClick.getToggleState()); };
+    addAndMakeVisible (playOnClick);
+
     emptyLabel.setText (juce::String::fromUTF8 ("Nothing here yet. Press the \xe2\x99\xa5 on a card or on Now Playing to save into this folder."), juce::dontSendNotification);
     emptyLabel.setFont (juce::Font (juce::FontOptions (11.5f)));
     emptyLabel.setColour (juce::Label::textColourId, colours::muted);
@@ -368,6 +375,8 @@ void LibraryPanel::resized()
     saveHereButton.setBounds (top.removeFromRight (78));
     top.removeFromRight (4);
     favouritesOnly.setBounds (top.removeFromRight (28));
+    top.removeFromRight (4);
+    playOnClick.setBounds (top.removeFromRight (40));
     top.removeFromRight (4);
     pathLabel.setBounds (top);
     r.removeFromTop (4);

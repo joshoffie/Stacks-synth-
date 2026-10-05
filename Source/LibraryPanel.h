@@ -29,6 +29,7 @@ private:
     StacksAudioProcessor& processor;
     juce::Label pathLabel, emptyLabel;
     juce::TextButton upButton { "<" }, newFolderButton { "New folder" }, revealButton { "Finder" }, favouritesOnly, saveHereButton { "Save here" };
+    juce::TextButton playOnClick { "Play" };   // audition previews on/off
     bool showFavouritesOnly = false;
     juce::String activeTag;
     std::vector<std::unique_ptr<juce::TextButton>> tagButtons;

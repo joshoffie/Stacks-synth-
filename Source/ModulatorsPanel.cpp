@@ -196,6 +196,7 @@ ModulatorsPanel::ModulatorsPanel (StacksAudioProcessor& p) : processor (p)
     sourcePicker.addItem ("Key", SrcKey);
     sourcePicker.addItem ("Mod Wheel", SrcModWheel);
     sourcePicker.addItem ("Aftertouch", SrcAftertouch);
+    sourcePicker.addItem ("Slide (MPE, CC74)", SrcSlide);
     sourcePicker.addItem ("Random (per note)", SrcRandom);
     sourcePicker.addItem ("Filter Env", SrcFilterEnv);
     sourcePicker.setSelectedId (SrcVelocity, juce::dontSendNotification);

@@ -605,6 +605,14 @@ juce::String describePatch (const Patch& p)
     if (std::abs (p.get (P::filter_env)) > 1.5f) filt << (p.get (P::filter_env) > 0 ? ", sweeping" : ", inverted sweep");
     parts.add (filt);
 
+    // Warps
+    for (int osc = 0; osc < 2; ++osc)
+    {
+        const int w = juce::jlimit (0, warpNames().size() - 1, (int) p.get (osc == 0 ? P::oscA_warp : P::oscB_warp));
+        if (w > 0 && p.get (osc == 0 ? P::oscA_warp_amt : P::oscB_warp_amt) > 0.08f)
+            parts.add (warpNames()[w].toLowerCase() + " warp on " + (osc == 0 ? "A" : "B"));
+    }
+
     // Envelope character
     const float att = p.get (P::aenv_attack), dec = p.get (P::aenv_decay), sus = p.get (P::aenv_sustain), rel = p.get (P::aenv_release);
     if (att > 0.5f)                parts.add ("slow attack");
@@ -614,7 +622,7 @@ juce::String describePatch (const Patch& p)
 
     // Motion
     static const char* shortSource[] = { "", "LFO1", "LFO2", "LFO3", "LFO4", "FEnv", "MEnv", "Vel", "Key", "Wheel", "AT", "Rnd",
-                                         "Bright", "Move", "Grit", "Space", "Width", "Length" };
+                                         "Bright", "Move", "Grit", "Space", "Width", "Length", "Slide" };
     static_assert (sizeof (shortSource) / sizeof (shortSource[0]) == kNumModSources, "a short name per modulation source");
     for (int i = 0; i < kNumModSlots; ++i)
     {

@@ -30,6 +30,8 @@ private:
     juce::Colour colour;
     int shownWave = -1;
     float shownMorph = -1.0f;
+    int shownWarp = 0;
+    float shownWarpAmt = 0.0f;
     juce::String shownName;
     std::unique_ptr<juce::FileChooser> chooser;
 };

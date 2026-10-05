@@ -160,6 +160,17 @@ public:
     bool calmMode() const                                  { return calm; }
     void setCalmMode (bool);
 
+    // MPE: per-note pitch bend (48 semitones on channels 2-16), pressure and slide (CC74). Persisted.
+    bool supportsMPE() const override                      { return true; }
+    bool mpeMode() const                                   { return mpe; }
+    void setMpeMode (bool);
+
+    // Audition previews: clicking a patch (library row, leaf, card, seed) plays a
+    // short phrase suited to its category, so browsing needs no keyboard. Persisted.
+    bool previewOnClick() const                            { return previewClicks; }
+    void setPreviewOnClick (bool);
+    void playPreview (const Patch&);                       // queues the phrase for the audio thread
+
     // Let the generators invent new wavetables ("Custom") instead of only picking built-ins. Persisted.
     bool designWavetables() const                          { return designWaves; }
     void setDesignWavetables (bool);
@@ -273,6 +284,13 @@ private:
     std::shared_ptr<LlmBackend> activeBackend;             // whichever model the engine uses right now
     std::optional<GenerationRequest> pendingRequest;       // runs once a missing model has downloaded
     bool calm = false;
+    bool mpe = false;
+    bool previewClicks = true;
+    struct PreviewPhrase { int notes[3] { -1, -1, -1 }; int lengthSamples = 0; };
+    PreviewPhrase previewRequest;                          // message thread writes, then sets previewPending
+    std::atomic<bool> previewPending { false };
+    int previewNotes[3] { -1, -1, -1 };                    // audio thread: what is sounding now
+    int previewRemaining = 0;
     std::unique_ptr<ModelDownloader> downloader;
     int lastDownloadPercent = -1;
     juce::ThreadPool pool { 2 };

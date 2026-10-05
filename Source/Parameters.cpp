@@ -23,6 +23,12 @@ const juce::StringArray& distModeNames()
     return names;
 }
 
+const juce::StringArray& warpNames()
+{
+    static const juce::StringArray names { "Off", "Sync", "Bend", "PWM", "Mirror", "Fold", "Quantize" };
+    return names;
+}
+
 const juce::StringArray& arpModeNames()
 {
     static const juce::StringArray names { "Off", "Up", "Down", "Up-Down", "Random", "As Played" };
@@ -68,7 +74,7 @@ const juce::StringArray& lfoModeNames()
 const juce::StringArray& modSourceNames()
 {
     static const juce::StringArray names { "Off", "LFO 1", "LFO 2", "LFO 3", "LFO 4", "Filter Env", "Mod Env", "Velocity", "Key", "Mod Wheel", "Aftertouch", "Random",
-                                           "Brightness", "Movement", "Grit", "Space", "Width", "Length" };
+                                           "Brightness", "Movement", "Grit", "Space", "Width", "Length", "Slide" };
     return names;
 }
 
@@ -161,7 +167,7 @@ bool isAdvancedParam (const char* id)
     static const juce::StringArray advanced { "chorus_voices", "chorus_feedback", "chorus_spread", "chorus_tone",
                                               "delay_tone", "delay_hpf", "delay_wow", "delay_width",
                                               "reverb_predelay", "reverb_lowcut", "reverb_highcut", "reverb_mod", "reverb_shimmer", "reverb_width",
-                                              "dist_tone", "eq_low_freq", "eq_mid_freq", "eq_mid_q", "eq_high_freq", "comp_attack", "comp_release", "arp_swing" };
+                                              "dist_tone", "eq_low_freq", "eq_mid_freq", "eq_mid_q", "eq_high_freq", "comp_attack", "comp_release", "arp_swing", "bend_range" };
     return advanced.contains (id);
 }
 

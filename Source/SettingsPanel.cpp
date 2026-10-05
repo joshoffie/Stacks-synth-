@@ -79,6 +79,11 @@ SettingsPanel::SettingsPanel (StacksAudioProcessor& p) : processor (p)
     calmToggle.onClick = [this] { processor.setCalmMode (calmToggle.getToggleState()); };
     addAndMakeVisible (calmToggle);
 
+    mpeToggle.setColour (juce::ToggleButton::textColourId, colours::text);
+    mpeToggle.setTooltip ("For Seaboard, Osmose, Linnstrument and other MPE controllers. Set the controller (or Logic's track) to MPE with channel 1 as the master and 2-16 as member channels. Bend Range (VOICE > more) still sets channel 1 and ordinary MIDI.");
+    mpeToggle.onClick = [this] { processor.setMpeMode (mpeToggle.getToggleState()); };
+    addAndMakeVisible (mpeToggle);
+
     guideTitle.setText ("Model guide", juce::dontSendNotification);
     guideTitle.setFont (StacksLookAndFeel::font (12.0f, true));
     guideTitle.setColour (juce::Label::textColourId, colours::muted);
@@ -157,6 +162,8 @@ void SettingsPanel::resized()
     r.removeFromTop (14);
 
     calmToggle.setBounds (r.removeFromTop (22));
+    r.removeFromTop (4);
+    mpeToggle.setBounds (r.removeFromTop (22));
     r.removeFromTop (14);
 
     guideTitle.setBounds (r.removeFromTop (18));
@@ -228,6 +235,7 @@ void SettingsPanel::refresh()
 {
     const auto choice = processor.engine();
     calmToggle.setToggleState (processor.calmMode(), juce::dontSendNotification);
+    mpeToggle.setToggleState (processor.mpeMode(), juce::dontSendNotification);
 
     juce::String status;
     bool canDownload = false, custom = false;

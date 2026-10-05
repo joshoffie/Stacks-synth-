@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cmath>
+#include <algorithm>
+
 #include <juce_core/juce_core.h>
 #include <juce_dsp/juce_dsp.h>
 #include <atomic>
@@ -159,5 +162,43 @@ private:
 
 // Index of "Custom" in waveNames(): the built-ins, then User 1-4, then Custom.
 constexpr int kCustomWave = WavetableBank::kNumBuiltIn + UserWavetables::kUserSlots;
+
+// Oscillator warps. Sync, Bend, PWM and Mirror reshape the phase before the
+// table is read; Fold and Quantize reshape the sample after it. amt is 0..1
+// and every mode is the identity at 0.
+enum WarpMode { WarpOff = 0, WarpSync, WarpBend, WarpPwm, WarpMirror, WarpFold, WarpQuantize, kNumWarpModes };
+
+inline float warpPhase (int mode, float p, float amt) noexcept
+{
+    switch (mode)
+    {
+        case WarpSync:   { const float q = p * (1.0f + 7.0f * amt); return q - std::floor (q); }   // the cycle restarts early: hard-sync buzz
+        case WarpBend:   { const float x0 = 0.5f - 0.48f * amt;                                     // phase distortion: the pivot slides toward the start
+                           return p < x0 ? 0.5f * p / x0 : 0.5f + 0.5f * (p - x0) / (1.0f - x0); }
+        case WarpPwm:    return std::min (0.9995f, p / (1.0f - 0.95f * amt));                       // the wave is squeezed into the first part of the cycle
+        case WarpMirror: { const float q = p < 0.5f ? 2.0f * p : 2.0f * (1.0f - p); return p + amt * (q - p); }   // forward, then backward
+        default:         return p;
+    }
+}
+
+inline float warpSample (int mode, float s, float amt) noexcept
+{
+    if (mode == WarpFold)
+    {
+        float t = (s * (1.0f + 4.0f * amt) + 1.0f) * 0.5f;   // 0..1 inside the ceiling, beyond it folds back
+        t = t - 2.0f * std::floor (t * 0.5f);
+        if (t > 1.0f) t = 2.0f - t;
+        return 2.0f * t - 1.0f;
+    }
+    if (mode == WarpQuantize)
+    {
+        const float levels = 2.0f + 126.0f * (1.0f - amt) * (1.0f - amt);
+        return std::round (s * levels) / levels;
+    }
+    return s;
+}
+
+// Sync reads the table that many times faster, so it needs a higher mip level.
+inline float warpRateFactor (int mode, float amt) noexcept { return mode == WarpSync ? 1.0f + 7.0f * amt : 1.0f; }
 
 } // namespace stacks

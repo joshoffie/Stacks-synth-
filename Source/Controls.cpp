@@ -3,6 +3,37 @@
 namespace stacks
 {
 
+void loadThemeFile (const juce::File& file)
+{
+    if (! file.existsAsFile())
+        return;
+    const auto parsed = juce::JSON::parse (file);   // keep the var alive: the object pointer below borrows from it
+    auto* obj = parsed.getDynamicObject();
+    if (obj == nullptr)
+        return;
+    auto pick = [obj] (const char* key, juce::Colour& target)
+    {
+        if (! obj->hasProperty (key))
+            return;
+        const auto hex = obj->getProperty (key).toString().trim().removeCharacters ("#");
+        if (hex.length() == 6)      target = juce::Colour::fromString ("ff" + hex);
+        else if (hex.length() == 8) target = juce::Colour::fromString (hex);
+    };
+    pick ("background",  colours::background);
+    pick ("panel",       colours::panel);
+    pick ("card",        colours::card);
+    pick ("accent",      colours::accent);
+    pick ("accentDim",   colours::accentDim);
+    pick ("text",        colours::text);
+    pick ("muted",       colours::muted);
+    pick ("rowSound",    colours::rowSound);
+    pick ("rowFilter",   colours::rowFilter);
+    pick ("rowMovement", colours::rowMovement);
+    pick ("rowSpace",    colours::rowSpace);
+    pick ("rowShape",    colours::rowShape);
+    pick ("rowMacro",    colours::rowMacro);
+}
+
 juce::Colour modSourceColour (int source)
 {
     switch (source)

@@ -77,11 +77,11 @@ namespace
     // list fits its source. LFO 3/4 and slots 7-12 are left to the player.
     constexpr int kAiSlots = 6;
     const std::vector<const char*> kLfoTargets    { "A Morph", "B Morph", "Cutoff", "Resonance", "FM B>A", "Amp", "Pan", "Pitch", "Sub", "Noise",
-                                                    "Chorus Mix", "Delay Mix", "Reverb Mix", "Shimmer", "Detune", "Drive" };
-    const std::vector<const char*> kEnvTargets    { "Pitch", "Pitch B", "Cutoff", "A Morph", "B Morph", "FM B>A", "B Level", "Noise", "Resonance", "Drive" };
+                                                    "Chorus Mix", "Delay Mix", "Reverb Mix", "Shimmer", "Detune", "Drive", "A Warp Amt" };
+    const std::vector<const char*> kEnvTargets    { "Pitch", "Pitch B", "Cutoff", "A Morph", "B Morph", "FM B>A", "B Level", "Noise", "Resonance", "Drive", "A Warp Amt" };
     const std::vector<const char*> kVelTargets    { "Cutoff", "Amp", "FM B>A", "A Morph", "Drive", "Resonance", "Decay", "Noise", "B Level" };
     const std::vector<const char*> kKeyTargets    { "Cutoff", "Pan", "A Morph", "Decay", "Release", "Detune" };
-    const std::vector<const char*> kPerfTargets   { "Cutoff", "FM B>A", "A Morph", "B Morph", "Resonance", "Drive", "Chorus Mix", "Reverb Mix", "Delay Mix", "Amp" };
+    const std::vector<const char*> kPerfTargets   { "Cutoff", "FM B>A", "A Morph", "B Morph", "Resonance", "Drive", "Chorus Mix", "Reverb Mix", "Delay Mix", "Amp", "A Warp Amt" };
     const std::vector<const char*> kRandomTargets { "A Morph", "B Morph", "Cutoff", "Pan", "Detune", "Decay", "FM B>A" };
 
     juce::String joinNames (const std::vector<const char*>& names)
@@ -99,7 +99,7 @@ namespace
     bool isExtraParam (const char* id)
     {
         const juce::String s (id);
-        if (s == "master_gain" || isCoreParam (id) || s.startsWith ("mod") || s.startsWith ("lfo3_") || s.startsWith ("lfo4_") || s.startsWith ("macro") || s.startsWith ("arp_"))
+        if (s == "master_gain" || s == "bend_range" || isCoreParam (id) || s.startsWith ("mod") || s.startsWith ("lfo3_") || s.startsWith ("lfo4_") || s.startsWith ("macro") || s.startsWith ("arp_"))
             return false;
         if ((s.startsWith ("lfo1_") || s.startsWith ("lfo2_")) && (s.endsWith ("_shape") || s.endsWith ("_rate") || s.endsWith ("_sync")))
             return false;
@@ -170,6 +170,19 @@ namespace
     }
 
     // "EchoingPad" -> "Echoing Pad"; models often drop the space.
+    // "cold formant" -> "Cold Formant". Words that already start with a capital
+    // (or digits, or "II") are left alone.
+    juce::String titleCase (const juce::String& name)
+    {
+        juce::StringArray words;
+        words.addTokens (name, " ", "");
+        words.removeEmptyStrings();
+        for (auto& w : words)
+            if (juce::CharacterFunctions::isLowerCase (w[0]))
+                w = w.substring (0, 1).toUpperCase() + w.substring (1);
+        return words.joinIntoString (" ");
+    }
+
     juce::String spaceOutCamelCase (const juce::String& name)
     {
         juce::String out;
@@ -698,7 +711,7 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
                     patch->set (waveParam, 2.0f);
             }
 
-        patch->name = spaceOutCamelCase (patch->name).substring (0, 28);
+        patch->name = titleCase (spaceOutCamelCase (patch->name)).substring (0, 28);
         // Small models sometimes copy the example patch's name straight from the prompt.
         if (patch->name.equalsIgnoreCase ("Velvet Horizon") || patch->name.equalsIgnoreCase ("Two Words") || patch->name.isEmpty())
             patch->name = patch->category + " " + juce::String ((int) out.size() + 1);
@@ -709,6 +722,7 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
                 patch->name << " II";
 
         keepPatchInTune (*patch);
+        applyPromptCues (req.hint, *patch);   // the chorus a "lush chorus" prompt asked for, etc.
 
         // Small models repeat themselves - a parent verbatim, or a sibling. Rather
         // than dropping the copy (and shorting the batch), nudge it into a relative.
@@ -797,7 +811,7 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
             const auto start = nameAt + 8;
             const auto end = obj.find ('"', start);
             if (end != std::string::npos)
-                name = spaceOutCamelCase (juce::String::fromUTF8 (obj.data() + start, (int) (end - start)));
+                name = titleCase (spaceOutCamelCase (juce::String::fromUTF8 (obj.data() + start, (int) (end - start))));
         }
         int keys = 0;
         for (size_t i = 0; (i = obj.find ("\":", i)) != std::string::npos; ++i) ++keys;

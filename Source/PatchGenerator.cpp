@@ -633,11 +633,21 @@ int countAudibleDifferences (const Patch& a, const Patch& b)
     {
         const juce::String id (specs[(size_t) i].id);
         const juce::String group (specs[(size_t) i].group);
-        if (id == "master_gain" || id.startsWith ("mod") || group == "MACROS" || group == "ARP")
+        if (id == "master_gain" || id == "bend_range" || id.startsWith ("mod") || group == "MACROS" || group == "ARP")
             continue;
         if (specs[(size_t) i].kind == ParamKind::Choice)
         {
-            if ((int) a.values[(size_t) i] != (int) b.values[(size_t) i]) ++differences;
+            if ((int) a.values[(size_t) i] != (int) b.values[(size_t) i])
+            {
+                // A warp mode is silent until its amount is up on at least one side.
+                if (id == "oscA_warp" || id == "oscB_warp")
+                {
+                    const P amt = id == "oscA_warp" ? P::oscA_warp_amt : P::oscB_warp_amt;
+                    if (a.get (amt) < 0.05f && b.get (amt) < 0.05f)
+                        continue;
+                }
+                ++differences;
+            }
             continue;
         }
         const auto& range = paramRange (i);
@@ -659,6 +669,80 @@ int countAudibleDifferences (const Patch& a, const Patch& b)
     for (const auto& r : rb) if (std::find (ra.begin(), ra.end(), r) == ra.end()) ++differences;
     if (a.waves[0] != b.waves[0]) ++differences;
     return differences;
+}
+
+void applyPromptCues (const juce::String& hint, Patch& p)
+{
+    const auto text = " " + hint.toLowerCase().retainCharacters ("abcdefghijklmnopqrstuvwxyz0123456789 -") + " ";
+    auto has    = [&] (const char* w) { const juce::String word (w); return text.contains (" " + word + " ") || text.contains (" " + word + "s "); };
+    auto phrase = [&] (const char* words) { return text.contains (words); };
+    auto raise  = [&] (P param, float to) { p.set (param, juce::jmax (p.get (param), to)); };
+    auto cap    = [&] (P param, float to) { p.set (param, juce::jmin (p.get (param), to)); };
+    auto choose = [&] (P param, const juce::StringArray& names, const char* name) { const int i = names.indexOf (name); if (i >= 0) p.set (param, (float) i); };
+
+    const bool ensemble = has ("ensemble") || phrase ("string machine") || has ("rotary");
+    if (has ("chorus") || has ("lush") || ensemble)
+    {
+        raise (P::chorus_mix, 0.4f);
+        raise (P::chorus_depth, 0.3f);
+        if (ensemble) choose (P::chorus_mode, chorusModeNames(), "Ensemble");
+    }
+    if (has ("delay") || has ("echo"))
+    {
+        raise (P::delay_mix, 0.3f);
+        raise (P::delay_feedback, 0.35f);
+        if (p.get (P::delay_sync) < 0.5f) choose (P::delay_sync, delaySyncNames(), "1/8D");
+    }
+    if (has ("tape"))
+    {
+        choose (P::delay_mode, delayModeNames(), "Tape");
+        raise (P::delay_wow, 0.3f);
+        raise (P::delay_mix, 0.2f);
+    }
+    if (has ("reverb") || has ("ambient") || has ("cinematic") || has ("hall") || has ("wash") || phrase ("long tail")
+        || has ("shimmer") || has ("spacious") || has ("ethereal"))
+        raise (P::reverb_mix, 0.35f);
+    if (phrase ("long tail") || phrase ("long decay") || has ("ambient") || has ("hall"))
+        raise (P::reverb_size, 0.7f);
+    if (has ("shimmer"))
+    {
+        choose (P::reverb_type, reverbTypeNames(), "Shimmer");
+        raise (P::reverb_shimmer, 0.5f);
+        raise (P::reverb_mix, 0.4f);
+    }
+    if (has ("distorted") || has ("distortion") || has ("screaming") || has ("dubstep") || has ("gritty") || has ("dirty") || has ("fuzz") || has ("overdriven"))
+    {
+        raise (P::dist_mix, 0.5f);
+        raise (P::dist_drive, 18.0f);
+    }
+    if (phrase ("lo-fi") || has ("lofi") || has ("crushed") || has ("bitcrushed") || has ("bitcrush"))
+    {
+        choose (P::dist_mode, distModeNames(), "Crush");
+        raise (P::dist_mix, 0.3f);
+    }
+    if (has ("wide") || has ("supersaw") || has ("detuned") || has ("huge") || has ("massive"))
+    {
+        raise (P::unison_voices, 5.0f);
+        raise (P::unison_detune, 18.0f);
+        raise (P::unison_spread, 0.7f);
+    }
+    if (phrase ("sub bass") || has ("sub"))
+        raise (P::sub_level, 0.5f);
+    if (has ("portamento") || has ("glide") || has ("legato"))
+        raise (P::glide, 0.08f);
+    if (has ("punchy") || has ("stab") || has ("short") || has ("staccato"))
+    {
+        cap (P::aenv_release, 0.3f);
+        cap (P::aenv_attack, 0.01f);
+    }
+    if (phrase ("long release"))
+        raise (P::aenv_release, 1.5f);
+    if (has ("riser"))
+        raise (P::aenv_attack, 2.0f);
+    else if (has ("swell") || phrase ("slow attack") || has ("evolving"))
+        raise (P::aenv_attack, 0.5f);
+    if (has ("arp") || has ("arpeggio") || has ("arpeggiated") || has ("arpeggiator"))
+        choose (P::arp_mode, arpModeNames(), "Up");
 }
 
 void mutatePatch (Patch& p, float amount, juce::int64 seed)
