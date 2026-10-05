@@ -141,9 +141,9 @@ class UserWavetables
 {
 public:
     static constexpr int kUserSlots = 4;                       // "User 1-4": imported files
-    static constexpr int kCustomSlotA = 4, kCustomSlotB = 5;   // "Custom": the loaded patch's designed tables
-    static constexpr int kSlots = 6;
-    static int customSlot (int osc) noexcept                   { return osc == 0 ? kCustomSlotA : kCustomSlotB; }
+    static constexpr int kCustomSlotA = 4, kCustomSlotB = 5, kCustomSlotC = 6;   // "Custom": the loaded patch's designed tables
+    static constexpr int kSlots = 7;
+    static int customSlot (int osc) noexcept                   { return kUserSlots + (osc < 0 ? 0 : osc > 2 ? 2 : osc); }
 
     const UserTable* active (int slot) const noexcept
     {

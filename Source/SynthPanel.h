@@ -16,7 +16,7 @@ class WaveDisplay : public juce::Component,
                     private juce::Timer
 {
 public:
-    WaveDisplay (StacksAudioProcessor&, bool oscB, juce::Colour);
+    WaveDisplay (StacksAudioProcessor&, int osc, juce::Colour);
     ~WaveDisplay() override;
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;
@@ -26,7 +26,7 @@ private:
     void importWavetable();
 
     StacksAudioProcessor& processor;
-    bool oscB;
+    int osc;   // 0 = A, 1 = B, 2 = C
     juce::Colour colour;
     int shownWave = -1;
     float shownMorph = -1.0f;

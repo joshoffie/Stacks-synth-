@@ -24,7 +24,8 @@ struct Patch
     std::array<float, kNumParams> values;  // real-world values; Choice params hold the index
     std::array<juce::String, kNumLfos> lfoShapes; // drawn LFO shapes as point JSON, empty = none
     std::array<juce::String, 4> userWaves;        // file names of the imported wavetables in User 1-4
-    std::array<WaveSpec, 2> waves;                // designed tables behind "Custom" for osc A and osc B
+    std::array<WaveSpec, kNumOscs> waves;         // designed tables behind "Custom" for osc A, B and C
+    static const char* waveKey (int osc) noexcept { return osc == 0 ? "waveA" : osc == 1 ? "waveB" : "waveC"; }   // JSON keys
     juce::StringArray tags;                // lowercase words a producer would search for
     juce::String parentName;               // the sound this one grew from (empty for fresh ideas)
     juce::String prompt;                   // the direction it was designed to

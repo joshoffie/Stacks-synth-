@@ -84,6 +84,11 @@ SettingsPanel::SettingsPanel (StacksAudioProcessor& p) : processor (p)
     mpeToggle.onClick = [this] { processor.setMpeMode (mpeToggle.getToggleState()); };
     addAndMakeVisible (mpeToggle);
 
+    mtsLabel.setFont (StacksLookAndFeel::font (12.0f));
+    mtsLabel.setColour (juce::Label::textColourId, colours::muted);
+    mtsLabel.setTooltip ("MTS-ESP (ODDSound) microtuning. Run an MTS-ESP master (the free MTS-ESP Mini, Scala, or Surge XT as master) and every note in Stacks follows its scale; nothing to set up here.");
+    addAndMakeVisible (mtsLabel);
+
     guideTitle.setText ("Model guide", juce::dontSendNotification);
     guideTitle.setFont (StacksLookAndFeel::font (12.0f, true));
     guideTitle.setColour (juce::Label::textColourId, colours::muted);
@@ -164,7 +169,9 @@ void SettingsPanel::resized()
     calmToggle.setBounds (r.removeFromTop (22));
     r.removeFromTop (4);
     mpeToggle.setBounds (r.removeFromTop (22));
-    r.removeFromTop (14);
+    r.removeFromTop (4);
+    mtsLabel.setBounds (r.removeFromTop (20));
+    r.removeFromTop (12);
 
     guideTitle.setBounds (r.removeFromTop (18));
     saveGuideButton.setBounds (r.removeFromBottom (26).removeFromLeft (200));
@@ -236,6 +243,9 @@ void SettingsPanel::refresh()
     const auto choice = processor.engine();
     calmToggle.setToggleState (processor.calmMode(), juce::dontSendNotification);
     mpeToggle.setToggleState (processor.mpeMode(), juce::dontSendNotification);
+    mtsLabel.setText (processor.mtsConnected() ? "MTS-ESP: following master tuning \"" + processor.mtsScaleName() + "\""
+                                               : "MTS-ESP: no master running (12-TET). Start an MTS-ESP master and every note follows its scale.",
+                      juce::dontSendNotification);
 
     juce::String status;
     bool canDownload = false, custom = false;

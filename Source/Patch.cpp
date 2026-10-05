@@ -62,9 +62,9 @@ juce::var Patch::toVar() const
         obj->setProperty ("userWaves", juce::var (waves));
     }
 
-    for (int osc = 0; osc < 2; ++osc)
+    for (int osc = 0; osc < kNumOscs; ++osc)
         if (! this->waves[(size_t) osc].isEmpty())
-            obj->setProperty (osc == 0 ? "waveA" : "waveB", this->waves[(size_t) osc].toVar());
+            obj->setProperty (waveKey (osc), this->waves[(size_t) osc].toVar());
 
     bool anyShape = false;
     for (const auto& sh : lfoShapes) anyShape = anyShape || sh.isNotEmpty();
@@ -161,8 +161,8 @@ std::optional<Patch> Patch::fromVar (const juce::var& v, const Patch* base)
             const auto v = shapes->getProperty ("lfo" + juce::String (k + 1));
             if (v.isArray()) p.lfoShapes[(size_t) k] = juce::JSON::toString (v, true);
         }
-    for (int osc = 0; osc < 2; ++osc)
-        if (auto w = WaveSpec::fromVar (obj->getProperty (osc == 0 ? "waveA" : "waveB")))
+    for (int osc = 0; osc < kNumOscs; ++osc)
+        if (auto w = WaveSpec::fromVar (obj->getProperty (waveKey (osc))))
             p.waves[(size_t) osc] = *w;
 
     auto* params = obj->getProperty ("params").getDynamicObject();
@@ -250,7 +250,7 @@ const juce::Identifier& Patch::customWavesTreeType()
 
 juce::Identifier Patch::customWaveProperty (int osc)
 {
-    return juce::Identifier (osc == 0 ? "waveA" : "waveB");
+    return juce::Identifier (waveKey (osc));
 }
 
 Patch Patch::capture (const juce::AudioProcessorValueTreeState& apvts)
@@ -273,7 +273,7 @@ Patch Patch::capture (const juce::AudioProcessorValueTreeState& apvts)
 
     auto custom = apvts.state.getChildWithName (customWavesTreeType());
     if (custom.isValid())
-        for (int osc = 0; osc < 2; ++osc)
+        for (int osc = 0; osc < kNumOscs; ++osc)
             if (auto w = WaveSpec::fromJson (custom.getProperty (customWaveProperty (osc)).toString()))
                 p.waves[(size_t) osc] = *w;
     return p;
@@ -303,7 +303,7 @@ void Patch::applyTo (juce::AudioProcessorValueTreeState& apvts) const
 
     // The designed tables travel with the patch: set them, or clear them.
     auto custom = apvts.state.getOrCreateChildWithName (customWavesTreeType(), nullptr);
-    for (int osc = 0; osc < 2; ++osc)
+    for (int osc = 0; osc < kNumOscs; ++osc)
     {
         const auto& w = this->waves[(size_t) osc];
         if (! w.isEmpty()) custom.setProperty (customWaveProperty (osc), w.toJson(), nullptr);
@@ -586,6 +586,8 @@ juce::String describePatch (const Patch& p)
     juce::String src = oscText (p, P::oscA_wave, P::oscA_coarse, p.waves[0]);
     if (p.get (P::oscB_level) > 0.05f)
         src << " + " << oscText (p, P::oscB_wave, P::oscB_coarse, p.waves[1]);
+    if (p.get (P::oscC_level) > 0.05f)
+        src << " + " << oscText (p, P::oscC_wave, P::oscC_coarse, p.waves[2]);
     const float fm = p.get (P::fm_amount);
     if (fm > 0.05f)
         src << (fm > 0.3f ? ", heavy FM" : ", light FM");
@@ -604,9 +606,17 @@ juce::String describePatch (const Patch& p)
     if (p.get (P::filter_drive) > 3.0f) filt << ", driven";
     if (std::abs (p.get (P::filter_env)) > 1.5f) filt << (p.get (P::filter_env) > 0 ? ", sweeping" : ", inverted sweep");
     parts.add (filt);
+    const int routing = juce::jlimit (0, filterRoutingNames().size() - 1, (int) p.get (P::filter_routing));
+    if (routing > 0)
+    {
+        const float c2 = p.get (P::filter2_cutoff);
+        parts.add ("filter 2 " + filterTypeNames()[juce::jlimit (0, filterTypeNames().size() - 1, (int) p.get (P::filter2_type))]
+                   + " @ " + (c2 >= 1000.0f ? juce::String (c2 / 1000.0f, 1) + " kHz" : juce::String ((int) c2) + " Hz")
+                   + ", " + filterRoutingNames()[routing].toLowerCase());
+    }
 
     // Warps
-    for (int osc = 0; osc < 2; ++osc)
+    for (int osc = 0; osc < kNumOscs; ++osc)
     {
         const int w = juce::jlimit (0, warpNames().size() - 1, (int) p.get (osc == 0 ? P::oscA_warp : P::oscB_warp));
         if (w > 0 && p.get (osc == 0 ? P::oscA_warp_amt : P::oscB_warp_amt) > 0.08f)

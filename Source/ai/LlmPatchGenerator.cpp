@@ -77,8 +77,8 @@ namespace
     // list fits its source. LFO 3/4 and slots 7-12 are left to the player.
     constexpr int kAiSlots = 6;
     const std::vector<const char*> kLfoTargets    { "A Morph", "B Morph", "Cutoff", "Resonance", "FM B>A", "Amp", "Pan", "Pitch", "Sub", "Noise",
-                                                    "Chorus Mix", "Delay Mix", "Reverb Mix", "Shimmer", "Detune", "Drive", "A Warp Amt" };
-    const std::vector<const char*> kEnvTargets    { "Pitch", "Pitch B", "Cutoff", "A Morph", "B Morph", "FM B>A", "B Level", "Noise", "Resonance", "Drive", "A Warp Amt" };
+                                                    "Chorus Mix", "Delay Mix", "Reverb Mix", "Shimmer", "Detune", "Drive", "A Warp Amt", "Cutoff 2" };
+    const std::vector<const char*> kEnvTargets    { "Pitch", "Pitch B", "Cutoff", "A Morph", "B Morph", "FM B>A", "B Level", "Noise", "Resonance", "Drive", "A Warp Amt", "Cutoff 2" };
     const std::vector<const char*> kVelTargets    { "Cutoff", "Amp", "FM B>A", "A Morph", "Drive", "Resonance", "Decay", "Noise", "B Level" };
     const std::vector<const char*> kKeyTargets    { "Cutoff", "Pan", "A Morph", "Decay", "Release", "Detune" };
     const std::vector<const char*> kPerfTargets   { "Cutoff", "FM B>A", "A Morph", "B Morph", "Resonance", "Drive", "Chorus Mix", "Reverb Mix", "Delay Mix", "Amp", "A Warp Amt" };
@@ -154,12 +154,12 @@ namespace
     {
         static juce::SharedResourcePointer<WavetableBank> bank;
         juce::String s;
-        for (int osc = 0; osc < 2; ++osc)
+        for (int osc = 0; osc < kNumOscs; ++osc)
         {
-            if (osc == 1 && parent.get (P::oscB_level) <= 0.05f)
+            if (osc > 0 && parent.get (oscLevelParam (osc)) <= 0.05f)
                 continue;
-            const int wave = (int) parent.get (osc == 0 ? P::oscA_wave : P::oscB_wave);
-            const juce::String key = osc == 0 ? "waveA" : "waveB";
+            const int wave = (int) parent.get (oscWaveParam (osc));
+            const juce::String key = Patch::waveKey (osc);
             if (wave == kCustomWave && ! parent.waves[(size_t) osc].isEmpty())
                 s << key << " (its designed table): " << parent.waves[(size_t) osc].toJson (true) << "\n";
             else if (wave < WavetableBank::kNumBuiltIn)
@@ -426,7 +426,7 @@ juce::String LlmPatchGenerator::systemPrompt (bool designWaves)
           << "Recipes: saw 9,8,7,6,5,5,5,4,4,4,4,3,3,3,3,3 - square 9,0,7,0,6,0,5,0,5,0,4,0,4,0,4,0 - hollow 9,2,8,2,5,1,3,1,2,0,1,0,1,0,0,0 - "
           << "glassy bell 9,0,0,6,0,0,5,0,0,0,4,0,0,0,0,3 (sparse partials) - vocal 5,8,9,9,6,3,2,1,1,0,0,0,0,0,0,0 (a bump is a formant) - "
           << "organ 9,8,0,7,0,0,0,6,0,0,0,0,0,0,0,0. Invent your own that fits the sound and give it a two-word name; never copy a recipe exactly. "
-          << "\"waveB\" (same format) is optional and designs oscillator B instead of a built-in.\n";
+          << "\"waveB\" and \"waveC\" (same format) are optional and design oscillator B or C instead of a built-in.\n";
     s
       << "Use plain numbers without units and the exact option names for choice parameters. "
       << "Make every patch in a batch clearly different from the others. "
@@ -504,7 +504,7 @@ juce::String LlmPatchGenerator::grammar (int patchCount, bool designWaves)
       << "patch ::= " << lit ("{\"name\":") << " name " << lit (",\"category\":") << " category "
       << lit (",\"tags\":[") << " tag " << lit (",") << " tag " << lit (",") << " tag " << lit ("]")
       << lit (",\"description\":") << " desc " << lit (",\"parent\":") << " int " << lit (",\"params\":{") << " params " << lit ("}")
-      << (designWaves ? " " + lit (",\"waveA\":") + " wave (" + lit (",\"waveB\":") + " wave)?" : juce::String())
+      << (designWaves ? " " + lit (",\"waveA\":") + " wave (" + lit (",\"waveB\":") + " wave)? (" + lit (",\"waveC\":") + " wave)?" : juce::String())
       << " " << lit ("}") << "\n"
       << "params ::= core (" << lit (",") << " param)*\n";
 
@@ -702,10 +702,10 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
 
         // A designed table switches its oscillator to Custom; Custom without a table falls back to a saw.
         if (auto* obj = v.getDynamicObject())
-            for (int osc = 0; osc < 2; ++osc)
+            for (int osc = 0; osc < kNumOscs; ++osc)
             {
-                const P waveParam = osc == 0 ? P::oscA_wave : P::oscB_wave;
-                if (obj->hasProperty (osc == 0 ? "waveA" : "waveB") && ! patch->waves[(size_t) osc].isEmpty())
+                const P waveParam = oscWaveParam (osc);
+                if (obj->hasProperty (Patch::waveKey (osc)) && ! patch->waves[(size_t) osc].isEmpty())
                     patch->set (waveParam, (float) kCustomWave);
                 if ((int) patch->get (waveParam) == kCustomWave && patch->waves[(size_t) osc].isEmpty())
                     patch->set (waveParam, 2.0f);

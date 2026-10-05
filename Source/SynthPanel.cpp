@@ -23,8 +23,8 @@ namespace
     const std::vector<RowSpec>& rowSpecs()
     {
         static const std::vector<RowSpec> specs = {
-            { "SOUND",      kSound,    0, { "OSC A", "OSC B", "MIX" } },
-            { "FILTER",     kFilter,   0, { "FILTER", "FILTER ENV", "AMP ENV" } },
+            { "SOUND",      kSound,    0, { "OSC A", "OSC B", "OSC C", "MIX" } },
+            { "FILTER",     kFilter,   0, { "FILTER", "FILTER 2", "FILTER ENV", "AMP ENV" } },
             { "MODULATORS", kMovement, SynthPanel::kModulatorsHeight, { kModulatorsGroup, "VOICE", "ARP" } },
             { "SHAPE",      kShape,    0, { "DISTORTION", "EQ", "COMPRESSOR" } },
             { "SPACE",      kSpace,    0, { "CHORUS", "DELAY", "REVERB" } },
@@ -94,7 +94,7 @@ private:
 };
 
 //==============================================================================
-WaveDisplay::WaveDisplay (StacksAudioProcessor& p, bool b, juce::Colour c) : processor (p), oscB (b), colour (c)
+WaveDisplay::WaveDisplay (StacksAudioProcessor& p, int o, juce::Colour c) : processor (p), osc (o), colour (c)
 {
     setTooltip ("The oscillator's wave at its morph position. Click to import a wavetable (.wav, 2048-sample frames) into a User slot.");
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
@@ -108,11 +108,11 @@ WaveDisplay::~WaveDisplay()
 
 void WaveDisplay::timerCallback()
 {
-    const int wave = (int) processor.apvts.getRawParameterValue (paramId (oscB ? P::oscB_wave : P::oscA_wave))->load();
-    const float morph = processor.apvts.getRawParameterValue (paramId (oscB ? P::oscB_morph : P::oscA_morph))->load();
-    const int warp = (int) processor.apvts.getRawParameterValue (paramId (oscB ? P::oscB_warp : P::oscA_warp))->load();
-    const float warpAmt = processor.apvts.getRawParameterValue (paramId (oscB ? P::oscB_warp_amt : P::oscA_warp_amt))->load();
-    const int slot = wave >= kCustomWave ? UserWavetables::customSlot (oscB ? 1 : 0) : wave - WavetableBank::kNumBuiltIn;
+    const int wave = (int) processor.apvts.getRawParameterValue (paramId (oscWaveParam (osc)))->load();
+    const float morph = processor.apvts.getRawParameterValue (paramId (oscMorphParam (osc)))->load();
+    const int warp = (int) processor.apvts.getRawParameterValue (paramId (oscWarpParam (osc)))->load();
+    const float warpAmt = processor.apvts.getRawParameterValue (paramId (oscWarpAmtParam (osc)))->load();
+    const int slot = wave >= kCustomWave ? UserWavetables::customSlot (osc) : wave - WavetableBank::kNumBuiltIn;
     const auto name = wave >= WavetableBank::kNumBuiltIn ? processor.userWaveName (slot) : juce::String();
     if (wave != shownWave || std::abs (morph - shownMorph) > 0.002f || name != shownName || warp != shownWarp || std::abs (warpAmt - shownWarpAmt) > 0.002f)
     {
@@ -134,7 +134,7 @@ void WaveDisplay::paint (juce::Graphics& g)
     const int wave = juce::jmax (0, shownWave);
     const float morph = juce::jlimit (0.0f, 1.0f, shownMorph);
     const bool custom = wave >= kCustomWave;
-    const int user = custom ? UserWavetables::customSlot (oscB ? 1 : 0) : wave - WavetableBank::kNumBuiltIn;
+    const int user = custom ? UserWavetables::customSlot (osc) : wave - WavetableBank::kNumBuiltIn;
     const UserTable* table = user >= 0 ? processor.userWavetables().active (user) : nullptr;
 
     juce::Path path;
@@ -171,7 +171,7 @@ void WaveDisplay::mouseDown (const juce::MouseEvent&)
 
 void WaveDisplay::importWavetable()
 {
-    const int wave = (int) processor.apvts.getRawParameterValue (paramId (oscB ? P::oscB_wave : P::oscA_wave))->load();
+    const int wave = (int) processor.apvts.getRawParameterValue (paramId (oscWaveParam (osc)))->load();
     const int slot = wave >= WavetableBank::kNumBuiltIn && wave < kCustomWave ? wave - WavetableBank::kNumBuiltIn : processor.firstFreeUserSlot();
 
     chooser = std::make_unique<juce::FileChooser> ("Import a wavetable (.wav with 2048-sample frames, Serum style)",
@@ -185,7 +185,7 @@ void WaveDisplay::importWavetable()
                               juce::String error;
                               if (processor.importWavetable (file, slot, error))
                               {
-                                  if (auto* param = processor.apvts.getParameter (paramId (oscB ? P::oscB_wave : P::oscA_wave)))
+                                  if (auto* param = processor.apvts.getParameter (paramId (oscWaveParam (osc))))
                                       param->setValueNotifyingHost (param->convertTo0to1 ((float) (WavetableBank::kNumBuiltIn + slot)));
                               }
                               else
@@ -297,8 +297,8 @@ private:
         if (newBody.isEmpty())
         {
             static const char* const screens[] = {
-                "SOUND is where the tone starts: two wavetable oscillators (A and B, B can FM A), a sub for weight and noise for air. Morph slides through each table; Warp bends it (Sync, Bend, PWM, Mirror, Fold, Quantize).",
-                "FILTER shapes the tone: cutoff is brightness, resonance a peak at the cutoff (Notch, Comb and Formant are special flavours). The filter envelope moves the cutoff per note; the amp envelope shapes loudness.",
+                "SOUND is where the tone starts: three wavetable oscillators (A, B and C; B can FM A), a sub for weight and noise for air. Morph slides through each table; Warp bends it (Sync, Bend, PWM, Mirror, Fold, Quantize).",
+                "FILTER shapes the tone: cutoff is brightness, resonance a peak at the cutoff (Notch, Comb and Formant are special flavours). Routing turns on a second filter: series, parallel, or split (A through 1, B and C through 2). The filter envelope moves both cutoffs per note; the amp envelope shapes loudness.",
                 "MODULATORS make things move: draw an LFO, press Assign and click any knob - it swings around its value. The Arp plays held notes as a pattern in time with the host.",
                 "SHAPE adds character: distortion (soft, hard, tube, fold, crush), a three-band EQ, and a compressor at the end of the chain for glue.",
                 "SPACE is the room: chorus for width and shimmer, delay for echoes (in time with the host), reverb for the tail. The 'more' buttons hold the fine print.",
@@ -479,11 +479,12 @@ SynthPanel::SynthPanel (StacksAudioProcessor& p) : processor (p), apvts (p.apvts
         controls.push_back (std::move (control));
 
         const juce::String id (spec.id);
-        if (id == "oscA_wave" || id == "oscB_wave")
+        if (id == "oscA_wave" || id == "oscB_wave" || id == "oscC_wave")
         {
-            auto display = std::make_unique<WaveDisplay> (processor, id == "oscB_wave", section->colour);
+            auto display = std::make_unique<WaveDisplay> (processor, id == "oscA_wave" ? 0 : id == "oscB_wave" ? 1 : 2, section->colour);
             addAndMakeVisible (*display);
             section->controls.emplace_back (display.get(), kCell);
+            optionalDisplays.push_back (display.get());   // the dense ALL view may drop it; the SOUND view always shows it
             controls.push_back (std::move (display));
         }
     }

@@ -31,7 +31,7 @@ namespace
 SynthVoice::SynthVoice (VoiceContext& context) : ctx (context)
 {
     rng.setSeedRandomly();
-    filter.setMode (filterMode);
+    for (auto& f : filters) f.ladder.setMode (f.mode);
 }
 
 bool SynthVoice::canPlaySound (juce::SynthesiserSound* sound)
@@ -45,12 +45,7 @@ void SynthVoice::setCurrentPlaybackSampleRate (double newRate)
     if (newRate <= 0.0)
         return;
 
-    juce::dsp::ProcessSpec spec { newRate, (juce::uint32) kSub, 2 };
-    filter.prepare (spec);
-    filter.reset();
-    for (auto& c : comb) c.prepare ((int) (newRate / 20.0) + 8);
-    for (auto& s : svfA) s.reset();
-    for (auto& s : svfB) s.reset();
+    for (auto& f : filters) f.prepare (newRate, kSub);
     ampEnv.setSampleRate (newRate);
     filterEnv.setSampleRate (newRate);
     modEnv.setSampleRate (newRate);
@@ -85,6 +80,13 @@ void SynthVoice::startNote (int midiNoteNumber, float vel, juce::SynthesiserSoun
     slide = ctx.channelSlide[channel - 1];
     aftertouch = ctx.channelPressure[channel - 1];
 
+    // A microtuning master may exclude this key from its scale.
+    if (ctx.mts != nullptr && MTS_ShouldFilterNote (ctx.mts, (char) midiNoteNumber, (signed char) (channel - 1)))
+    {
+        clearCurrentNote();
+        return;
+    }
+
     // Glide starts from whatever note was played last, on any voice.
     targetNote = (float) midiNoteNumber;
     const float glideTime = p.get (P::glide);
@@ -108,6 +110,7 @@ void SynthVoice::startNote (int midiNoteNumber, float vel, juce::SynthesiserSoun
         const float ph = unison > 1 ? (float) u / (float) unison : 0.0f;
         phaseA[u] = ph;
         phaseB[u] = ph;
+        phaseC[u] = ph;
     }
     subPhase = 0.0f;
     for (int k = 0; k < kNumLfos; ++k)
@@ -117,10 +120,7 @@ void SynthVoice::startNote (int midiNoteNumber, float vel, juce::SynthesiserSoun
     }
 
     updateEnvelopes (p);
-    filter.reset();
-    for (auto& s : svfA) s.reset();
-    for (auto& s : svfB) s.reset();
-    for (auto& c : comb) c.clear();
+    for (auto& f : filters) f.reset();
     ampEnv.noteOn();
     filterEnv.noteOn();
     modEnv.noteOn();
@@ -224,12 +224,50 @@ float SynthVoice::readWave (int osc, int wave, int mip, float morph, float phase
     return std::sin (twoPi * phase);
 }
 
+void SynthVoice::FilterUnit::prepare (double sampleRate, int blockSize)
+{
+    juce::dsp::ProcessSpec spec { sampleRate, (juce::uint32) blockSize, 2 };
+    ladder.prepare (spec);
+    for (auto& c : comb) c.prepare ((int) (sampleRate / 20.0) + 8);
+    reset();
+}
+
+void SynthVoice::FilterUnit::reset() noexcept
+{
+    ladder.reset();
+    for (auto& s : svfA) s.reset();
+    for (auto& s : svfB) s.reset();
+    for (auto& c : comb) c.clear();
+}
+
+void SynthVoice::FilterUnit::process (int type, float cutoff, float res, float drive, juce::AudioBuffer<float>& buffer, int n, float fsr) noexcept
+{
+    if (type <= 5)
+    {
+        const auto wanted = filterModeFor (type);
+        if (wanted != mode)
+        {
+            mode = wanted;
+            ladder.setMode (mode);   // resets state, so only on a real change
+        }
+        ladder.setCutoffFrequencyHz (cutoff);
+        ladder.setResonance (res);
+        ladder.setDrive (drive);
+        juce::dsp::AudioBlock<float> block (buffer);
+        auto subBlock = block.getSubBlock (0, (size_t) n);
+        juce::dsp::ProcessContextReplacing<float> context (subBlock);
+        ladder.process (context);
+    }
+    else
+        processExtra (type, cutoff, res, buffer, n, fsr);
+}
+
 // Notch (a hole at the cutoff), Comb (a resonance at the cutoff's pitch) and
 // Formant (two vowel peaks; the cutoff sweeps A-E-I-O-U).
-void SynthVoice::processExtraFilter (int type, float cutoff, float res, int n, float fsr) noexcept
+void SynthVoice::FilterUnit::processExtra (int type, float cutoff, float res, juce::AudioBuffer<float>& buffer, int n, float fsr) noexcept
 {
-    float* L = scratch.getWritePointer (0);
-    float* R = scratch.getWritePointer (1);
+    float* L = buffer.getWritePointer (0);
+    float* R = buffer.getWritePointer (1);
     float* ch[2] = { L, R };
 
     if (type == 6)   // Notch
@@ -397,15 +435,25 @@ void SynthVoice::renderNextBlock (juce::AudioBuffer<float>& out, int startSample
         const float warpAmtA    = juce::jlimit (0.0f, 1.0f, p.get (P::oscA_warp_amt));
         const float warpAmtB    = juce::jlimit (0.0f, 1.0f, p.get (P::oscB_warp_amt));
         const float uniMorph    = p.get (P::unison_morph);
+        const int waveC         = juce::jlimit (0, kLastWave, p.geti (P::oscC_wave));
+        const float levelC      = p.get (P::oscC_level);
+        const float semisC      = (float) p.geti (P::oscC_coarse) + p.get (P::oscC_fine) / 100.0f;
+        const float morphC      = juce::jlimit (0.0f, 1.0f, p.get (P::oscC_morph));
+        const int warpC         = juce::jlimit (0, kNumWarpModes - 1, p.geti (P::oscC_warp));
+        const float warpAmtC    = juce::jlimit (0.0f, 1.0f, p.get (P::oscC_warp_amt));
+        const int routing       = juce::jlimit (0, 3, p.geti (P::filter_routing));   // 0 Off, 1 Series, 2 Parallel, 3 Split
+        const bool split        = routing == 3;
+        const bool useC         = levelC > 0.0001f;
         const float fmDepth     = fm * fm * 2.0f;        // cycles of phase excursion
         const float unisonComp  = 1.0f / std::sqrt ((float) unison);
 
-        float gainL[kMaxUnison], gainR[kMaxUnison], detuneRatio[kMaxUnison], morphAu[kMaxUnison], morphBu[kMaxUnison];
+        float gainL[kMaxUnison], gainR[kMaxUnison], detuneRatio[kMaxUnison], morphAu[kMaxUnison], morphBu[kMaxUnison], morphCu[kMaxUnison];
         for (int u = 0; u < unison; ++u)
         {
             const float offset = unison > 1 ? -1.0f + 2.0f * (float) u / (float) (unison - 1) : 0.0f;
             morphAu[u] = juce::jlimit (0.0f, 1.0f, morphA + 0.5f * uniMorph * offset);   // Uni Morph: each copy at its own table position
             morphBu[u] = juce::jlimit (0.0f, 1.0f, morphB + 0.5f * uniMorph * offset);
+            morphCu[u] = juce::jlimit (0.0f, 1.0f, morphC + 0.5f * uniMorph * offset);
             const float upan   = offset * spread;
             gainL[u] = unison > 1 ? std::sqrt (0.5f * (1.0f - upan)) * juce::MathConstants<float>::sqrt2 : 1.0f;
             gainR[u] = unison > 1 ? std::sqrt (0.5f * (1.0f + upan)) * juce::MathConstants<float>::sqrt2 : 1.0f;
@@ -428,70 +476,97 @@ void SynthVoice::renderNextBlock (juce::AudioBuffer<float>& out, int startSample
         const bool mpe     = ctx.mpe.load (std::memory_order_relaxed);
         const bool member  = mpe && channel != 1;
         const float pitchBendSemis = bendNorm * (member ? 48.0f : (float) p.geti (P::bend_range)) + (member ? ctx.masterBend : 0.0f);
-        const float note   = currentNote + pitchBendSemis + pitchMod;
+        // MTS-ESP: the master's retuning for the key being played (0 without a master).
+        const float retune = ctx.mts != nullptr && MTS_HasMaster (ctx.mts)
+                           ? (float) MTS_RetuningInSemitones (ctx.mts, (char) juce::jlimit (0, 127, (int) std::lround (currentNote)), (signed char) (channel - 1))
+                           : 0.0f;
+        const float note   = currentNote + retune + pitchBendSemis + pitchMod;
         const float baseHz = midiToHz (note);
         const float hzA    = baseHz * std::exp2 (semisA / 12.0f);
         const float hzB    = baseHz * std::exp2 (semisB / 12.0f);
+        const float hzC    = baseHz * std::exp2 (semisC / 12.0f);
         const int mipA     = WavetableBank::levelFor (hzA * (1.0f + 3.0f * fm) * warpRateFactor (warpA, warpAmtA), sr); // FM and Sync widen A's spectrum
         const int mipB     = WavetableBank::levelFor (hzB * warpRateFactor (warpB, warpAmtB), sr);
+        const int mipC     = WavetableBank::levelFor (hzC * warpRateFactor (warpC, warpAmtC), sr);
 
-        float incA[kMaxUnison], incB[kMaxUnison];
+        float incA[kMaxUnison], incB[kMaxUnison], incC[kMaxUnison];
         for (int u = 0; u < unison; ++u)
         {
             incA[u] = hzA * detuneRatio[u] / fsr;
             incB[u] = hzB * detuneRatio[u] / fsr;
+            incC[u] = hzC * detuneRatio[u] / fsr;
         }
         const float subInc = baseHz * 0.5f / fsr;
 
-        // ---- oscillators -> scratch (pre-filter) --------------------------
+        // ---- oscillators -> the filter buses (pre-filter) -------------------
+        // Bus 1 (scratch) feeds filter 1, bus 2 (scratch2) feeds filter 2. Only
+        // Split routing separates them: A, sub and noise on bus 1, B and C on bus 2.
+        auto* scratch2L = scratch2.getWritePointer (0);
+        auto* scratch2R = scratch2.getWritePointer (1);
         for (int i = 0; i < n; ++i)
         {
-            float l = 0.0f, r = 0.0f;
+            float l1 = 0.0f, r1 = 0.0f, l2 = 0.0f, r2 = 0.0f;
             for (int u = 0; u < unison; ++u)
             {
                 const float sB = warpSample (warpB, readWave (1, waveB, mipB, morphBu[u], warpPhase (warpB, phaseB[u], warpAmtB)), warpAmtB);
                 const float pa = warpPhase (warpA, wrap01 (phaseA[u] + fmDepth * sB), warpAmtA);
                 const float sA = warpSample (warpA, readWave (0, waveA, mipA, morphAu[u], pa), warpAmtA);
-                const float s  = sA * levelA + sB * levelB;
-                l += s * gainL[u];
-                r += s * gainR[u];
+                const float sC = useC ? warpSample (warpC, readWave (2, waveC, mipC, morphCu[u], warpPhase (warpC, phaseC[u], warpAmtC)), warpAmtC) : 0.0f;
+                const float a  = sA * levelA;
+                const float bc = sB * levelB + sC * levelC;
+                if (split)
+                {
+                    l1 += a * gainL[u];  r1 += a * gainR[u];
+                    l2 += bc * gainL[u]; r2 += bc * gainR[u];
+                }
+                else
+                {
+                    const float s = a + bc;
+                    l1 += s * gainL[u];
+                    r1 += s * gainR[u];
+                }
 
                 phaseA[u] = wrap01 (phaseA[u] + incA[u]);
                 phaseB[u] = wrap01 (phaseB[u] + incB[u]);
+                phaseC[u] = wrap01 (phaseC[u] + incC[u]);
             }
 
             const float mono = std::sin (twoPi * subPhase) * subLevel
                              + (rng.nextFloat() * 2.0f - 1.0f) * noiseLevel;
             subPhase += subInc; if (subPhase >= 1.0f) subPhase -= 1.0f;
 
-            scratchL[i] = l * unisonComp + mono;
-            scratchR[i] = r * unisonComp + mono;
+            scratchL[i] = l1 * unisonComp + mono;
+            scratchR[i] = r1 * unisonComp + mono;
+            scratch2L[i] = l2 * unisonComp;
+            scratch2R[i] = r2 * unisonComp;
         }
 
-        // ---- filter --------------------------------------------------------
-        const int filterType = p.geti (P::filter_type);
+        // ---- filters -------------------------------------------------------
         const float keyTrack = p.get (P::filter_keytrack) * (currentNote - 60.0f) / 12.0f;
-        float cutoff = p.get (P::filter_cutoff) * std::exp2 (envF * p.get (P::filter_env) + keyTrack);
-        cutoff = juce::jlimit (20.0f, juce::jmin (20000.0f, fsr * 0.45f), cutoff);
-        if (filterType <= 5)
-        {
-            const auto wantedMode = filterModeFor (filterType);
-            if (wantedMode != filterMode)
-            {
-                filterMode = wantedMode;
-                filter.setMode (filterMode); // resets state, so only on a real change
-            }
-            filter.setCutoffFrequencyHz (cutoff);
-            filter.setResonance (juce::jlimit (0.0f, 1.0f, p.get (P::filter_res)));
-            filter.setDrive (juce::jmax (1.0f, p.get (P::filter_drive)));
+        const float maxHz    = juce::jmin (20000.0f, fsr * 0.45f);
+        const float cutoff   = juce::jlimit (20.0f, maxHz, p.get (P::filter_cutoff)  * std::exp2 (envF * p.get (P::filter_env)  + keyTrack));
+        const float cutoff2  = juce::jlimit (20.0f, maxHz, p.get (P::filter2_cutoff) * std::exp2 (envF * p.get (P::filter2_env) + keyTrack));
+        const int type1 = p.geti (P::filter_type), type2 = p.geti (P::filter2_type);
+        const float res1 = juce::jlimit (0.0f, 1.0f, p.get (P::filter_res)),  drive1 = juce::jmax (1.0f, p.get (P::filter_drive));
+        const float res2 = juce::jlimit (0.0f, 1.0f, p.get (P::filter2_res)), drive2 = juce::jmax (1.0f, p.get (P::filter2_drive));
 
-            juce::dsp::AudioBlock<float> block (scratch);
-            auto subBlock = block.getSubBlock (0, (size_t) n);
-            juce::dsp::ProcessContextReplacing<float> context (subBlock);
-            filter.process (context);
+        if (routing == 2)   // Parallel: filter 2 gets its own copy of the whole mix
+            for (int c = 0; c < 2; ++c)
+                scratch2.copyFrom (c, 0, scratch, c, 0, n);
+
+        filters[0].process (type1, cutoff, res1, drive1, scratch, n, fsr);
+        if (routing == 1)
+            filters[1].process (type2, cutoff2, res2, drive2, scratch, n, fsr);        // Series
+        else if (routing >= 2)
+        {
+            filters[1].process (type2, cutoff2, res2, drive2, scratch2, n, fsr);       // Parallel / Split
+            const float g = routing == 2 ? 0.7f : 1.0f;
+            for (int c = 0; c < 2; ++c)
+            {
+                if (routing == 2) scratch.applyGain (c, 0, n, g);
+                scratch.addFrom (c, 0, scratch2, c, 0, n, g);
+            }
         }
-        else
-            processExtraFilter (filterType, cutoff, juce::jlimit (0.0f, 1.0f, p.get (P::filter_res)), n, fsr);
 
         // ---- amplitude, pan, output ----------------------------------------
         const float gl = std::sqrt (0.5f * (1.0f - pan)) * juce::MathConstants<float>::sqrt2;
@@ -520,10 +595,7 @@ void SynthVoice::renderNextBlock (juce::AudioBuffer<float>& out, int startSample
         if (! ampEnv.isActive())
         {
             clearCurrentNote();
-            filter.reset();
-    for (auto& s : svfA) s.reset();
-    for (auto& s : svfB) s.reset();
-    for (auto& c : comb) c.clear();
+            for (auto& f : filters) f.reset();
             break;
         }
     }

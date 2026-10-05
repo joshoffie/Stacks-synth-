@@ -150,8 +150,8 @@ static void testPatchJson()
     section ("Patch JSON");
     CHECK (waveNames()[kCustomWave] == "Custom");
     CHECK (waveNames().size() == kCustomWave + 1);
-    CHECK (UserWavetables::customSlot (0) == UserWavetables::kCustomSlotA && UserWavetables::customSlot (1) == UserWavetables::kCustomSlotB);
-    CHECK (UserWavetables::kSlots > UserWavetables::kCustomSlotB);
+    CHECK (UserWavetables::customSlot (0) == UserWavetables::kCustomSlotA && UserWavetables::customSlot (1) == UserWavetables::kCustomSlotB && UserWavetables::customSlot (2) == UserWavetables::kCustomSlotC);
+    CHECK (UserWavetables::kSlots > UserWavetables::kCustomSlotC && kNumOscs == 3);
 
     Patch p;
     p.name = "Test";
@@ -937,6 +937,26 @@ static void testWarpsAndSources()
     CHECK (describePatch (p).contains ("fold warp on A"));
 
     // A warp mode on its own is silent; with its amount up it counts (mode + amount).
+    // Third oscillator and second filter: parameters, JSON and description.
+    CHECK (oscWaveParam (2) == P::oscC_wave && oscWarpAmtParam (2) == P::oscC_warp_amt && oscLevelParam (1) == P::oscB_level);
+    CHECK (filterRoutingNames().size() == 4 && filterRoutingNames()[3] == "Split");
+    Patch c;
+    c.set (P::oscC_level, 0.7f);
+    c.set (P::oscC_wave, (float) kCustomWave);
+    c.waves[2] = *WaveSpec::fromJson (R"json({"name":"Third","tail":3,"spectra":[[9,7,5,4,3,2,2,1,1,1,0,0,0,0,0,0]]})json");
+    c.set (P::filter_routing, 1.0f);
+    c.set (P::filter2_cutoff, 1500.0f);
+    const auto cj = c.toJson();
+    CHECK (cj.contains ("\"waveC\"") && ! cj.contains ("\"waveB\""));
+    if (auto back = Patch::fromJson (cj))
+    {
+        CHECK (back->waves[2] == c.waves[2] && back->waves[1].isEmpty());
+        CHECK ((int) back->get (P::filter_routing) == 1 && std::abs (back->get (P::filter2_cutoff) - 1500.0f) < 0.5f);
+    }
+    else CHECK (false);
+    CHECK (describePatch (c).contains ("filter 2 LP24 @ 1.5 kHz, series") && describePatch (c).contains ("Third"));
+    CHECK (countAudibleDifferences (Patch(), c) >= 3);   // C level, its table, routing, cutoff 2
+
     Patch a, b;
     b.set (P::oscA_warp, (float) WarpSync);
     CHECK (countAudibleDifferences (a, b) == 0);

@@ -55,7 +55,8 @@ public:
 private:
     void timerCallback() override;
     std::atomic<float>* type; std::atomic<float>* cutoff; std::atomic<float>* resonance; std::atomic<float>* drive;
-    float shown[4] { -1.0f, -1.0f, -1.0f, -1.0f };
+    std::atomic<float>* routing; std::atomic<float>* type2; std::atomic<float>* cutoff2; std::atomic<float>* resonance2;   // filter 2
+    float shown[8] { -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f };
     juce::Colour colour;
 };
 

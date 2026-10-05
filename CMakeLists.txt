@@ -77,6 +77,7 @@ juce_add_plugin(Stacks
     COPY_PLUGIN_AFTER_BUILD ${STACKS_COPY_PLUGIN})
 
 juce_generate_juce_header(Stacks)
+target_include_directories(Stacks PRIVATE ThirdParty/MTS-ESP)   # ODDSound MTS-ESP client (microtuning)
 
 # The factory presets travel inside every bundle and are installed into the
 # library on first run. Resources must go on the format targets (the bundles);
@@ -120,6 +121,7 @@ target_sources(Stacks PRIVATE
     Source/Patch.cpp
     Source/Effects.cpp
     Source/Arpeggiator.cpp
+    ThirdParty/MTS-ESP/libMTSClient.cpp
     Source/PatchGenerator.cpp
     Source/ai/OllamaBackend.cpp
     Source/ai/LlamaBackend.cpp
@@ -167,11 +169,12 @@ target_sources(StacksTests PRIVATE
     Source/Patch.cpp
     Source/PatchGenerator.cpp
     Source/Arpeggiator.cpp
+    ThirdParty/MTS-ESP/libMTSClient.cpp
     Source/ai/LlmPatchGenerator.cpp
     Source/ai/LlamaBackend.cpp
     Source/ai/OllamaBackend.cpp
     Source/ai/ModelManager.cpp)
-target_include_directories(StacksTests PRIVATE Source)
+target_include_directories(StacksTests PRIVATE Source ThirdParty/MTS-ESP)
 target_compile_definitions(StacksTests PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0

@@ -57,6 +57,7 @@ StacksAudioProcessor::StacksAudioProcessor()
       generator (randomGenerator)
 {
     loadThemeFile (libraryRoot().getChildFile ("theme.json"));   // optional recolouring, before any window exists
+    voiceContext.mts = MTS_RegisterClient();                      // MTS-ESP: retunes to a running master, 12-TET otherwise
     const auto& specs = paramSpecs();
     for (int i = 0; i < kNumParams; ++i)
     {
@@ -106,6 +107,11 @@ StacksAudioProcessor::StacksAudioProcessor()
 
 StacksAudioProcessor::~StacksAudioProcessor()
 {
+    if (voiceContext.mts != nullptr)
+    {
+        MTS_DeregisterClient (voiceContext.mts);
+        voiceContext.mts = nullptr;
+    }
     stopTimer();
     cancelPendingUpdate();
     for (auto* param : getParameters())
@@ -930,7 +936,7 @@ void StacksAudioProcessor::reloadUserWaves()
 void StacksAudioProcessor::reloadCustomWaves()
 {
     auto tree = apvts.state.getChildWithName (Patch::customWavesTreeType());
-    for (int osc = 0; osc < 2; ++osc)
+    for (int osc = 0; osc < kNumOscs; ++osc)
     {
         WaveSpec spec;
         if (tree.isValid())

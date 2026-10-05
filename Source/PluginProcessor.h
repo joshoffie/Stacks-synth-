@@ -167,6 +167,10 @@ public:
 
     // Audition previews: clicking a patch (library row, leaf, card, seed) plays a
     // short phrase suited to its category, so browsing needs no keyboard. Persisted.
+    // MTS-ESP microtuning (ODDSound): automatic whenever a master is running on this machine.
+    bool mtsConnected() const                              { return voiceContext.mts != nullptr && MTS_HasMaster (voiceContext.mts); }
+    juce::String mtsScaleName() const                      { return mtsConnected() ? juce::String (MTS_GetScaleName (voiceContext.mts)) : juce::String(); }
+
     bool previewOnClick() const                            { return previewClicks; }
     void setPreviewOnClick (bool);
     void playPreview (const Patch&);                       // queues the phrase for the audio thread
@@ -174,7 +178,7 @@ public:
     // Let the generators invent new wavetables ("Custom") instead of only picking built-ins. Persisted.
     bool designWavetables() const                          { return designWaves; }
     void setDesignWavetables (bool);
-    const WaveSpec& customWave (int osc) const             { return customSpecs[osc & 1]; }
+    const WaveSpec& customWave (int osc) const             { return customSpecs[juce::jlimit (0, kNumOscs - 1, osc)]; }
 
     static constexpr int kBatchSize = 10;
     static constexpr int kAiPatchesPerBatch = 5;           // the rest are instant Random variations
@@ -243,7 +247,7 @@ private:
     // Synth engine
     juce::SharedResourcePointer<WavetableBank> bank;      // built once, shared by all instances
     UserWavetables userWaves;                             // per instance, named in the state tree
-    WaveSpec customSpecs[2];                              // what the Custom slots were built from
+    WaveSpec customSpecs[kNumOscs];                              // what the Custom slots were built from
     bool designWaves = true;
     SynthParams params;                                   // base values this block
     SynthParams fxParams;                                 // base + global modulation, read by the effects

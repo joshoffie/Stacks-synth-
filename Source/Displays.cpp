@@ -185,6 +185,10 @@ FilterCurve::FilterCurve (juce::AudioProcessorValueTreeState& apvts, juce::Colou
     cutoff = apvts.getRawParameterValue ("filter_cutoff");
     resonance = apvts.getRawParameterValue ("filter_res");
     drive = apvts.getRawParameterValue ("filter_drive");
+    routing = apvts.getRawParameterValue ("filter_routing");
+    type2 = apvts.getRawParameterValue ("filter2_type");
+    cutoff2 = apvts.getRawParameterValue ("filter2_cutoff");
+    resonance2 = apvts.getRawParameterValue ("filter2_res");
     setTooltip ("What the filter lets through: low-pass keeps the lows, high-pass the highs, band-pass the middle. Resonance adds a peak at the cutoff.");
     setInterceptsMouseClicks (false, false);
     startTimerHz (15);
@@ -192,9 +196,9 @@ FilterCurve::FilterCurve (juce::AudioProcessorValueTreeState& apvts, juce::Colou
 
 void FilterCurve::timerCallback()
 {
-    const float v[4] = { type->load(), cutoff->load(), resonance->load(), drive->load() };
+    const float v[8] = { type->load(), cutoff->load(), resonance->load(), drive->load(), routing->load(), type2->load(), cutoff2->load(), resonance2->load() };
     bool changed = false;
-    for (int i = 0; i < 4; ++i) { changed = changed || std::abs (v[i] - shown[i]) > 1.0e-4f; shown[i] = v[i]; }
+    for (int i = 0; i < 8; ++i) { changed = changed || std::abs (v[i] - shown[i]) > 1.0e-4f; shown[i] = v[i]; }
     if (changed) repaint();
 }
 
@@ -204,12 +208,11 @@ void FilterCurve::paint (juce::Graphics& g)
     frame (g, r0);
     auto inner = r0.reduced (4.0f, 4.0f);
 
-    const int t = (int) shown[0];          // LP12, LP24, HP12, HP24, BP12, BP24
-    const float fc = juce::jlimit (kMinHz, kMaxHz, shown[1]);
-    const float res = juce::jlimit (0.0f, 1.0f, shown[2]);
-    const float order = (t % 2 == 0) ? 2.0f : 4.0f;   // 12 or 24 dB/oct
-    auto response = [&] (float hz)
+    // One filter's magnitude response (type, cutoff, resonance); filter 2 is drawn
+    // with the same function when its routing is on.
+    auto responseOf = [] (int t, float fc, float res, float hz)
     {
+        const float order = (t % 2 == 0) ? 2.0f : 4.0f;   // 12 or 24 dB/oct
         const float w = hz / fc;
         float gain = 1.0f;
         const float octaves = std::log2 (w);
@@ -235,14 +238,43 @@ void FilterCurve::paint (juce::Graphics& g)
         return gain;
     };
 
-    juce::Path p;
-    const int points = (int) inner.getWidth();
-    for (int px = 0; px <= points; ++px)
+    const int t = (int) shown[0];
+    const float fc = juce::jlimit (kMinHz, kMaxHz, shown[1]);
+    const float res = juce::jlimit (0.0f, 1.0f, shown[2]);
+    const int rt = (int) shown[4];
+    const int t2 = (int) shown[5];
+    const float fc2 = juce::jlimit (kMinHz, kMaxHz, shown[6]);
+    const float res2 = juce::jlimit (0.0f, 1.0f, shown[7]);
+    auto response = [&] (float hz)
     {
-        const float hz = kMinHz * std::pow (kMaxHz / kMinHz, (float) px / (float) points);
-        const float db = juce::jlimit (-36.0f, 18.0f, juce::Decibels::gainToDecibels (response (hz), -60.0f));
-        const float y = inner.getBottom() - (db + 36.0f) / 54.0f * inner.getHeight();
-        if (px == 0) p.startNewSubPath (inner.getX(), y); else p.lineTo (inner.getX() + (float) px, y);
+        const float g1 = responseOf (t, fc, res, hz);
+        if (rt == 1) return g1 * responseOf (t2, fc2, res2, hz);            // series: the product
+        if (rt == 2) return 0.7f * (g1 + responseOf (t2, fc2, res2, hz));   // parallel: the sum
+        return g1;                                                         // off / split: filter 1 (filter 2 drawn on its own below)
+    };
+
+    const int points = (int) inner.getWidth();
+    auto curve = [&] (auto&& fn)
+    {
+        juce::Path path;
+        for (int px = 0; px <= points; ++px)
+        {
+            const float hz = kMinHz * std::pow (kMaxHz / kMinHz, (float) px / (float) points);
+            const float db = juce::jlimit (-36.0f, 18.0f, juce::Decibels::gainToDecibels (fn (hz), -60.0f));
+            const float y = inner.getBottom() - (db + 36.0f) / 54.0f * inner.getHeight();
+            if (px == 0) path.startNewSubPath (inner.getX(), y); else path.lineTo (inner.getX() + (float) px, y);
+        }
+        return path;
+    };
+    juce::Path p = curve (response);
+    if (rt == 3)   // split: filter 2 shapes B and C on its own, shown as a dotted second curve
+    {
+        const auto p2 = curve ([&] (float hz) { return responseOf (t2, fc2, res2, hz); });
+        const float dashes[] = { 3.0f, 3.0f };
+        juce::Path dashed;
+        juce::PathStrokeType (1.2f).createDashedStroke (dashed, p2, dashes, 2);
+        g.setColour (colour.withAlpha (0.55f));
+        g.fillPath (dashed);
     }
     juce::Path fill (p);
     fill.lineTo (inner.getRight(), inner.getBottom());

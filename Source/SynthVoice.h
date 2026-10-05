@@ -7,6 +7,7 @@
 #include "Wavetable.h"
 #include "Effects.h"
 #include "LfoTable.h"
+#include "libMTSClient.h"
 
 namespace stacks
 {
@@ -29,6 +30,7 @@ struct VoiceContext
     std::atomic<float> aftertouch { 0.0f };   // last channel pressure, for global targets
     std::atomic<float> slide { 0.0f };        // last CC74 (MPE slide) on any channel, for global targets
     std::atomic<bool> mpe { false };          // MPE: channel 1 is the master, 2-16 carry one note each
+    MTSClient* mts = nullptr;                 // MTS-ESP: retunes every note when a master is running
     float masterBend = 0.0f;                  // semitones from channel 1's wheel (MPE master), audio thread only
     float masterPressure = 0.0f;              // channel 1's pressure
     float channelSlide[16] {};                // per channel, so a note that starts after the controller moved begins right
@@ -52,8 +54,8 @@ inline void nudgeParam (SynthParams& p, int paramIndex, float delta) noexcept
     v = range.convertFrom0to1 (norm);
 }
 
-// One playing note: 2 wavetable oscillators (B can FM A, each with a warp) x
-// up to 16 unison copies, sub + noise, filters, three envelopes, four LFOs.
+// One playing note: 3 wavetable oscillators (B can FM A, each with a warp) x
+// up to 16 unison copies, sub + noise, two filters, three envelopes, four LFOs.
 class SynthVoice : public juce::SynthesiserVoice
 {
 public:
@@ -82,11 +84,6 @@ private:
 
     VoiceContext& ctx;
     juce::ADSR ampEnv, filterEnv, modEnv;
-    juce::dsp::LadderFilter<float> filter;
-    juce::dsp::LadderFilterMode filterMode = juce::dsp::LadderFilterMode::LPF24;
-
-    // Notch, Comb and Formant: types the ladder doesn't do. A TPT state-variable
-    // filter (two per channel, the formant needs two peaks) and a comb line.
     struct Svf
     {
         float ic1 = 0.0f, ic2 = 0.0f, lp = 0.0f, bp = 0.0f, hp = 0.0f;
@@ -99,10 +96,22 @@ private:
             lp = v2; bp = v1; hp = x - k * v1 - v2;
         }
     };
-    Svf svfA[2], svfB[2];
-    FracDelay comb[2];
-    void processExtraFilter (int type, float cutoff, float res, int n, float fsr) noexcept;
-    juce::AudioBuffer<float> scratch { 2, kSub };
+
+    // One filter: the ladder for LP/HP/BP; a TPT state-variable pair and a comb
+    // line for Notch, Comb and Formant. Two of them: filter 1 and filter 2.
+    struct FilterUnit
+    {
+        juce::dsp::LadderFilter<float> ladder;
+        juce::dsp::LadderFilterMode mode = juce::dsp::LadderFilterMode::LPF24;
+        Svf svfA[2], svfB[2];
+        FracDelay comb[2];
+        void prepare (double sampleRate, int blockSize);
+        void reset() noexcept;
+        void process (int type, float cutoff, float res, float drive, juce::AudioBuffer<float>& buffer, int n, float fsr) noexcept;
+        void processExtra (int type, float cutoff, float res, juce::AudioBuffer<float>& buffer, int n, float fsr) noexcept;
+    };
+    FilterUnit filters[2];
+    juce::AudioBuffer<float> scratch { 2, kSub }, scratch2 { 2, kSub };   // the filter 1 bus and the filter 2 bus (Parallel / Split)
     juce::Random rng;
 
     int serial = -1;               // this note's serial, see VoiceContext::displayVoice
@@ -114,7 +123,7 @@ private:
     float noteRandom = 0.0f;       // -1..1, drawn per note
     float currentNote = 60.0f, targetNote = 60.0f, glideInc = 0.0f;
 
-    float phaseA[kMaxUnison] {}, phaseB[kMaxUnison] {};
+    float phaseA[kMaxUnison] {}, phaseB[kMaxUnison] {}, phaseC[kMaxUnison] {};
     float subPhase = 0.0f;
     float lfoNotePhase[kNumLfos] {}, lfoHeld[kNumLfos] {};
     SynthParams local;              // this sub-block's modulated copy of the parameters

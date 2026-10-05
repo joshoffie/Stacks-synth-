@@ -26,6 +26,7 @@ struct ParamSpec
 
 const juce::StringArray& waveNames();
 const juce::StringArray& filterTypeNames();
+const juce::StringArray& filterRoutingNames();   // second filter: Off, Series, Parallel, Split
 const juce::StringArray& distModeNames();
 const juce::StringArray& warpNames();     // oscillator warps: Off, Sync, Bend, PWM, Mirror, Fold, Quantize
 const juce::StringArray& arpModeNames();
@@ -55,6 +56,7 @@ inline bool isMacroSource (int src) noexcept { return src >= SrcMacro1 && src < 
 enum ModTarget { TargetOff = 0, TargetPitch, TargetPitchB, TargetAmp, TargetPan, kNumVirtualTargets };
 constexpr int kNumModSlots = 20;
 constexpr int kNumLfos = 4;
+constexpr int kNumOscs = 3;   // wavetable oscillators A, B, C
 enum LfoShape  { ShapeSine = 0, ShapeTriangle, ShapeSaw, ShapeRamp, ShapeSquare, ShapeRandom, ShapeCustom };
 
 inline bool isBipolarSource (int src) noexcept
@@ -78,6 +80,13 @@ inline bool isBipolarSource (int src) noexcept
  X(oscB_level,     "B Level",      "OSC B",      Float,   0,     1,     0,     0,     "",   nullptr,            "oscillator B volume (can be 0 when B is only an FM modulator)") \
  X(oscB_warp,      "B Warp",       "OSC B",      Choice,  0,     6,     0,     0,     "",   warpNames,          "warp for table B, same modes as A Warp") \
  X(oscB_warp_amt,  "B Warp Amt",   "OSC B",      Float,   0,     1,     0,     0,     "",   nullptr,            "how far the B warp goes, 0 = untouched") \
+ X(oscC_wave,      "C Wave",       "OSC C",      Choice,  0,     9,     0,     0,     "",   waveNames,       "oscillator C wavetable, a third layer beside A and B (Custom = the table designed in waveC)") \
+ X(oscC_morph,     "C Morph",      "OSC C",      Float,   0,     1,     0.5,   0,     "",   nullptr,            "position inside wavetable C") \
+ X(oscC_coarse,    "C Coarse",     "OSC C",      Int,    -24,    24,    0,     0,     "st", nullptr,            "oscillator C transpose in semitones (octaves and fifths stay in key)") \
+ X(oscC_fine,      "C Fine",       "OSC C",      Float,  -100,   100,   0,     0,     "ct", nullptr,            "oscillator C detune in cents") \
+ X(oscC_level,     "C Level",      "OSC C",      Float,   0,     1,     0,     0,     "",   nullptr,            "oscillator C volume, 0 = off") \
+ X(oscC_warp,      "C Warp",       "OSC C",      Choice,  0,     6,     0,     0,     "",   warpNames,          "warp for table C, same modes as A Warp") \
+ X(oscC_warp_amt,  "C Warp Amt",   "OSC C",      Float,   0,     1,     0,     0,     "",   nullptr,            "how far the C warp goes") \
  X(sub_level,      "Sub",          "MIX",        Float,   0,     1,     0,     0,     "",   nullptr,            "sine sub-oscillator one octave below") \
  X(noise_level,    "Noise",        "MIX",        Float,   0,     1,     0,     0,     "",   nullptr,            "white noise level") \
  X(fm_amount,      "FM B>A",       "MIX",        Float,   0,     1,     0,     0,     "",   nullptr,            "how much B frequency-modulates A: 0 none, 0.1 warm, 0.3+ metallic") \
@@ -87,6 +96,12 @@ inline bool isBipolarSource (int src) noexcept
  X(filter_drive,   "Drive",        "FILTER",     Float,   1,     10,    1,     0,     "",   nullptr,            "filter input saturation, 1 = clean") \
  X(filter_env,     "Filt Env",     "FILTER",     Float,  -5,     5,     0,     0,     "oct",nullptr,            "filter envelope depth in octaves (negative = inverted)") \
  X(filter_keytrack,"Key Track",    "FILTER",     Float,   0,     1,     0.3,   0,     "",   nullptr,            "how much cutoff follows the played pitch") \
+ X(filter_routing, "Routing",      "FILTER 2",   Choice,  0,     3,     0,     0,     "",   filterRoutingNames, "second filter: Off; Series = filter 1 then filter 2; Parallel = both on the whole sound, summed; Split = A, sub and noise through filter 1, B and C through filter 2") \
+ X(filter2_type,   "Type 2",       "FILTER 2",   Choice,  0,     8,     1,     0,     "",   filterTypeNames, "second filter's type") \
+ X(filter2_cutoff, "Cutoff 2",     "FILTER 2",   Float,   20,    20000, 2000,  632,   "Hz", nullptr,            "second filter's cutoff in Hz") \
+ X(filter2_res,    "Res 2",        "FILTER 2",   Float,   0,     1,     0.1,   0,     "",   nullptr,            "second filter's resonance") \
+ X(filter2_env,    "Env 2",        "FILTER 2",   Float,  -5,     5,     0,     0,     "oct",nullptr,            "filter envelope depth on cutoff 2, in octaves") \
+ X(filter2_drive,  "Drive 2",      "FILTER 2",   Float,   1,     10,    1,     0,     "",   nullptr,            "second filter's input saturation (advanced)") \
  X(fenv_attack,    "F Attack",     "FILTER ENV", Float,   0.001, 10,    0.01,  0.2,   "s",  nullptr,            "filter envelope attack in seconds") \
  X(fenv_decay,     "F Decay",      "FILTER ENV", Float,   0.001, 10,    0.3,   0.3,   "s",  nullptr,            "filter envelope decay in seconds") \
  X(fenv_sustain,   "F Sustain",    "FILTER ENV", Float,   0,     1,     0.5,   0,     "",   nullptr,            "filter envelope sustain level") \
@@ -251,6 +266,14 @@ enum class P : int
 };
 
 constexpr int kNumParams = static_cast<int>(P::COUNT);
+
+// Oscillator k (0 = A, 1 = B, 2 = C) parameters.
+inline P oscWaveParam    (int osc) noexcept { return osc == 0 ? P::oscA_wave     : osc == 1 ? P::oscB_wave     : P::oscC_wave; }
+inline P oscMorphParam   (int osc) noexcept { return osc == 0 ? P::oscA_morph    : osc == 1 ? P::oscB_morph    : P::oscC_morph; }
+inline P oscCoarseParam  (int osc) noexcept { return osc == 0 ? P::oscA_coarse   : osc == 1 ? P::oscB_coarse   : P::oscC_coarse; }
+inline P oscLevelParam   (int osc) noexcept { return osc == 0 ? P::oscA_level    : osc == 1 ? P::oscB_level    : P::oscC_level; }
+inline P oscWarpParam    (int osc) noexcept { return osc == 0 ? P::oscA_warp     : osc == 1 ? P::oscB_warp     : P::oscC_warp; }
+inline P oscWarpAmtParam (int osc) noexcept { return osc == 0 ? P::oscA_warp_amt : osc == 1 ? P::oscB_warp_amt : P::oscC_warp_amt; }
 
 const std::vector<ParamSpec>& paramSpecs();
 

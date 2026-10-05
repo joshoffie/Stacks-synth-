@@ -460,6 +460,7 @@ namespace
                 donor = &parents[(size_t) rng.r.nextInt ((int) parents.size())];
                 if (currentGroup == "OSC A") child.waves[0] = donor->waves[0];   // a designed table follows its oscillator
                 if (currentGroup == "OSC B") child.waves[1] = donor->waves[1];
+                if (currentGroup == "OSC C") child.waves[2] = donor->waves[2];
             }
             child.values[(size_t) i] = donor->values[(size_t) i];
         }
@@ -667,7 +668,8 @@ int countAudibleDifferences (const Patch& a, const Patch& b)
     const auto ra = routings (a), rb = routings (b);
     for (const auto& r : ra) if (std::find (rb.begin(), rb.end(), r) == rb.end()) ++differences;
     for (const auto& r : rb) if (std::find (ra.begin(), ra.end(), r) == ra.end()) ++differences;
-    if (a.waves[0] != b.waves[0]) ++differences;
+    for (int osc = 0; osc < kNumOscs; ++osc)
+        if (a.waves[(size_t) osc] != b.waves[(size_t) osc]) ++differences;
     return differences;
 }
 
