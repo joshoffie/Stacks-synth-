@@ -516,7 +516,7 @@ void LabPanel::refresh()
     const bool busy = processor.isBusy();
     juce::String currentName = processor.currentPatchName();
     if (currentName.length() > 20) currentName = currentName.substring (0, 19) + juce::String::fromUTF8 ("\xe2\x80\xa6");
-    evolveButton.setButtonText ("Evolve: " + currentName);
+    evolveButton.setButtonText ("Evolve: " + (currentName.length() > 16 ? currentName.substring (0, 15).trimEnd() + juce::String (juce::CharPointer_UTF8 ("\xe2\x80\xa6")) : currentName));   // fits the row beside From audio
     evolveButton.setTooltip ("Ten descendants of the sound you're playing now, steered by the direction text");
     evolveButton.setEnabled (! busy);
     newBatchButton.setButtonText (busy ? "Stop" : "Generate");
