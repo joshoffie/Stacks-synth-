@@ -1542,7 +1542,7 @@ static void installFactoryPresets()
     if (! source.isDirectory())
         return;
     const auto marker = target.getChildFile (".installed");
-    const auto stamp = juce::String (source.getChildFile ("..").getLastModificationTime().toMilliseconds()) + " " + juce::String (source.getNumberOfChildFiles (juce::File::findFiles, "*.json"));
+    const auto stamp = juce::String (source.findChildFiles (juce::File::findFiles, true, "*.json").size());   // this build's preset count
     if (marker.existsAsFile() && marker.loadFileAsString().trim() == stamp)
         return;   // this build's set was installed already
     for (const auto& file : source.findChildFiles (juce::File::findFiles, true, "*.json"))

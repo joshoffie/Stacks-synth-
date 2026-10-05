@@ -78,9 +78,15 @@ juce_add_plugin(Stacks
 
 juce_generate_juce_header(Stacks)
 
-# The factory presets travel inside every bundle and are installed into the library on first run.
+# The factory presets travel inside every bundle and are installed into the
+# library on first run. Resources must go on the format targets (the bundles);
+# on the shared-code library they are silently dropped.
 if(APPLE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Factory")
-    juce_add_bundle_resources_directory(Stacks Factory)
+    foreach(fmt IN ITEMS Standalone AU VST3)
+        if(TARGET Stacks_${fmt})
+            juce_add_bundle_resources_directory(Stacks_${fmt} Factory)
+        endif()
+    endforeach()
 endif()
 
 target_sources(Stacks PRIVATE
