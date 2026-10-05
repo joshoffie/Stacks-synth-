@@ -16,6 +16,10 @@ struct SampleAnalysis
     float f0 = 0.0f;                                  // Hz, median over the pitched frames
     float attack = 0.01f, decay = 0.5f, sustain = 0.5f, release = 0.3f;   // seconds, except sustain (0..1)
     bool decaying = false;                            // dies away by itself (pluck, bell) rather than holding
+    bool percussive = false;                          // short, instant attack, dies away: a hit
+    bool weakPitch = false;                           // no clear period, but one spectral peak that stands out (a kick, an 808)
+    float pitchDropOctaves = 0.0f;                    // how far the pitch falls from the first frames into the body (0 = steady)
+    juce::String heard;                               // one line for the status strip: "percussive hit, body 55 Hz, 1 ms attack, dies away in 300 ms"
     float centroidAttack = 2000.0f, centroidSustain = 2000.0f;   // Hz
     float brightnessDrop = 0.0f;                      // octaves the centroid falls from the attack into the body
     float noiseRatio = 0.0f;                          // energy away from the harmonics, 0..1

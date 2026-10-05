@@ -1031,6 +1031,7 @@ bool StacksAudioProcessor::recreateFromAudio (const juce::File& file, juce::Stri
     labState.auditioned = -1;
     playPreview (seed);
     brief = analysis.brief;
+    labState.status = "Heard: " + analysis.heard;
     labBroadcaster.sendChangeMessage();
     return true;
 }

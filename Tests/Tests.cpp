@@ -1079,6 +1079,41 @@ static void testSampleAnalyser()
     CHECK (! n.pitched && n.category == "Texture" && n.width > 0.8f);
     const auto q = patchFromAnalysis (n, "Noise Test");
     CHECK (q.get (P::noise_level) > 0.4f && (int) q.get (P::unison_voices) == 3);
+    CHECK ((int) q.get (modSourceParam (0)) == SrcLfo1 && (int) q.get (modDestParam (0)) == modTargetForParam ((int) P::filter_cutoff));   // not static: the filter drifts
+
+    // A kick: a sine sweeping from 120 Hz down to 50 Hz, gone in 350 ms.
+    SampleData kick;
+    kick.sampleRate = sr;
+    kick.audio.setSize (1, (int) (0.6 * sr));
+    double phase = 0.0;
+    for (int i = 0; i < kick.length(); ++i)
+    {
+        const float t = (float) i / (float) sr;
+        const float hz = 50.0f + 70.0f * std::exp (-t * 25.0f);
+        phase += hz / sr;
+        kick.audio.setSample (0, i, 0.9f * std::exp (-t * 9.0f) * std::sin (6.2831853 * phase));
+    }
+    const auto k = analyseSample (kick);
+    CHECK (k.percussive && k.pitched && k.f0 < 90.0f && k.category == "Perc");
+    CHECK (k.pitchDropOctaves > 0.3f);
+    const auto kp = patchFromAnalysis (k, "Kick Test");
+    CHECK ((int) kp.get (P::oscA_wave) == waveNames().indexOf ("Sine") && kp.get (P::aenv_sustain) == 0.0f && kp.get (P::oscA_coarse) <= -12.0f);
+    CHECK ((int) kp.get (modSourceParam (0)) == SrcModEnv && (int) kp.get (modDestParam (0)) == TargetPitch);
+    CHECK (k.brief.contains ("percussive hit") && k.heard.contains ("percussive"));
+
+    // A snare: a 180 Hz tone plus a noise burst, both gone in 250 ms.
+    SampleData snare;
+    snare.sampleRate = sr;
+    snare.audio.setSize (1, (int) (0.5 * sr));
+    for (int i = 0; i < snare.length(); ++i)
+    {
+        const float t = (float) i / (float) sr;
+        snare.audio.setSample (0, i, std::exp (-t * 14.0f) * (0.4f * std::sin (6.2831853f * 180.0f * t) + 0.6f * (rng.nextFloat() * 2.0f - 1.0f)));
+    }
+    const auto sn = analyseSample (snare);
+    CHECK (sn.percussive && sn.category == "Perc");
+    const auto sp = patchFromAnalysis (sn, "Snare Test");
+    CHECK (sp.get (P::noise_level) >= 0.2f && sp.get (P::aenv_sustain) == 0.0f && sp.get (P::aenv_release) <= 0.25f);
 }
 
 // Song mode: a synthetic track at 120 BPM in A minor with nothing above 3 kHz
