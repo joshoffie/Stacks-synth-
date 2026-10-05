@@ -278,7 +278,8 @@ void LibraryPanel::showMenuFor (const juce::File& file)
     const auto root = StacksAudioProcessor::libraryRoot();
     std::vector<juce::File> folders { root };
     for (const auto& f : root.findChildFiles (juce::File::findDirectories, true))
-        folders.push_back (f);
+        if (f.getFileName() != "Samples" && ! f.isAChildOf (root.getChildFile ("Samples")))
+            folders.push_back (f);
     for (const auto& folder : folders)
     {
         if (folder == file.getParentDirectory()) continue;
@@ -305,6 +306,7 @@ void LibraryPanel::refresh()
 
     rows.clear();
     auto folders = folder.findChildFiles (juce::File::findDirectories, false);
+    folders.removeIf ([] (const juce::File& f) { return f.getFileName() == "Samples"; });   // audio files for the sample oscillator, not presets
     folders.sort();
     for (const auto& f : folders)
     {
