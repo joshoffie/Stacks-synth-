@@ -193,6 +193,17 @@ Per batch the AI designs 5 patches that stream into the **✦ AI IDEAS** section
 as they arrive, while the random breeder's 5 land in a folded **RANDOM
 VARIATIONS** section underneath.
 
+**From audio.** The Lab's **From audio** button (or dropping an audio file on
+the Lab) works two ways. A short recording (a one-shot, a note from another
+synth, a voice) is *recreated*: Stacks measures its pitch, envelope, spectrum
+over time, noise, width and vibrato, loads an imitation patch at once (the
+measured spectrum becomes the Custom table) and evolves it with the model. A
+whole track (over 20 seconds) is analysed for tempo, key, where the mix has
+room, brightness, density and dynamics; the resulting brief goes into the
+prompt box and a fresh batch is designed to fit the song, with auditions in
+its key. The model never hears audio; the analysis is the ears, the model the
+designer. `StacksTests --recreate file` and `--song file` print both paths.
+
 **Prompt cues.** When a prompt names an effect or a voice setting ("lush chorus", "with
 delay", "tape", "shimmer", "distorted", "wide", "sub bass", "portamento",
 "punchy", "riser", "arp"), the generator raises that setting after the model
@@ -270,6 +281,8 @@ Source/
   LfoTable.h       drawable LFO shapes (points -> 512-sample tables)
   SynthVoice.*     one voice: 3 wavetable oscs (B can FM A, 6 warps), sample osc, sub, noise, 2 filters, 3 env, 4 LFO, 20 connections, 16-voice unison
   Sampler.*        the sample oscillator: file bank (lock-free handoff) and the pitched / granular player
+  ai/SampleAnalyser.* a recording in numbers (pitch, envelope, spectrum, noise, width, vibrato) and the imitation patch
+  ai/SongAnalyser.*   a track in numbers (tempo, key, spectral room, density, dynamics) and the brief for the model
   Effects.*        chorus/ensemble/flanger/dimension, stereo/ping-pong/tape delay, Dattorro reverb with shimmer
   Patch.*          a named set of parameter values; JSON in/out; apply/capture
   PatchGenerator.* generators: Random (archetypes + crossover/mutation)

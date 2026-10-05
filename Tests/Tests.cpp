@@ -16,6 +16,8 @@
 #include "ai/ModelManager.h"
 #include "Arpeggiator.h"
 #include "Sampler.h"
+#include "ai/SampleAnalyser.h"
+#include "ai/SongAnalyser.h"
 
 using namespace stacks;
 
@@ -1036,6 +1038,130 @@ static void testSampler()
     CHECK (modTargetNames().contains ("Start") && modTargetNames().contains ("Spray"));
 }
 
+// Sample-to-patch: a decaying saw is heard as a pitched pluck at its pitch with a
+// saw-like table; a noise burst is heard as an unpitched texture.
+static void testSampleAnalyser()
+{
+    std::printf ("sample analyser\n");
+    const double sr = 48000.0;
+    SampleData saw;
+    saw.sampleRate = sr;
+    saw.audio.setSize (1, (int) (1.2 * sr));
+    for (int i = 0; i < saw.length(); ++i)
+    {
+        const float t = (float) i / (float) sr;
+        const float phase = std::fmod (220.0f * t, 1.0f);
+        const float env = t < 0.004f ? t / 0.004f : std::exp (-(t - 0.004f) * 6.0f);     // 4 ms attack, decays in ~0.4 s
+        saw.audio.setSample (0, i, 0.8f * env * (2.0f * phase - 1.0f));
+    }
+    const auto a = analyseSample (saw);
+    CHECK (a.pitched && std::abs (a.f0 - 220.0f) < 4.0f);
+    CHECK (a.attack < 0.03f && a.decaying && a.decay > 0.15f && a.decay < 1.2f);
+    CHECK (a.category == "Pluck");
+    CHECK (a.wave.frames.size() == 3 && a.wave.frames[1][0] > a.wave.frames[1][3] && a.wave.frames[1][3] > a.wave.frames[1][11]);   // saw: falling harmonics
+    CHECK (a.noiseRatio < 0.3f && a.vibratoHz == 0.0f);
+    CHECK (a.brief.contains ("220 Hz") && a.brief.contains ("pluck"));
+    const auto p = patchFromAnalysis (a, "Saw Test");
+    CHECK ((int) p.get (P::oscA_wave) == kCustomWave && ! p.waves[0].isEmpty());
+    CHECK (p.get (P::aenv_attack) < 0.03f && p.get (P::aenv_sustain) < 0.4f && p.category == "Pluck");
+    CHECK (p.get (P::noise_level) == 0.0f);
+
+    SampleData noise;
+    noise.sampleRate = sr;
+    noise.audio.setSize (2, (int) sr);
+    juce::Random rng (3);
+    for (int i = 0; i < noise.length(); ++i)
+    {
+        noise.audio.setSample (0, i, 0.5f * (rng.nextFloat() * 2.0f - 1.0f));
+        noise.audio.setSample (1, i, 0.5f * (rng.nextFloat() * 2.0f - 1.0f));
+    }
+    const auto n = analyseSample (noise);
+    CHECK (! n.pitched && n.category == "Texture" && n.width > 0.8f);
+    const auto q = patchFromAnalysis (n, "Noise Test");
+    CHECK (q.get (P::noise_level) > 0.4f && (int) q.get (P::unison_voices) == 3);
+}
+
+// Song mode: a synthetic track at 120 BPM in A minor with nothing above 3 kHz
+// is heard as such, and its emptiest room is up top.
+static void testSongAnalyser()
+{
+    std::printf ("song analyser\n");
+    const double sr = 22050.0;
+    const int len = (int) (30.0 * sr);
+    std::vector<float> x ((size_t) len, 0.0f);
+    juce::Random rng (11);
+    for (int i = 0; i < len; ++i)
+    {
+        const float t = (float) i / (float) sr;
+        const float beat = std::fmod (t, 0.5f);                                       // 120 BPM kick
+        const float kick = beat < 0.12f ? std::sin (6.2831853f * 55.0f * beat) * std::exp (-beat * 30.0f) : 0.0f;
+        const float bass = 0.25f * std::sin (6.2831853f * 55.0f * t) * (std::fmod (t, 1.0f) < 0.5f ? 1.0f : 0.6f);   // A1
+        float pad = 0.0f;                                                             // A minor: A3 C4 E4
+        for (float hz : { 220.0f, 261.63f, 329.63f }) pad += 0.08f * (std::sin (6.2831853f * hz * t) + 0.3f * std::sin (6.2831853f * 2.0f * hz * t));
+        const float hat = std::fmod (t + 0.25f, 0.5f) < 0.03f ? 0.05f * (rng.nextFloat() * 2.0f - 1.0f) : 0.0f;
+        x[(size_t) i] = 0.6f * kick + bass + pad + hat;
+    }
+    const auto s = analyseSong (x, sr, 0.2f);
+    CHECK (std::abs (s.bpm - 120.0f) < 3.0f);
+    CHECK (s.keyRoot == 9 && s.minor);                                             // A minor
+    CHECK (s.openBand >= 4);                                                       // nothing up top: upper mids or air are empty
+    CHECK (s.fullBand <= 1);                                                       // kick and bass dominate
+    CHECK (s.brief.contains ("120 BPM"));
+    CHECK (s.brief.contains ("A minor") && s.brief.contains ("Stay in A minor"));
+    CHECK (s.onsetsPerSecond > 1.0f && s.duration > 29.0f);
+    CHECK (SongAnalysis().keyName() == "no clear key");
+}
+
+// `--song file`: analyse a track and let the model design for it. `--recreate file`:
+// analyse a recording, print the imitation, evolve it. Both print what the player would see.
+static int audioMode (const juce::String& mode, const juce::File& file)
+{
+    juce::String error;
+    GenerationRequest req;
+    req.count = 3;
+    req.designWaves = true;
+    req.variation = 0.5f;
+    if (mode == "--song")
+    {
+        std::vector<float> mono; double sr = 22050.0; float width = 0.0f;
+        if (! readSongMono (file, mono, sr, width, error)) { std::printf ("%s\n", error.toRawUTF8()); return 2; }
+        const auto song = analyseSong (mono, sr, width);
+        std::printf ("track: %.0f s, %.1f BPM (conf %.2f), %s (conf %.2f), centroid %.0f Hz, %.1f onsets/s, dynamics %.1f dB, width %.2f\n",
+                     song.duration, song.bpm, song.tempoConfidence, song.keyName().toRawUTF8(), song.keyConfidence, song.centroidHz, song.onsetsPerSecond, song.dynamicsDb, song.width);
+        for (int b = 0; b < SongAnalysis::kBands; ++b) std::printf ("  %-24s %+5.1f dB%s\n", SongAnalysis::bandName (b), song.bandDb[b], b == song.openBand ? "  <- room" : b == song.fullBand ? "  <- full" : "");
+        std::printf ("brief: %s\n", song.brief.toRawUTF8());
+        req.hint = song.brief;
+    }
+    else
+    {
+        SampleBank bank;
+        auto data = bank.read (file, error);
+        if (data == nullptr) { std::printf ("%s\n", error.toRawUTF8()); return 2; }
+        const auto a = analyseSample (*data);
+        std::printf ("recording: %.2f s, %s f0 %.1f Hz, attack %.3f decay %.2f sustain %.2f release %.2f, centroid %.0f -> %.0f Hz (drop %.1f oct), noise %.2f, width %.2f, vibrato %.1f Hz\n",
+                     a.duration, a.pitched ? "pitched" : "unpitched", a.f0, a.attack, a.decay, a.sustain, a.release, a.centroidAttack, a.centroidSustain, a.brightnessDrop, a.noiseRatio, a.width, a.vibratoHz);
+        const auto seed = patchFromAnalysis (a, file.getFileNameWithoutExtension());
+        std::printf ("imitation: %s [%s] %s\n", seed.name.toRawUTF8(), seed.category.toRawUTF8(), describePatch (seed).toRawUTF8());
+        std::printf ("brief: %s\n", a.brief.toRawUTF8());
+        req.hint = a.brief;
+        req.parents = { seed };
+        req.count = 2;
+    }
+    std::optional<ModelInfo> chosen;
+    for (const auto& m : ModelManager::catalogue())
+        if (m.installed && (! chosen || m.id.containsIgnoreCase ("4b"))) chosen = m;
+    if (! chosen) { std::printf ("no built-in model installed; analysis only\n"); return 0; }
+    auto backend = std::make_shared<LlamaBackend> (chosen->file, chosen->label);
+    LlmPatchGenerator gen (backend, std::make_shared<RandomPatchGenerator>());
+    GenerationProgress quiet;
+    const auto t0 = juce::Time::getMillisecondCounterHiRes();
+    auto out = gen.generate (req, quiet);
+    std::printf ("%d patches in %.0f s\n", (int) out.size(), (juce::Time::getMillisecondCounterHiRes() - t0) / 1000.0);
+    for (const auto& p : out)
+        std::printf ("  %-26s [%-7s] %s\n     %s\n", p.name.toRawUTF8(), p.category.toRawUTF8(), describePatch (p).toRawUTF8(), p.description.toRawUTF8());
+    return 0;
+}
+
 // Re-applies the prompt cues to every preset in Factory/ (after the rules change).
 static int retouchFactory()
 {
@@ -1179,6 +1305,8 @@ static int buildFactory (int perPrompt)
 
 int main (int argc, char** argv)
 {
+    if (argc > 2 && (juce::String (argv[1]) == "--song" || juce::String (argv[1]) == "--recreate"))
+        return audioMode (argv[1], juce::File::getCurrentWorkingDirectory().getChildFile (juce::String::fromUTF8 (argv[2])));
     if (argc > 1 && juce::String (argv[1]) == "--retouch")
         return retouchFactory();
     if (argc > 1 && juce::String (argv[1]) == "--factory")
@@ -1199,6 +1327,8 @@ int main (int argc, char** argv)
     testWarpsAndSources();
     testPromptCues();
     testSampler();
+    testSampleAnalyser();
+    testSongAnalyser();
     testRandomGenerator();
     testLlmGenerator();
     std::printf ("\n%d checks, %d failures\n", checks, failures);

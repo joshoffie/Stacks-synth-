@@ -72,6 +72,7 @@ private:
 
 // The generate -> audition -> pick -> evolve workflow.
 class LabPanel : public juce::Component,
+                 public juce::FileDragAndDropTarget,
                  private juce::ChangeListener,
                  private juce::Timer
 {
@@ -81,6 +82,9 @@ public:
 
     void resized() override;
     void paint (juce::Graphics&) override;
+    bool isInterestedInFileDrag (const juce::StringArray& files) override;
+    void filesDropped (const juce::StringArray& files, int x, int y) override;
+    void recreateFromAudio (const juce::File&);   // sample-to-patch: imitate, then evolve
 
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override { refresh(); }
@@ -100,7 +104,8 @@ private:
     juce::Slider variation;
     juce::ToggleButton designWavesToggle { "Design wavetables" };
     juce::TextButton savePresetButton;
-    juce::TextButton newBatchButton { "Generate" }, evolveButton { "Evolve" }, backButton { "<" };
+    juce::TextButton newBatchButton { "Generate" }, evolveButton { "Evolve" }, backButton { "<" }, fromAudioButton { "From audio" };
+    std::unique_ptr<juce::FileChooser> audioChooser;
     juce::TextButton gardenTab { "STACKS" }, treeTab { "HISTORY" }, ideasTab { "LIST" }, libraryTab { "LIBRARY" }, explainTab { "EXPLAIN" };
     View view = View::garden;
     LibraryPanel library;

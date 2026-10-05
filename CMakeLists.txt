@@ -138,6 +138,8 @@ target_sources(Stacks PRIVATE
     Source/ai/LlamaBackend.cpp
     Source/ai/ModelManager.cpp
     Source/ai/LlmPatchGenerator.cpp
+    Source/ai/SampleAnalyser.cpp
+    Source/ai/SongAnalyser.cpp
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
     Source/Controls.cpp
@@ -183,6 +185,8 @@ target_sources(StacksTests PRIVATE
     Source/Sampler.cpp
     ThirdParty/MTS-ESP/libMTSClient.cpp
     Source/ai/LlmPatchGenerator.cpp
+    Source/ai/SampleAnalyser.cpp
+    Source/ai/SongAnalyser.cpp
     Source/ai/LlamaBackend.cpp
     Source/ai/OllamaBackend.cpp
     Source/ai/ModelManager.cpp)

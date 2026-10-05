@@ -182,6 +182,16 @@ public:
     void clearSample();
     static juce::File samplesDirectory();
 
+    // Sample-to-patch: analyse a recording, load an imitation of it as the current
+    // sound and return the brief for the model to evolve from. False with an error.
+    bool recreateFromAudio (const juce::File&, juce::String& brief, juce::String& error);
+
+    // Song mode: analyse a whole track (tempo, key, where the mix has room) into a
+    // brief for a fresh batch, and put the audition phrases in its key.
+    bool designForSong (const juce::File&, juce::String& brief, juce::String& error);
+    static bool looksLikeASong (const juce::File&);     // longer than 20 seconds
+    int previewRoot() const                                { return previewRootNote; }
+
     // Let the generators invent new wavetables ("Custom") instead of only picking built-ins. Persisted.
     bool designWavetables() const                          { return designWaves; }
     void setDesignWavetables (bool);
@@ -304,6 +314,7 @@ private:
     PreviewPhrase previewRequest;                          // message thread writes, then sets previewPending
     std::atomic<bool> previewPending { false };
     int previewNotes[3] { -1, -1, -1 };                    // audio thread: what is sounding now
+    int previewRootNote = 60;                               // C by default; a song's key after song mode
     int previewRemaining = 0;
     std::unique_ptr<ModelDownloader> downloader;
     int lastDownloadPercent = -1;

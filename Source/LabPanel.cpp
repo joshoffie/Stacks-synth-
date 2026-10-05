@@ -191,7 +191,7 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
     header.setColour (juce::Label::textColourId, colours::text);
     addAndMakeVisible (header);
 
-    hint.setTextToShowWhenEmpty ("Describe a sound and press Return: \"mgmt style synth patch\", \"dark evolving pad\"...", colours::muted);
+    hint.setTextToShowWhenEmpty ("Describe a sound and press Return: \"mgmt style synth patch\", \"dark evolving pad\"... or drop a recording here", colours::muted);
     hint.setMultiLine (false);
     hint.setReturnKeyStartsNewLine (false);
     hint.onReturnKey = [this] { newBatchButton.triggerClick(); };   // a prompt stands on its own: no preset needed
@@ -236,6 +236,16 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
     evolveButton.setColour (juce::TextButton::textColourOffId, juce::Colours::black);
     evolveButton.onClick = [this] { processor.requestEvolve (hint.getText(), (float) variation.getValue()); };
     addAndMakeVisible (evolveButton);
+
+    fromAudioButton.setTooltip ("Pick an audio file (or drop one anywhere on this panel). A short recording is recreated: Stacks measures its pitch, envelope, spectrum, noise, width and vibrato, loads an imitation at once and evolves it. A whole track (over 20 s) is analysed for tempo, key and where the mix has room, and a fresh batch is designed to fit it.");
+    fromAudioButton.onClick = [this]
+    {
+        audioChooser = std::make_unique<juce::FileChooser> ("Recreate a recording", juce::File::getSpecialLocation (juce::File::userHomeDirectory),
+                                                            "*.wav;*.aif;*.aiff;*.flac;*.mp3;*.ogg");
+        audioChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                                   [this] (const juce::FileChooser& fc) { if (fc.getResult().existsAsFile()) recreateFromAudio (fc.getResult()); });
+    };
+    addAndMakeVisible (fromAudioButton);
 
     backButton.setTooltip ("Back to the previous batch");
     backButton.onClick = [this] { processor.goBackGeneration(); };
@@ -314,6 +324,51 @@ LabPanel::~LabPanel()
     processor.labBroadcaster.removeChangeListener (this);
 }
 
+bool LabPanel::isInterestedInFileDrag (const juce::StringArray& files)
+{
+    for (const auto& f : files)
+        if (juce::File (f).hasFileExtension ("wav;aif;aiff;flac;mp3;ogg"))
+            return true;
+    return false;
+}
+
+void LabPanel::filesDropped (const juce::StringArray& files, int, int)
+{
+    for (const auto& f : files)
+        if (juce::File (f).hasFileExtension ("wav;aif;aiff;flac;mp3;ogg"))
+        {
+            recreateFromAudio (juce::File (f));
+            return;
+        }
+}
+
+// Analyse -> imitation as the current sound -> the brief in the prompt box -> Evolve.
+void LabPanel::recreateFromAudio (const juce::File& file)
+{
+    juce::String brief, error;
+    if (StacksAudioProcessor::looksLikeASong (file))
+    {
+        // A whole track: tempo, key and the room in the mix become the brief for a fresh batch.
+        if (! processor.designForSong (file, brief, error))
+        {
+            juce::NativeMessageBox::showAsync (juce::MessageBoxOptions().withIconType (juce::MessageBoxIconType::WarningIcon)
+                                                   .withTitle ("Couldn't analyse that track").withMessage (error).withButton ("OK"), nullptr);
+            return;
+        }
+        hint.setText (brief, juce::dontSendNotification);
+        processor.requestNewBatch (brief, (float) variation.getValue());
+        return;
+    }
+    if (! processor.recreateFromAudio (file, brief, error))
+    {
+        juce::NativeMessageBox::showAsync (juce::MessageBoxOptions().withIconType (juce::MessageBoxIconType::WarningIcon)
+                                               .withTitle ("Couldn't recreate that file").withMessage (error).withButton ("OK"), nullptr);
+        return;
+    }
+    hint.setText (brief, juce::dontSendNotification);
+    processor.requestEvolve (brief, (float) variation.getValue());
+}
+
 void LabPanel::paint (juce::Graphics& g)
 {
     g.setColour (colours::panel);
@@ -343,6 +398,8 @@ void LabPanel::resized()
     newBatchButton.setBounds (buttons.removeFromLeft (104));
     buttons.removeFromLeft (6);
     savePresetButton.setBounds (buttons.removeFromRight (70));
+    buttons.removeFromRight (6);
+    fromAudioButton.setBounds (buttons.removeFromRight (90));
     buttons.removeFromRight (6);
     evolveButton.setBounds (buttons);
     r.removeFromTop (4);

@@ -2,6 +2,8 @@
 #include "Controls.h"
 #include "PluginEditor.h"
 #include "ai/PatchExplainer.h"
+#include "ai/SampleAnalyser.h"
+#include "ai/SongAnalyser.h"
 #include "ai/LlmPatchGenerator.h"
 
 namespace stacks
@@ -1013,6 +1015,56 @@ bool StacksAudioProcessor::importSample (const juce::File& source, juce::String&
     return true;
 }
 
+bool StacksAudioProcessor::recreateFromAudio (const juce::File& file, juce::String& brief, juce::String& error)
+{
+    auto data = samples.read (file, error);
+    if (data == nullptr)
+        return false;
+    const auto analysis = analyseSample (*data);
+    if (analysis.duration < 0.02f)
+    {
+        error = "that file is silent";
+        return false;
+    }
+    auto seed = patchFromAnalysis (analysis, file.getFileNameWithoutExtension().substring (0, 24));
+    applyPatch (seed);                       // hear the imitation straight away
+    labState.auditioned = -1;
+    playPreview (seed);
+    brief = analysis.brief;
+    labBroadcaster.sendChangeMessage();
+    return true;
+}
+
+bool StacksAudioProcessor::looksLikeASong (const juce::File& file)
+{
+    static juce::AudioFormatManager formats;
+    static std::once_flag once;
+    std::call_once (once, [] { formats.registerBasicFormats(); });
+    std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
+    return reader != nullptr && reader->sampleRate > 0.0 && (double) reader->lengthInSamples / reader->sampleRate > 20.0;
+}
+
+bool StacksAudioProcessor::designForSong (const juce::File& file, juce::String& brief, juce::String& error)
+{
+    std::vector<float> mono;
+    double sr = 22050.0;
+    float width = 0.0f;
+    if (! readSongMono (file, mono, sr, width, error))
+        return false;
+    const auto song = analyseSong (mono, sr, width);
+    if (song.duration < 5.0f)
+    {
+        error = "could not analyse that file";
+        return false;
+    }
+    // Auditions in the song's key: the nearest octave of its root to middle C.
+    previewRootNote = song.keyRoot >= 0 ? (song.keyRoot <= 6 ? 60 + song.keyRoot : 48 + song.keyRoot) : 60;
+    brief = song.brief;
+    labState.status = "Track: " + juce::String ((int) std::round (song.bpm)) + " BPM, " + song.keyName() + ", room in the " + SongAnalysis::bandName (song.openBand);
+    labBroadcaster.sendChangeMessage();
+    return true;
+}
+
 void StacksAudioProcessor::clearSample()
 {
     pushUndoSnapshot();
@@ -1062,6 +1114,8 @@ void StacksAudioProcessor::playPreview (const Patch& p)
     else if (cat == "pad" || cat == "texture" || cat == "drone") { ph.notes[0] = 55; ph.notes[1] = 59; ph.notes[2] = 62; ph.lengthSamples = (int) (1.8 * sr); }
     else if (cat == "keys" || cat == "bell" || cat == "pluck")   { ph.notes[0] = 60; ph.notes[1] = 64; ph.notes[2] = 67; ph.lengthSamples = (int) (1.0 * sr); }
     else                                                         { ph.notes[0] = 62; ph.lengthSamples = (int) (1.0 * sr); }
+    for (int& n : ph.notes)
+        if (n >= 0) n += previewRootNote - 60;   // in the song's key when one was analysed
     previewRequest = ph;
     previewPending.store (true, std::memory_order_release);
 }
