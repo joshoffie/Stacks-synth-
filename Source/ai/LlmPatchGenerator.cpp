@@ -712,6 +712,8 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
             }
 
         patch->name = titleCase (spaceOutCamelCase (patch->name)).substring (0, 28);
+        for (auto& w : patch->waves)
+            if (! w.isEmpty()) w.name = titleCase (spaceOutCamelCase (w.name)).substring (0, 24);   // "glassy bell" -> "Glassy Bell"
         // Small models sometimes copy the example patch's name straight from the prompt.
         if (patch->name.equalsIgnoreCase ("Velvet Horizon") || patch->name.equalsIgnoreCase ("Two Words") || patch->name.isEmpty())
             patch->name = patch->category + " " + juce::String ((int) out.size() + 1);
