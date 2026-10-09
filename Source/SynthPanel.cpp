@@ -448,6 +448,7 @@ SynthPanel::SynthPanel (StacksAudioProcessor& p) : processor (p), apvts (p.apvts
             knob->onAssignClick = [this] (int paramIndex) { knobClicked (paramIndex); };
             knob->onModulatorDropped = [this] (int source, int paramIndex) { processor.addModulation (source, modTargetForParam (paramIndex)); };
             knob->onRingDrag = [this] (int slot, float amount) { processor.setModulationAmount (slot, amount); };
+            if (juce::String (spec.id) == "delay_time") delayTimeKnob = knob.get();
             knobs.push_back (knob.get());
             control = std::move (knob);
         }
@@ -555,11 +556,21 @@ SynthPanel::SynthPanel (StacksAudioProcessor& p) : processor (p), apvts (p.apvts
         apvts.addParameterListener (paramId (modAmountParam (i)), this);
     }
     refreshModulationDisplay();
+    processor.labBroadcaster.addChangeListener (this);
+    seenTweakSerial = processor.lab().tweakSerial;
     startTimerHz (30);
 }
 
 void SynthPanel::timerCallback()
 {
+    // Knobs a sync setting overrides read as switched off.
+    if (delayTimeKnob != nullptr)
+    {
+        const bool synced = (int) apvts.getRawParameterValue (paramId (P::delay_sync))->load() != 0;
+        if (delayTimeKnob->isEnabled() == synced) delayTimeKnob->setEnabled (! synced);
+    }
+    modulators->refreshEnabled();
+
     if (processor.calmMode())
     {
         for (auto* knob : knobs) knob->clearLiveValue();
@@ -569,9 +580,21 @@ void SynthPanel::timerCallback()
         knob->setLiveValue (processor.liveValue (knob->parameterIndex()));
 }
 
+void SynthPanel::changeListenerCallback (juce::ChangeBroadcaster*)
+{
+    const auto& lab = processor.lab();
+    if (lab.tweakSerial == seenTweakSerial)
+        return;
+    seenTweakSerial = lab.tweakSerial;
+    for (auto* knob : knobs)
+        if (std::find (lab.tweakedParams.begin(), lab.tweakedParams.end(), knob->parameterIndex()) != lab.tweakedParams.end())
+            knob->flash();
+}
+
 SynthPanel::~SynthPanel()
 {
     stopTimer();
+    processor.labBroadcaster.removeChangeListener (this);
     cancelPendingUpdate();
     for (int i = 0; i < kNumModSlots; ++i)
     {

@@ -35,6 +35,8 @@ struct LabState
     juce::String explanationKey;                // which sound they describe
     bool explaining = false;
     bool tweaking = false;                      // a quick tweak is with the model
+    int tweakSerial = 0;                        // bumps when a tweak lands (or fails), so the panels can flash
+    std::vector<int> tweakedParams;             // what the last tweak moved
     juce::String progressDetail;                // what the model is doing right now
 };
 
@@ -114,6 +116,11 @@ public:
     // playing sound in place. Plain words act at once; anything else goes to the
     // model and lands a moment later. One undo step either way.
     void quickTweak (const juce::String& request);
+
+    // Wipes the Lab: every generation, the history and the garden. The playing
+    // sound and the saved presets stay (and every batch is still on disk under
+    // historyRoot()).
+    void clearLab();
 
     // Tags on the playing sound and on saved files
     const juce::StringArray& currentTags() const           { return patchTags; }

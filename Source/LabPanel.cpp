@@ -195,6 +195,26 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
     generationLabel.setJustificationType (juce::Justification::centredRight);
     addAndMakeVisible (generationLabel);
 
+    styleAsTab (clearButton);
+    clearButton.setTooltip ("Wipe the Lab: every generation, the history and the garden go, back to a blank start. "
+                            "The sound you're playing and your saved presets stay (and every batch is kept on disk under Generations).");
+    clearButton.onClick = [this]
+    {
+        juce::NativeMessageBox::showAsync (juce::MessageBoxOptions().withIconType (juce::MessageBoxIconType::QuestionIcon)
+                                               .withTitle ("Clear the Lab?")
+                                               .withMessage ("Every generation and the family tree go. Your sound and your saved presets stay.")
+                                               .withButton ("Clear").withButton ("Cancel").withAssociatedComponent (this),
+                                           [this] (int result)
+                                           {
+                                               if (result != 1) return;
+                                               processor.clearLab();
+                                               hint.setText ({}, juce::dontSendNotification);
+                                               tweak.setText ({}, juce::dontSendNotification);
+                                               showView (View::garden);
+                                           });
+    };
+    addAndMakeVisible (clearButton);
+
     hint.setTextToShowWhenEmpty (juce::String::fromUTF8 ("Describe a sound and press Return\xe2\x80\xa6 or drop a recording here"), colours::muted);
     hint.setMultiLine (false);
     hint.setReturnKeyStartsNewLine (false);
@@ -216,6 +236,7 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
         if (text.isEmpty()) return;
         processor.quickTweak (text);
         tweak.setText ({}, juce::dontSendNotification);
+        tweak.giveAwayKeyboardFocus();   // the result reads in the empty box, and the host gets its keyboard back
     };
     tweak.onEscapeKey = [this] { tweak.giveAwayKeyboardFocus(); };
     addAndMakeVisible (tweak);
@@ -407,7 +428,8 @@ void LabPanel::resized()
     auto r = getLocalBounds().reduced (10, 8);
 
     auto top = r.removeFromTop (16);
-    generationLabel.setBounds (top.removeFromRight (80));
+    generationLabel.setBounds (top.removeFromRight (56));
+    clearButton.setBounds (top.removeFromRight (48));
     header.setBounds (top);
     r.removeFromTop (6);
 
@@ -535,6 +557,20 @@ void LabPanel::refreshNowPlaying()
 void LabPanel::timerCallback()
 {
     refreshNowPlaying(); // knob tweaks change the description without any broadcast
+    if (tweakFlashUntil > 0.0 && juce::Time::getMillisecondCounterHiRes() > tweakFlashUntil)
+    {
+        tweakFlashUntil = 0.0;
+        tweak.setTextToShowWhenEmpty (juce::String::fromUTF8 ("Quick tweak the playing sound: brighter, more reverb, shorter\xe2\x80\xa6"), colours::muted);
+        tweak.repaint();
+    }
+}
+
+// The result of a tweak reads in the box itself for a few seconds.
+void LabPanel::showTweakResult (const juce::String& text, juce::Colour colour)
+{
+    tweak.setTextToShowWhenEmpty (text, colour);
+    tweak.repaint();
+    tweakFlashUntil = juce::Time::getMillisecondCounterHiRes() + 8000.0;
 }
 
 // The newest generation sits at the right end of the tree: bring it into view.
@@ -561,6 +597,12 @@ void LabPanel::refresh()
     backButton.setEnabled (! busy && ! lab.history.empty());
     designWavesToggle.setToggleState (processor.designWavetables(), juce::dontSendNotification);
     tweak.setEnabled (! lab.tweaking);
+    clearButton.setEnabled (! busy && (lab.generation > 0 || ! lab.candidates.empty() || ! lab.history.empty()));
+    if (lab.tweakSerial != seenTweakSerial)
+    {
+        seenTweakSerial = lab.tweakSerial;
+        showTweakResult (lab.status, lab.tweakedParams.empty() ? colours::rowFilter : colours::accent);
+    }
 
     // Candidate cards
     while (cards.size() < lab.candidates.size())
@@ -608,7 +650,10 @@ void LabPanel::refresh()
         int aiDone = 0;
         for (const auto& c : lab.candidates) if (c.origin == "AI") ++aiDone;
         const bool aiEngine = processor.engine().kind != EngineKind::Random;
-        progressStrip.set (lab.generating && aiEngine, lab.progress, lab.progressDetail, aiDone, StacksAudioProcessor::kAiPatchesPerBatch);
+        if (lab.tweaking)
+            progressStrip.set (true, -1.0f, "Tweaking with " + processor.engineName() + "...", 0, 1);
+        else
+            progressStrip.set (lab.generating && aiEngine, lab.progress, lab.progressDetail, aiDone, StacksAudioProcessor::kAiPatchesPerBatch);
     }
 
     status.setText (lab.status.isNotEmpty() ? lab.status : processor.engineName(), juce::dontSendNotification);

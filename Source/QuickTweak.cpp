@@ -240,19 +240,48 @@ bool ruleTweak (const juce::String& request, const Patch& current, std::vector<T
         understood.add ("fatter");
     }
 
-    // Envelope
-    if (hasWord (words, { "shorter", "short", "snappier", "snappy", "tighter", "staccato", "quicker-release", "clipped" }))
+    // Envelope. A named stage ("shorter release", "less decay", "longer attack")
+    // moves only that stage; "shorter" / "longer" on their own shape the whole note.
+    const bool shorterWord = hasWord (words, { "shorter", "short", "snappier", "snappy", "tighter", "staccato", "clipped", "quicker", "faster", "less", "lower", "reduce", "drop" });
+    const bool longerWord  = hasWord (words, { "longer", "long", "sustained", "held", "drawn", "lingering", "slower", "more", "extra", "bigger", "raise", "higher" });
+    const bool stageNamed  = hasWord (words, { "release", "tail", "decay", "attack", "sustain" });
+    if (stageNamed && (shorterWord || longerWord))
+    {
+        const float factor = shorterWord ? 0.5f : 2.0f;
+        if (hasWord (words, { "release", "tail" })) { e.scale (P::aenv_release, factor); understood.add (shorterWord ? "shorter release" : "longer release"); }
+        if (hasWord (words, { "decay" }))           { e.scale (P::aenv_decay, factor);   understood.add (shorterWord ? "shorter decay" : "longer decay"); }
+        if (hasWord (words, { "attack" }))          { e.scale (P::aenv_attack, factor);  understood.add (shorterWord ? "faster attack" : "slower attack"); }
+        if (hasWord (words, { "sustain" }))         { e.nudge (P::aenv_sustain, shorterWord ? -0.25f : 0.25f); understood.add (shorterWord ? "less sustain" : "more sustain"); }
+    }
+    else if (hasWord (words, { "shorter", "short", "snappier", "snappy", "tighter", "staccato", "clipped" }))
     {
         e.scale (P::aenv_release, 0.5f);
         e.scale (P::aenv_decay, 0.7f);
         if (current.get (P::aenv_sustain) > 0.6f) e.nudge (P::aenv_sustain, -0.25f);
         understood.add ("shorter");
     }
-    if (hasWord (words, { "longer", "long", "sustained", "sustain", "held", "drawn", "lingering", "tail" }))
+    else if (hasWord (words, { "longer", "long", "sustained", "held", "drawn", "lingering" }))
     {
         e.scale (P::aenv_release, 2.0f);
-        if (current.get (P::aenv_sustain) < 0.3f && ! hasWord (words, { "tail", "release" })) e.nudge (P::aenv_sustain, 0.25f);
+        if (current.get (P::aenv_sustain) < 0.3f) e.nudge (P::aenv_sustain, 0.25f);
         understood.add ("longer");
+    }
+    // The filter by name: "open the filter", "lower the cutoff", "less filter".
+    if (hasWord (words, { "cutoff", "filter" }) && ! stageNamed)
+    {
+        const bool down = hasWord (words, { "lower", "less", "close", "closed", "down", "darker", "reduce" });
+        const bool up   = hasWord (words, { "higher", "more", "open", "up", "raise", "brighter" });
+        if (down != up)
+        {
+            e.nudge (P::filter_cutoff, down ? -0.12f : 0.12f);
+            understood.add (down ? "cutoff down" : "cutoff up");
+        }
+    }
+    if (hasWord (words, { "volume", "level", "gain" }) && ! hasWord (words, { "louder", "quieter" }))
+    {
+        const bool down = hasWord (words, { "lower", "less", "down", "reduce", "quieter" });
+        e.nudge (P::master_gain, down ? -0.1f : 0.1f);
+        understood.add (down ? "quieter" : "louder");
     }
     if (hasWord (words, { "punchier", "punchy", "punch", "harder-hitting", "attacky", "percussive", "plucky", "pluckier" }))
     {
@@ -268,14 +297,6 @@ bool ruleTweak (const juce::String& request, const Patch& current, std::vector<T
         e.nudge (P::dist_mix, -0.15f);
         e.nudge (P::filter_res, -0.08f);
         understood.add ("softer");
-    }
-    {
-        const int attack = moreOrLess (words, { "attack" });
-        if (attack != 0 || hasWord (words, { "faster-attack", "quicker" }))
-        {
-            if (attack > 0) e.scale (P::aenv_attack, 2.5f); else e.scale (P::aenv_attack, 0.4f);
-            understood.add (attack > 0 ? "slower attack" : "faster attack");
-        }
     }
 
     // Character
@@ -376,8 +397,8 @@ bool ruleTweak (const juce::String& request, const Patch& current, std::vector<T
             understood.add (vib > 0 ? "more vibrato" : "less vibrato");
         }
     }
-    if (hasWord (words, { "faster", "fast", "quicker-lfo", "speedier", "busier" }))  { e.scaleFreeLfoRates (1.6f); e.scale (P::chorus_rate, 1.3f); understood.add ("faster"); }
-    if (hasWord (words, { "slower", "slow", "lazier", "calmer", "calm" }))          { e.scaleFreeLfoRates (0.6f); e.scale (P::chorus_rate, 0.8f); understood.add ("slower"); }
+    if (! stageNamed && hasWord (words, { "faster", "fast", "speedier", "busier" }))  { e.scaleFreeLfoRates (1.6f); e.scale (P::chorus_rate, 1.3f); understood.add ("faster"); }
+    if (! stageNamed && hasWord (words, { "slower", "slow", "lazier", "calmer", "calm" })) { e.scaleFreeLfoRates (0.6f); e.scale (P::chorus_rate, 0.8f); understood.add ("slower"); }
 
     // Pitch and voice
     if (hasWord (words, { "octave" }) || hasWord (words, { "higher", "lower" }))

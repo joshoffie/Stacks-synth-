@@ -51,6 +51,7 @@ public:
     void paint (juce::Graphics&) override;
 
     void refreshConnections();
+    void refreshEnabled();                       // the Rate knob dims while its LFO is tempo-synced
     void setAssigning (int source);              // -1 = not assigning
     int currentSource() const;
 

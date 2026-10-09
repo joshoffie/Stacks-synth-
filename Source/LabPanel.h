@@ -130,6 +130,7 @@ private:
     juce::ToggleButton designWavesToggle { "Design wavetables" };
     juce::TextButton savePresetButton;
     juce::TextButton newBatchButton { "Generate" }, evolveButton { "Evolve" }, backButton { "<" }, fromAudioButton { "From audio" };
+    juce::TextButton clearButton { "Clear" };              // wipe the Lab
     std::unique_ptr<juce::FileChooser> audioChooser;
     juce::TextButton gardenTab { "STACKS" }, treeTab { "HISTORY" }, ideasTab { "LIST" }, libraryTab { "LIBRARY" }, explainTab { "EXPLAIN" };
     View view = View::garden;
@@ -149,6 +150,9 @@ private:
 
     int shownGeneration = -1;
     int treeGeneration = -1;
+    int seenTweakSerial = 0;
+    double tweakFlashUntil = 0.0;                            // the tweak box shows its result until then
+    void showTweakResult (const juce::String& text, juce::Colour);
 };
 
 } // namespace stacks

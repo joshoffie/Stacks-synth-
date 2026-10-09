@@ -308,6 +308,7 @@ void ModulatorsPanel::showTab (int tab)
     }
 
     refreshConnections();
+    refreshEnabled();
     resized();
 }
 
@@ -358,6 +359,15 @@ void ModulatorsPanel::refreshConnections()
     }
 
     resized();
+}
+
+void ModulatorsPanel::refreshEnabled()
+{
+    if (currentTab > TabLfo4 || content.size() < 4)
+        return;
+    const bool synced = (int) processor.apvts.getRawParameterValue (paramId (lfoSyncParam (currentTab)))->load() != 0;
+    if (content[3]->isEnabled() == synced)
+        content[3]->setEnabled (! synced);   // content[3] is the Rate knob
 }
 
 void ModulatorsPanel::paint (juce::Graphics& g)

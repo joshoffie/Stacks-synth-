@@ -1518,11 +1518,24 @@ juce::String StacksAudioProcessor::currentExplanationKey() const
 void StacksAudioProcessor::applyTweak (const std::vector<TweakChange>& changes, const juce::String& summary)
 {
     pushUndoSnapshot();
+    labState.tweakedParams.clear();
     for (const auto& c : changes)
         if (c.paramIndex >= 0 && c.paramIndex < kNumParams)
             if (auto* p = apvts.getParameter (paramId ((P) c.paramIndex)))
+            {
                 p->setValueNotifyingHost (p->convertTo0to1 (c.value));
+                labState.tweakedParams.push_back (c.paramIndex);
+            }
     labState.status = summary;
+    ++labState.tweakSerial;
+    labBroadcaster.sendChangeMessage();
+}
+
+void StacksAudioProcessor::clearLab()
+{
+    cancelGeneration();
+    ++tweakToken;
+    labState = LabState();
     labBroadcaster.sendChangeMessage();
 }
 
@@ -1546,6 +1559,8 @@ void StacksAudioProcessor::quickTweak (const juce::String& request)
     {
         labState.status = backend == nullptr ? "Try words like brighter, darker, wider, shorter, punchier, more reverb (or pick an AI model in Settings for anything else)"
                                              : "Wait for the batch to finish, then tweak";
+        labState.tweakedParams.clear();
+        ++labState.tweakSerial;
         labBroadcaster.sendChangeMessage();
         return;
     }
@@ -1578,6 +1593,8 @@ void StacksAudioProcessor::quickTweak (const juce::String& request)
             else
             {
                 self->labState.status = error.isNotEmpty() ? "Tweak failed: " + error : "The model had no change for that - try other words";
+                self->labState.tweakedParams.clear();
+                ++self->labState.tweakSerial;
                 self->labBroadcaster.sendChangeMessage();
             }
         });

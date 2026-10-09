@@ -148,6 +148,7 @@ ParamKnob::ParamKnob (juce::AudioProcessorValueTreeState& apvts, const ParamSpec
 
 ParamKnob::~ParamKnob()
 {
+    stopTimer();
     slider.removeMouseListener (this);
 }
 
@@ -258,20 +259,43 @@ void ParamKnob::updateCaption()
     if (compact || paramIndex < 0)
         return;
     const auto& s = spec ((P) paramIndex);
-    if (showingValue)
+    juce::Colour colour;
+    if (showingValue || flashing)
     {
         auto text = slider.getTextFromValue (slider.getValue());
         const juce::String unit (s.unit);
         if (unit.isNotEmpty() && ! text.endsWith (unit) && ! text.endsWithChar ('k') && ! text.endsWith ("ms"))
             text << " " << unit;
         label.setText (text, juce::dontSendNotification);
-        label.setColour (juce::Label::textColourId, colours::text);
+        colour = flashing ? colours::accent : colours::text;
     }
     else
     {
         label.setText (s.name, juce::dontSendNotification);
-        label.setColour (juce::Label::textColourId, large ? colours::text : colours::muted);
+        colour = large ? colours::text : colours::muted;
     }
+    label.setColour (juce::Label::textColourId, isEnabled() ? colour : colour.withAlpha (0.35f));
+}
+
+// A tweak moved this knob: its value lights up for a couple of seconds.
+void ParamKnob::flash()
+{
+    flashing = true;
+    updateCaption();
+    startTimer (2200);
+}
+
+void ParamKnob::timerCallback()
+{
+    stopTimer();
+    flashing = false;
+    updateCaption();
+}
+
+void ParamKnob::enablementChanged()
+{
+    updateCaption();
+    repaint();
 }
 
 std::unique_ptr<juce::AccessibilityHandler> ParamKnob::createAccessibilityHandler()
@@ -343,7 +367,7 @@ void ParamKnob::paint (juce::Graphics& g)
         juce::Path ring;
         ring.addCentredArc (centre.x, centre.y, ringRadius, ringRadius, 0.0f,
                             rotary.startAngleRadians + from * span, rotary.startAngleRadians + to * span, true);
-        g.setColour (modSourceColour (source).withAlpha (0.95f));
+        g.setColour (modSourceColour (source).withAlpha (isEnabled() ? 0.95f : 0.3f));   // dim with the knob when a sync setting overrides it
         g.strokePath (ring, juce::PathStrokeType (2.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
         // a dot at the knob's own value, so the ring reads as "around here"
@@ -352,7 +376,7 @@ void ParamKnob::paint (juce::Graphics& g)
     }
 
     // Live marker: where the modulation has the value right now.
-    if (liveNorm >= 0.0f)
+    if (liveNorm >= 0.0f && isEnabled())
     {
         const float outer = ringRadiusFor ((int) modulations.size() - 1);
         const float a0 = rotary.startAngleRadians + v0 * span;

@@ -54,7 +54,8 @@ struct KnobModulation { int slot, source; float amount; };
 // ring to change its depth), accepts a modulator dropped on it, and can be
 // clicked as a target while a modulator is being assigned.
 class ParamKnob : public juce::Component,
-                  public juce::DragAndDropTarget
+                  public juce::DragAndDropTarget,
+                  private juce::Timer
 {
 public:
     // compact = no caption at all (used in the header)
@@ -66,6 +67,7 @@ public:
     void setLiveValue (float realValue);               // where the modulation has the knob right now
     void clearLiveValue();
     void setAssignMode (bool on, juce::Colour sourceColour);
+    void flash();                                      // show the value in the accent colour for a moment (a tweak moved it)
     int parameterIndex() const { return paramIndex; }
 
     void resized() override;
@@ -73,6 +75,7 @@ public:
     void mouseDown (const juce::MouseEvent&) override;
     void mouseEnter (const juce::MouseEvent&) override;
     void mouseExit (const juce::MouseEvent&) override;
+    void enablementChanged() override;
     std::unique_ptr<juce::AccessibilityHandler> createAccessibilityHandler() override;
 
     bool isInterestedInDragSource (const SourceDetails&) override;
@@ -91,6 +94,7 @@ private:
     juce::Rectangle<float> knobBounds() const;      // the rotary's own square
     float ringRadiusFor (int which) const;
     void updateCaption();
+    void timerCallback() override;                  // ends a flash
 
     juce::Label label;
     juce::Slider slider;
@@ -98,7 +102,7 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
     std::vector<KnobModulation> modulations;
     int paramIndex = -1;
-    bool compact = false, large = false, assignMode = false, dragOver = false, showingValue = false;
+    bool compact = false, large = false, assignMode = false, dragOver = false, showingValue = false, flashing = false;
     float liveNorm = -1.0f;                          // -1 = none
     juce::Colour assignColour, dragColour;
 };

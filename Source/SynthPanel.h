@@ -68,7 +68,8 @@ private:
 class SynthPanel : public juce::Component,
                    private juce::AudioProcessorValueTreeState::Listener,
                    private juce::AsyncUpdater,
-                   private juce::Timer
+                   private juce::Timer,
+                   private juce::ChangeListener
 {
 public:
     static constexpr int kCell = 62, kCellH = 70, kTitleH = 17, kPad = 5, kGap = 6, kBand = 14, kDisplayH = 60;
@@ -117,7 +118,8 @@ private:
 
     void parameterChanged (const juce::String&, float) override { triggerAsyncUpdate(); }
     void handleAsyncUpdate() override;                       // refresh rings + connection lists
-    void timerCallback() override;                           // live markers on modulated knobs
+    void timerCallback() override;                           // live markers on modulated knobs, sync dimming
+    void changeListenerCallback (juce::ChangeBroadcaster*) override;   // a tweak landed: flash what it moved
     void refreshModulationDisplay();
     void layoutRow (Row&, int width, int height);            // places the sections and their cells
     Section* findSection (const juce::String& title);
@@ -135,6 +137,8 @@ private:
     std::unique_ptr<MacroPage> macroPage;
     int viewMode = -1;                                        // -1 = all
     int assigningSource = -1;
+    int seenTweakSerial = 0;
+    ParamKnob* delayTimeKnob = nullptr;                      // dims while the delay is tempo-synced
 };
 
 } // namespace stacks
