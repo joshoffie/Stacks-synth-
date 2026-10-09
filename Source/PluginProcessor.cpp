@@ -2,6 +2,7 @@
 #include "Controls.h"
 #include "PluginEditor.h"
 #include "ai/PatchExplainer.h"
+#include "QuickTweak.h"
 #include "ai/SampleAnalyser.h"
 #include "ai/SongAnalyser.h"
 #include "ai/LlmPatchGenerator.h"
@@ -654,6 +655,7 @@ int StacksAudioProcessor::addModulation (int source, int target, float amount)
                 slot = i;
     if (slot < 0)
         return -1;
+    pushUndoSnapshot();   // a connection is one undo step
 
     auto set = [this] (P param, float value)
     {
@@ -670,6 +672,7 @@ void StacksAudioProcessor::clearModulation (int slot)
 {
     if (slot < 0 || slot >= kNumModSlots)
         return;
+    pushUndoSnapshot();
     auto set = [this] (P param, float value)
     {
         if (auto* p = apvts.getParameter (paramId (param)))
@@ -1102,8 +1105,8 @@ void StacksAudioProcessor::setPreviewOnClick (bool shouldPlay)
     s.saveIfNeeded();
 }
 
-// A phrase that suits the sound: a low note for a bass, a chord for a pad, a
-// triad for keys and bells, one mid note for everything else.
+// One note that suits the sound: low for a bass, held a little longer for a
+// pad, middle C for everything else.
 void StacksAudioProcessor::playPreview (const Patch& p)
 {
     if (! previewClicks)
@@ -1111,12 +1114,10 @@ void StacksAudioProcessor::playPreview (const Patch& p)
     const double sr = currentSampleRate > 0.0 ? currentSampleRate : 48000.0;
     const auto cat = p.category.toLowerCase();
     PreviewPhrase ph;
-    if (cat == "bass")                                          { ph.notes[0] = 40; ph.lengthSamples = (int) (0.9 * sr); }
-    else if (cat == "pad" || cat == "texture" || cat == "drone") { ph.notes[0] = 55; ph.notes[1] = 59; ph.notes[2] = 62; ph.lengthSamples = (int) (1.8 * sr); }
-    else if (cat == "keys" || cat == "bell" || cat == "pluck")   { ph.notes[0] = 60; ph.notes[1] = 64; ph.notes[2] = 67; ph.lengthSamples = (int) (1.0 * sr); }
-    else                                                         { ph.notes[0] = 62; ph.lengthSamples = (int) (1.0 * sr); }
-    for (int& n : ph.notes)
-        if (n >= 0) n += previewRootNote - 60;   // in the song's key when one was analysed
+    if (cat == "bass")                                           { ph.notes[0] = 40; ph.lengthSamples = (int) (0.9 * sr); }
+    else if (cat == "pad" || cat == "texture" || cat == "drone")  { ph.notes[0] = 60; ph.lengthSamples = (int) (1.4 * sr); }
+    else                                                          { ph.notes[0] = 60; ph.lengthSamples = (int) (0.8 * sr); }
+    ph.notes[0] += previewRootNote - 60;   // in the song's key when one was analysed
     previewRequest = ph;
     previewPending.store (true, std::memory_order_release);
 }
@@ -1512,6 +1513,75 @@ juce::String StacksAudioProcessor::currentExplanationKey() const
 {
     const auto p = currentPatch();
     return p.name + "|" + describePatch (p);
+}
+
+void StacksAudioProcessor::applyTweak (const std::vector<TweakChange>& changes, const juce::String& summary)
+{
+    pushUndoSnapshot();
+    for (const auto& c : changes)
+        if (c.paramIndex >= 0 && c.paramIndex < kNumParams)
+            if (auto* p = apvts.getParameter (paramId ((P) c.paramIndex)))
+                p->setValueNotifyingHost (p->convertTo0to1 (c.value));
+    labState.status = summary;
+    labBroadcaster.sendChangeMessage();
+}
+
+void StacksAudioProcessor::quickTweak (const juce::String& request)
+{
+    if (request.trim().isEmpty())
+        return;
+    const auto patch = currentPatch();
+    std::vector<TweakChange> changes;
+    juce::String summary;
+
+    // Words we know act at once, no model needed.
+    if (ruleTweak (request, patch, changes, summary))
+    {
+        applyTweak (changes, summary);
+        return;
+    }
+
+    auto backend = activeBackend;
+    if (backend == nullptr || labState.generating)
+    {
+        labState.status = backend == nullptr ? "Try words like brighter, darker, wider, shorter, punchier, more reverb (or pick an AI model in Settings for anything else)"
+                                             : "Wait for the batch to finish, then tweak";
+        labBroadcaster.sendChangeMessage();
+        return;
+    }
+
+    const int token = ++tweakToken;
+    labState.tweaking = true;
+    labState.status = "Tweaking with " + backend->modelName() + "...";
+    labBroadcaster.sendChangeMessage();
+
+    juce::WeakReference<StacksAudioProcessor> weak (this);
+    pool.addJob ([weak, token, backend, patch, request]
+    {
+        juce::String text, error;
+        const bool ok = backend->chat (tweakSystemPrompt(), tweakUserPrompt (patch, request), tweakGrammar(),
+                                       [&] (const juce::String& t) { text += t; }, [] (const juce::String&) {},
+                                       [weak, token] { auto* self = weak.get(); return self == nullptr || self->tweakToken.load() != token; }, error);
+        ModelManager::appDataDirectory().getChildFile ("last-tweak.txt").replaceWithText (tweakUserPrompt (patch, request) + "\n\n----- REPLY -----\n" + text
+                                                                                            + (error.isNotEmpty() ? "\n----- ERROR -----\n" + error : juce::String()));
+        std::vector<TweakChange> modelChanges;
+        juce::String modelSummary;
+        const bool parsed = ok && parseTweakReply (text, patch, modelChanges, modelSummary);
+        juce::MessageManager::callAsync ([weak, token, parsed, modelChanges, modelSummary, error, request]
+        {
+            auto* self = weak.get();
+            if (self == nullptr || self->tweakToken.load() != token)
+                return;
+            self->labState.tweaking = false;
+            if (parsed)
+                self->applyTweak (modelChanges, "\"" + request.trim() + "\": " + modelSummary);
+            else
+            {
+                self->labState.status = error.isNotEmpty() ? "Tweak failed: " + error : "The model had no change for that - try other words";
+                self->labBroadcaster.sendChangeMessage();
+            }
+        });
+    });
 }
 
 void StacksAudioProcessor::explainCurrentPatch()

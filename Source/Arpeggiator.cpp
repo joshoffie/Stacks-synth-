@@ -110,7 +110,13 @@ void Arpeggiator::process (juce::MidiBuffer& midi, int numSamples, const Params&
         }
         else if (m.isNoteOff())
         {
+            const auto before = held.size();
             held.erase (std::remove_if (held.begin(), held.end(), [&] (const Held& h) { return h.note == m.getNoteNumber(); }), held.end());
+            // Not one of ours: the note went straight to the synth while the arp was
+            // off (a preview, a held key) and the arp came on since. Let the release
+            // through, or that note never stops.
+            if (held.size() == before)
+                out.addEvent (m, meta.samplePosition);
         }
         else if (m.isAllNotesOff() || m.isAllSoundOff())
         {

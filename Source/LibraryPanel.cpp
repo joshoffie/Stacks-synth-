@@ -149,8 +149,6 @@ LibraryPanel::LibraryPanel (StacksAudioProcessor& p) : processor (p)
     addAndMakeVisible (revealButton);
 
     saveHereButton.setTooltip ("Save the sound you're hearing into this folder");
-    saveHereButton.setColour (juce::TextButton::buttonColourId, colours::accent);
-    saveHereButton.setColour (juce::TextButton::textColourOffId, juce::Colours::black);
     saveHereButton.onClick = [this] { saveHere(); };
     addAndMakeVisible (saveHereButton);
 
@@ -161,14 +159,14 @@ LibraryPanel::LibraryPanel (StacksAudioProcessor& p) : processor (p)
     favouritesOnly.onClick = [this] { showFavouritesOnly = favouritesOnly.getToggleState(); refresh(); };
     addAndMakeVisible (favouritesOnly);
 
-    playOnClick.setTooltip ("Play: clicking a patch plays a short phrase that suits it (a low note for a bass, a chord for a pad) so you can browse without the keyboard. Click to turn it off.");
+    playOnClick.setTooltip ("Play: clicking a patch plays one note of it (low for a bass) so you can browse without the keyboard. Click to turn it off.");
     playOnClick.setClickingTogglesState (true);
     playOnClick.setColour (juce::TextButton::buttonOnColourId, colours::accent);
     playOnClick.setToggleState (processor.previewOnClick(), juce::dontSendNotification);
     playOnClick.onClick = [this] { processor.setPreviewOnClick (playOnClick.getToggleState()); };
     addAndMakeVisible (playOnClick);
 
-    emptyLabel.setText (juce::String::fromUTF8 ("Nothing here yet. Press the \xe2\x99\xa5 on a card or on Now Playing to save into this folder."), juce::dontSendNotification);
+    emptyLabel.setText ("Nothing here yet. Save here puts the sound you're hearing into this folder.", juce::dontSendNotification);
     emptyLabel.setFont (juce::Font (juce::FontOptions (11.5f)));
     emptyLabel.setColour (juce::Label::textColourId, colours::muted);
     emptyLabel.setJustificationType (juce::Justification::centredTop);

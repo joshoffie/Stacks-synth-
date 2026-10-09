@@ -7,46 +7,37 @@ namespace stacks
 
 namespace
 {
-    // Row colours: one hue per stage of the signal path, so a knob's colour
-    // says what part of the synth it belongs to.
-    const juce::Colour& kSound    = colours::rowSound;
-    const juce::Colour& kFilter   = colours::rowFilter;
-    const juce::Colour& kMovement = colours::rowMovement;
-    const juce::Colour& kSpace    = colours::rowSpace;
-    const juce::Colour& kShape    = colours::rowShape;
-    const juce::Colour& kMacro    = colours::rowMacro;
-    const juce::Colour& kSample   = colours::rowSample;
+    // One card of the panel: which parameter groups it holds, how many
+    // columns its grid has, and the display drawn across its top.
+    struct SectionSpec { const char* title; std::vector<const char*> groups; int columns; const char* display; };
+    struct RowSpec { const char* caption; const juce::Colour* colour; std::vector<SectionSpec> sections; };
 
-    const char* kModulatorsGroup = "__MODULATORS__";
-
-    struct RowSpec { const char* caption; juce::Colour colour; int height; std::vector<const char*> groups; };
+    const char* kModulatorsSection = "MODULATORS";
 
     const std::vector<RowSpec>& rowSpecs()
     {
         static const std::vector<RowSpec> specs = {
-            { "SOUND",      kSound,    0, { "OSC A", "OSC B", "OSC C", "MIX" } },
-            { "SAMPLE",     kSample,   0, { "SAMPLE", "GRAIN" } },
-            { "FILTER",     kFilter,   0, { "FILTER", "FILTER 2", "FILTER ENV", "AMP ENV" } },
-            { "MODULATORS", kMovement, SynthPanel::kModulatorsHeight, { kModulatorsGroup, "VOICE", "ARP" } },
-            { "SHAPE",      kShape,    0, { "DISTORTION", "EQ", "COMPRESSOR" } },
-            { "SPACE",      kSpace,    0, { "CHORUS", "DELAY", "REVERB" } },
+            { "SOUND",      &colours::rowSound,    { { "OSC A", { "OSC A" }, 4, "waveA" }, { "OSC B", { "OSC B" }, 4, "waveB" }, { "OSC C", { "OSC C" }, 4, "waveC" },
+                                                     { "MIX", { "MIX" }, 1, nullptr }, { "SAMPLE", { "SAMPLE", "GRAIN" }, 4, "sample" } } },
+            { "FILTER",     &colours::rowFilter,   { { "FILTER", { "FILTER", "FILTER 2" }, 6, "filter" }, { "FILTER ENV", { "FILTER ENV" }, 2, "fenv" }, { "AMP ENV", { "AMP ENV" }, 2, "aenv" } } },
+            { "EFFECTS",    &colours::rowSpace,    { { "DISTORTION", { "DISTORTION" }, 2, nullptr }, { "EQ", { "EQ" }, 2, nullptr }, { "COMPRESSOR", { "COMPRESSOR" }, 2, nullptr },
+                                                     { "CHORUS", { "CHORUS" }, 2, nullptr }, { "DELAY", { "DELAY" }, 3, nullptr }, { "REVERB", { "REVERB" }, 2, nullptr } } },
+            { "MODULATORS", &colours::rowMovement, { { kModulatorsSection, {}, 0, nullptr }, { "VOICE", { "VOICE" }, 3, nullptr }, { "ARP", { "ARP" }, 2, nullptr } } },
         };
         return specs;
     }
 
+    // Knob colour = the row's hue, except the SHAPE effects keep their own.
     juce::Colour colourForGroup (const juce::String& group)
     {
+        if (group == "DISTORTION" || group == "EQ" || group == "COMPRESSOR") return colours::rowShape;
+        if (group == "SAMPLE" || group == "GRAIN") return colours::rowSample;
         for (const auto& row : rowSpecs())
-            for (auto* g : row.groups)
-                if (group == g)
-                    return row.colour;
+            for (const auto& section : row.sections)
+                for (auto* g : section.groups)
+                    if (group == g)
+                        return *row.colour;
         return colours::accent;
-    }
-
-    // Groups the modulators area draws itself.
-    bool isModulatorGroup (const juce::String& group)
-    {
-        return group.startsWith ("LFO ") || group == "MOD MATRIX" || group == "MOD ENV";
     }
 }
 
@@ -58,8 +49,8 @@ public:
     AdvancedBox (juce::AudioProcessorValueTreeState& apvts, const juce::String& title, juce::Colour colour,
                  const std::vector<const ParamSpec*>& specs)
     {
-        heading.setText (title + "  -  more", juce::dontSendNotification);
-        heading.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
+        heading.setText (title, juce::dontSendNotification);
+        heading.setFont (StacksLookAndFeel::font (10.5f, true).withExtraKerningFactor (0.08f));
         heading.setColour (juce::Label::textColourId, colour);
         addAndMakeVisible (heading);
 
@@ -77,7 +68,7 @@ public:
             addAndMakeVisible (*c);
             controls.push_back (std::move (c));
         }
-        setSize (12 + (int) controls.size() * SynthPanel::kCell + 12, 20 + SynthPanel::kCellH + 10);
+        setSize (12 + (int) controls.size() * SynthPanel::kCell + 12, 22 + SynthPanel::kCellH + 10);
     }
 
     void paint (juce::Graphics& g) override { g.fillAll (colours::panel); }
@@ -129,9 +120,8 @@ void WaveDisplay::timerCallback()
 
 void WaveDisplay::paint (juce::Graphics& g)
 {
-    auto r = getLocalBounds().toFloat().reduced (1.0f, 15.0f).withTrimmedBottom (2.0f);
-    g.setColour (colours::background);
-    g.fillRoundedRectangle (r, 4.0f);
+    auto r = getLocalBounds().toFloat();
+    StacksLookAndFeel::drawInset (g, r);
 
     const int wave = juce::jmax (0, shownWave);
     const float morph = juce::jlimit (0.0f, 1.0f, shownMorph);
@@ -139,8 +129,12 @@ void WaveDisplay::paint (juce::Graphics& g)
     const int user = custom ? UserWavetables::customSlot (osc) : wave - WavetableBank::kNumBuiltIn;
     const UserTable* table = user >= 0 ? processor.userWavetables().active (user) : nullptr;
 
+    // faint centre line
+    g.setColour (juce::Colours::white.withAlpha (0.06f));
+    g.drawHorizontalLine ((int) r.getCentreY(), r.getX() + 3.0f, r.getRight() - 3.0f);
+
     juce::Path path;
-    const int steps = 48;
+    const int steps = juce::jlimit (48, 160, (int) r.getWidth() / 2);
     for (int i = 0; i <= steps; ++i)
     {
         const float phase = (float) i / (float) steps;
@@ -150,20 +144,28 @@ void WaveDisplay::paint (juce::Graphics& g)
         else if (table != nullptr) y = table->read (0, morph, wp);
         else                    y = std::sin (juce::MathConstants<float>::twoPi * wp);
         y = warpSample (shownWarp, y, shownWarpAmt);
-        const float px = r.getX() + 2.0f + phase * (r.getWidth() - 4.0f);
-        const float py = r.getCentreY() - y * (r.getHeight() * 0.5f - 3.0f);
+        const float px = r.getX() + 4.0f + phase * (r.getWidth() - 8.0f);
+        const float py = r.getCentreY() - y * (r.getHeight() * 0.5f - 5.0f);
         if (i == 0) path.startNewSubPath (px, py); else path.lineTo (px, py);
     }
-    g.setColour (user >= 0 && table == nullptr ? colours::muted : colour);
-    g.strokePath (path, juce::PathStrokeType (1.6f));
+    const auto lineColour = user >= 0 && table == nullptr ? colours::muted : colour;
+    juce::Path fill (path);
+    fill.lineTo (r.getRight() - 4.0f, r.getCentreY());
+    fill.lineTo (r.getX() + 4.0f, r.getCentreY());
+    fill.closeSubPath();
+    g.setColour (lineColour.withAlpha (0.12f));
+    g.fillPath (fill);
+    g.setColour (lineColour);
+    g.strokePath (path, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
-    g.setColour (colours::muted);
-    g.setFont (juce::Font (juce::FontOptions (9.5f)));
-    const auto caption = custom    ? (table != nullptr ? shownName : juce::String ("no table designed"))
-                       : user >= 0 ? (table != nullptr ? shownName.upToLastOccurrenceOf (".", false, false) : juce::String ("click to import"))
-                                   : juce::String ("import...");
-    g.drawText (caption, getLocalBounds().removeFromBottom (14), juce::Justification::centred, true);
-    g.drawText ("Shape", getLocalBounds().removeFromTop (14), juce::Justification::centred, true);
+    // The table's name only when it is a designed or imported one.
+    if (user >= 0)
+    {
+        g.setColour (colours::muted);
+        g.setFont (StacksLookAndFeel::font (9.0f));
+        const auto caption = table != nullptr ? shownName.upToLastOccurrenceOf (".", false, false) : juce::String (custom ? "no table designed" : "click to import");
+        g.drawText (caption, r.reduced (5.0f, 2.0f).toNearestInt(), juce::Justification::bottomRight, true);
+    }
 }
 
 void WaveDisplay::mouseDown (const juce::MouseEvent&)
@@ -229,39 +231,38 @@ void SampleDisplay::timerCallback()
 
 void SampleDisplay::paint (juce::Graphics& g)
 {
-    auto r = getLocalBounds().toFloat().reduced (1.0f, 15.0f).withTrimmedBottom (2.0f);
-    g.setColour (colours::background);
-    g.fillRoundedRectangle (r, 4.0f);
+    auto r = getLocalBounds().toFloat();
+    StacksLookAndFeel::drawInset (g, r);
     g.setColour (colours::muted);
-    g.setFont (juce::Font (juce::FontOptions (9.5f)));
-    g.drawText ("Sample", getLocalBounds().removeFromTop (14), juce::Justification::centred, true);
+    g.setFont (StacksLookAndFeel::font (10.0f));
 
     const auto* s = shown;
     if (s == nullptr || s->length() < 2)
     {
-        g.drawFittedText ("click to load\na sample", r.toNearestInt().reduced (4), juce::Justification::centred, 2);
+        g.drawFittedText ("click to load a sample", r.toNearestInt().reduced (4), juce::Justification::centred, 2);
         return;
     }
     // Overview: the peak of each pixel column.
-    const int columns = juce::jmax (1, (int) r.getWidth() - 4);
+    const int columns = juce::jmax (1, (int) r.getWidth() - 8);
     const int len = s->length();
     const float* a = s->audio.getReadPointer (0);
-    const float midY = r.getCentreY(), half = r.getHeight() * 0.5f - 3.0f;
-    g.setColour (shownMode == 0 ? colours::muted : colour);
+    const float midY = r.getCentreY(), half = r.getHeight() * 0.5f - 4.0f;
+    g.setColour ((shownMode == 0 ? colours::muted : colour).withAlpha (0.85f));
     for (int c = 0; c < columns; ++c)
     {
         const int i0 = (int) ((juce::int64) c * len / columns), i1 = juce::jmax (i0 + 1, (int) ((juce::int64) (c + 1) * len / columns));
         float peak = 0.0f;
         for (int i = i0; i < i1 && i < len; i += juce::jmax (1, (i1 - i0) / 64))
             peak = juce::jmax (peak, std::abs (a[i]));
-        const float x = r.getX() + 2.0f + (float) c;
+        const float x = r.getX() + 4.0f + (float) c;
         g.drawVerticalLine ((int) x, midY - peak * half, midY + peak * half + 1.0f);
     }
-    const float sx = r.getX() + 2.0f + juce::jlimit (0.0f, 1.0f, shownStart) * (float) (columns - 1);
+    const float sx = r.getX() + 4.0f + juce::jlimit (0.0f, 1.0f, shownStart) * (float) (columns - 1);
     g.setColour (colours::text.withAlpha (0.85f));
-    g.drawVerticalLine ((int) sx, r.getY() + 1.0f, r.getBottom() - 1.0f);
+    g.drawVerticalLine ((int) sx, r.getY() + 2.0f, r.getBottom() - 2.0f);
     g.setColour (colours::muted);
-    g.drawText (s->name, getLocalBounds().removeFromBottom (14), juce::Justification::centred, true);
+    g.setFont (StacksLookAndFeel::font (9.0f));
+    g.drawText (s->name.upToLastOccurrenceOf (".", false, false), r.reduced (5.0f, 2.0f).toNearestInt(), juce::Justification::bottomRight, true);
 }
 
 void SampleDisplay::mouseDown (const juce::MouseEvent& e)
@@ -288,8 +289,21 @@ void SampleDisplay::mouseDown (const juce::MouseEvent& e)
 }
 
 //==============================================================================
-// One row of sections, drawn with its caption band. In the single-row views
-// the whole container is scaled up to fill the panel.
+int SynthPanel::Section::naturalWidth() const
+{
+    if (custom != nullptr) return 2 * kPad + 640;
+    return 2 * kPad + columns * kCell;
+}
+
+int SynthPanel::Section::naturalHeight() const
+{
+    if (custom != nullptr) return kTitleH + kModulatorsHeight + kPad;
+    return kTitleH + (display != nullptr ? kDisplayH + kPad : 0) + rows() * kCellH + kPad;
+}
+
+//==============================================================================
+// One row of cards, drawn with its caption band. The whole container is
+// scaled to fit the panel.
 class SynthPanel::RowContainer : public juce::Component
 {
 public:
@@ -297,11 +311,12 @@ public:
 
     void paint (juce::Graphics& g) override
     {
+        // The caption, rotated, in a slim band on the left.
         auto band = juce::Rectangle<float> (0.0f, 0.0f, (float) kBand, (float) getHeight());
-        g.setColour (row.colour.withAlpha (0.18f));
-        g.fillRoundedRectangle (band.reduced (2.0f, 0.0f), 4.0f);
+        g.setColour (row.colour.withAlpha (0.14f));
+        g.fillRoundedRectangle (band.reduced (1.0f, 0.0f), 3.0f);
         g.setColour (row.colour);
-        g.setFont (StacksLookAndFeel::font (10.0f, true).withExtraKerningFactor (0.12f));
+        g.setFont (StacksLookAndFeel::font (9.0f, true).withExtraKerningFactor (0.14f));
         g.saveState();
         g.addTransform (juce::AffineTransform::rotation (-juce::MathConstants<float>::halfPi, band.getCentreX(), band.getCentreY()));
         g.drawText (row.caption, juce::Rectangle<float> (band.getCentreX() - band.getHeight() * 0.5f, band.getCentreY() - band.getWidth() * 0.5f,
@@ -312,103 +327,15 @@ public:
         for (const auto* section : row.sections)
         {
             const auto b = section->bounds.toFloat();
-            juce::ColourGradient grad (colours::panel.brighter (0.05f), b.getX(), b.getY(), colours::panel.darker (0.08f), b.getX(), b.getBottom(), false);
-            g.setGradientFill (grad);
-            g.fillRoundedRectangle (b, 7.0f);
-            g.setColour (juce::Colours::white.withAlpha (0.05f));
-            g.drawRoundedRectangle (b.reduced (0.5f), 7.0f, 1.0f);
+            StacksLookAndFeel::drawCard (g, b);
             g.setColour (section->colour);
-            g.setFont (StacksLookAndFeel::font (10.5f, true).withExtraKerningFactor (0.06f));
-            const auto title = section->title == kModulatorsGroup ? juce::String ("MODULATORS   -   pick one, press Assign, click a knob") : section->title;
-            g.drawText (title, section->bounds.withHeight (kTitleH).reduced (kPad, 0), juce::Justification::centredLeft);
+            g.setFont (StacksLookAndFeel::font (9.5f, true).withExtraKerningFactor (0.1f));
+            g.drawText (section->title, section->bounds.withHeight (kTitleH).reduced (kPad + 2, 0).withTrimmedTop (2), juce::Justification::centredLeft);
         }
     }
 
 private:
     Row& row;
-};
-
-//==============================================================================
-// One line of help under the rows: the control under the mouse, named and
-// explained in plain words; otherwise what the current screen is for.
-class SynthPanel::HelpStrip : public juce::Component,
-                              private juce::Timer
-{
-public:
-    explicit HelpStrip (SynthPanel& owner) : panel (owner)
-    {
-        setInterceptsMouseClicks (false, false);
-        startTimerHz (20);
-    }
-
-    void paint (juce::Graphics& g) override
-    {
-        auto r = getLocalBounds().toFloat();
-        g.setColour (colours::panel.withAlpha (0.7f));
-        g.fillRoundedRectangle (r, 6.0f);
-        juce::AttributedString text;
-        if (title.isNotEmpty())
-        {
-            text.append (title + "   ", StacksLookAndFeel::font (12.0f, true), accent);
-            text.append (body, StacksLookAndFeel::font (12.0f), colours::text.withAlpha (0.9f));
-        }
-        else
-            text.append (body, StacksLookAndFeel::font (12.0f), colours::muted);
-        text.setJustification (juce::Justification::centredLeft);
-        text.setWordWrap (juce::AttributedString::none);
-        text.draw (g, r.reduced (12.0f, 0.0f));
-    }
-
-private:
-    void timerCallback() override
-    {
-        juce::String newTitle, newBody;
-        juce::Colour newAccent = colours::accent;
-        auto* under = juce::Desktop::getInstance().getMainMouseSource().getComponentUnderMouse();
-        for (auto* c = under; c != nullptr && c != &panel; c = c->getParentComponent())
-        {
-            if (auto* knob = dynamic_cast<ParamKnob*> (c))
-            {
-                const auto& s = spec ((P) knob->parameterIndex());
-                newTitle = s.name;
-                newBody = juce::String (s.aiHint).replace (" (advanced)", "");
-                if (s.unit[0] != 0) newBody << "  (" << s.unit << ")";
-                newBody << "   -   drag up/down; double-click to reset; with Assign on, click to modulate it";
-                break;
-            }
-            if (auto* tip = dynamic_cast<juce::SettableTooltipClient*> (c))
-            {
-                if (tip->getTooltip().isNotEmpty()) { newBody = tip->getTooltip(); break; }
-            }
-            if (auto* combo = dynamic_cast<juce::ComboBox*> (c))
-            {
-                if (combo->getTooltip().isNotEmpty()) { newTitle = "Choice"; newBody = combo->getTooltip(); break; }
-            }
-        }
-        if (newBody.isEmpty())
-        {
-            static const char* const screens[] = {
-                "SOUND is where the tone starts: three wavetable oscillators (A, B and C; B can FM A), a sub for weight and noise for air. Morph slides through each table; Warp bends it (Sync, Bend, PWM, Mirror, Fold, Quantize).",
-                "SAMPLE adds a recording to the sound: click the display to load a file. Pitched plays it at the note (loop or once, Start sets where). Granular sows short grains from around Start: Grain Size and Rate set the texture, Spray scatters them, an LFO on Start scans the file.",
-                "FILTER shapes the tone: cutoff is brightness, resonance a peak at the cutoff (Notch, Comb and Formant are special flavours). Routing turns on a second filter: series, parallel, or split (A through 1, B and C through 2). The filter envelope moves both cutoffs per note; the amp envelope shapes loudness.",
-                "MODULATORS make things move: draw an LFO, press Assign and click any knob - it swings around its value. The Arp plays held notes as a pattern in time with the host.",
-                "SHAPE adds character: distortion (soft, hard, tube, fold, crush), a three-band EQ, and a compressor at the end of the chain for glue.",
-                "SPACE is the room: chorus for width and shimmer, delay for echoes (in time with the host), reverb for the tail. The 'more' buttons hold the fine print.",
-            };
-            if (panel.viewMode == -2) newBody = "MACROS: six big knobs wired for this sound. Brightness opens the filter, Movement adds motion, Grit adds dirt, Space adds room, Width spreads it, Length holds it.";
-            else if (panel.viewMode >= 0 && panel.viewMode < 6) newBody = screens[panel.viewMode];
-            else newBody = "Hover any control to see what it does. The tabs above open one section at a time, larger. Signal flows top to bottom: SOUND > FILTER > MODULATORS > SPACE.";
-        }
-        if (newTitle != title || newBody != body)
-        {
-            title = newTitle; body = newBody; accent = newAccent;
-            repaint();
-        }
-    }
-
-    SynthPanel& panel;
-    juce::String title, body;
-    juce::Colour accent { colours::accent };
 };
 
 //==============================================================================
@@ -422,7 +349,7 @@ public:
         for (int k = 0; k < kNumMacros; ++k)
         {
             auto knob = std::make_unique<ParamKnob> (apvts, spec (macroParam (k)));
-            knob->setAccent (kMacro);
+            knob->setAccent (colours::rowMacro);
             knob->setLarge (true);
             addAndMakeVisible (*knob);
             knobs.push_back (std::move (knob));
@@ -443,7 +370,7 @@ public:
                 if (target <= 0) continue;
                 parts.add (modTargetNames()[juce::jlimit (0, modTargetNames().size() - 1, target)] + " " + (amount >= 0 ? "+" : "") + juce::String (juce::roundToInt (amount * 100)) + "%");
             }
-            targets.add (parts.isEmpty() ? juce::String ("not wired - press Assign in MODULATORS") : parts.joinIntoString ("   "));
+            targets.add (parts.isEmpty() ? juce::String ("not wired") : parts.joinIntoString ("   "));
             std::vector<KnobModulation> mods;
             for (const auto& m : processor.modulationsOnParam ((int) macroParam (k))) mods.push_back ({ m.slot, m.source, m.amount });
             knobs[(size_t) k]->setModulations (mods);
@@ -453,36 +380,30 @@ public:
 
     void resized() override
     {
-        auto r = getLocalBounds().reduced (24, 8);
-        r.removeFromTop (34);
+        auto r = getLocalBounds().reduced (24, 12);
         const int cols = 3, rows = 2;
         const int w = r.getWidth() / cols, h = r.getHeight() / rows;
         for (int k = 0; k < kNumMacros; ++k)
         {
             auto cell = juce::Rectangle<int> (r.getX() + (k % cols) * w, r.getY() + (k / cols) * h, w, h);
-            cell.removeFromBottom (26);   // the target line
-            const int side = juce::jmin (cell.getWidth(), cell.getHeight());
+            cell.removeFromBottom (24);   // the target line
+            const int side = juce::jmin (cell.getWidth(), cell.getHeight(), 180);
             knobs[(size_t) k]->setBounds (cell.withSizeKeepingCentre (side, side));
         }
     }
 
     void paint (juce::Graphics& g) override
     {
-        auto r = getLocalBounds().reduced (24, 8);
-        auto title = r.removeFromTop (34);
-        g.setColour (colours::muted);
-        g.setFont (StacksLookAndFeel::font (12.5f));
-        g.drawFittedText ("Six knobs every sound answers. Turn them and listen; the lines below say what each one is moving for this patch. "
-                          "To rewire one: MODULATORS > MORE, pick the macro, press Assign, click a knob.", title, juce::Justification::centredLeft, 2);
+        auto r = getLocalBounds().reduced (24, 12);
         const int cols = 3, rows = 2;
         const int w = r.getWidth() / cols, h = r.getHeight() / rows;
-        g.setFont (StacksLookAndFeel::font (11.5f));
+        g.setFont (StacksLookAndFeel::font (11.0f));
         for (int k = 0; k < kNumMacros; ++k)
         {
             auto cell = juce::Rectangle<int> (r.getX() + (k % cols) * w, r.getY() + (k / cols) * h, w, h);
-            auto line = cell.removeFromBottom (26).reduced (6, 0);
-            g.setColour (targets[k].startsWith ("not wired") ? colours::muted : kMacro.withAlpha (0.9f));
-            g.drawFittedText (targets[k], line, juce::Justification::centred, 1);
+            auto line = cell.removeFromBottom (24).reduced (6, 0);
+            g.setColour (targets[k] == "not wired" ? colours::muted.withAlpha (0.6f) : colours::rowMacro.withAlpha (0.85f));
+            g.drawFittedText (targets[k], line, juce::Justification::centredTop, 1);
         }
     }
 
@@ -498,157 +419,130 @@ SynthPanel::SynthPanel (StacksAudioProcessor& p) : processor (p), apvts (p.apvts
     macroPage = std::make_unique<MacroPage> (p, apvts);
     addChildComponent (*macroPage);
 
-    help = std::make_unique<HelpStrip> (*this);
-    addAndMakeVisible (*help);
-
     setWantsKeyboardFocus (true);
 
-    // The modulators area is one wide "section" of its own.
-    {
-        sections.push_back (std::make_unique<Section>());
-        auto* section = sections.back().get();
-        section->title = kModulatorsGroup;
-        section->colour = kMovement;
-        section->tall = true;
-        modulators = std::make_unique<ModulatorsPanel> (processor);
-        modulators->onAssignRequest = [this] (int source) { beginAssign (source); };
-        modulators->onAssignCancel  = [this] { endAssign(); };
-        addAndMakeVisible (*modulators);
-        section->controls.emplace_back (modulators.get(), 674);
-    }
+    modulators = std::make_unique<ModulatorsPanel> (processor);
+    modulators->onAssignRequest = [this] (int source) { beginAssign (source); };
+    modulators->onAssignCancel  = [this] { endAssign(); };
 
-    // One section per parameter group, controls generated from the table...
+    // Every control, made once from the parameter table and filed under its group.
+    std::map<juce::String, std::vector<juce::Component*>> byGroup;
+    std::map<juce::String, std::vector<const ParamSpec*>> advancedByGroup;
     for (const auto& spec : paramSpecs())
     {
         const juce::String group (spec.group);
-        if (group == "MASTER" || isModulatorGroup (group))
+        if (group == "MASTER" || group == "MACROS" || group == "MOD MATRIX" || group == "MOD ENV" || group.startsWith ("LFO "))
             continue;
-
-        auto* section = findSection (group);
-        if (section == nullptr)
-        {
-            sections.push_back (std::make_unique<Section>());
-            section = sections.back().get();
-            section->title = group;
-            section->colour = colourForGroup (group);
-        }
-
         if (isAdvancedParam (spec.id))
         {
-            section->advanced.push_back (&spec);
-            if (section->moreButton == nullptr)
-            {
-                section->moreButton = std::make_unique<juce::TextButton> ("more");
-                section->moreButton->setTooltip ("More " + group.toLowerCase() + " options");
-                section->moreButton->setColour (juce::TextButton::buttonColourId, colours::card);
-                auto* sectionPtr = section;
-                section->moreButton->onClick = [this, sectionPtr] { showAdvanced (*sectionPtr); };
-                addAndMakeVisible (*section->moreButton);
-            }
+            advancedByGroup[group].push_back (&spec);
             continue;
         }
-
         std::unique_ptr<juce::Component> control;
-        int cellWidth = kCell;
         if (spec.kind == ParamKind::Choice)
-        {
             control = std::make_unique<ParamChoice> (apvts, spec);
-            cellWidth = kChoiceCell;
-        }
         else
         {
             auto knob = std::make_unique<ParamKnob> (apvts, spec);
-            knob->setAccent (section->colour);
+            knob->setAccent (colourForGroup (group));
             knob->onAssignClick = [this] (int paramIndex) { knobClicked (paramIndex); };
             knob->onModulatorDropped = [this] (int source, int paramIndex) { processor.addModulation (source, modTargetForParam (paramIndex)); };
             knob->onRingDrag = [this] (int slot, float amount) { processor.setModulationAmount (slot, amount); };
             knobs.push_back (knob.get());
             control = std::move (knob);
         }
-
-        addAndMakeVisible (*control);
-        section->controls.emplace_back (control.get(), cellWidth);
+        byGroup[group].push_back (control.get());
         controls.push_back (std::move (control));
-
-        const juce::String id (spec.id);
-        if (id == "smp_mode")
-        {
-            auto display = std::make_unique<SampleDisplay> (processor, apvts, section->colour);
-            addAndMakeVisible (*display);
-            section->controls.emplace_back (display.get(), 2 * kCell);
-            controls.push_back (std::move (display));
-        }
-        if (id == "oscA_wave" || id == "oscB_wave" || id == "oscC_wave")
-        {
-            auto display = std::make_unique<WaveDisplay> (processor, id == "oscA_wave" ? 0 : id == "oscB_wave" ? 1 : 2, section->colour);
-            addAndMakeVisible (*display);
-            section->controls.emplace_back (display.get(), kCell);
-            optionalDisplays.push_back (display.get());   // the dense ALL view may drop it; the SOUND view always shows it
-            controls.push_back (std::move (display));
-        }
     }
 
-    // Displays at the front of the filter and envelope sections.
-    auto prepend = [this] (const char* group, std::unique_ptr<juce::Component> display, int width)
+    auto makeDisplay = [this] (const char* which, juce::Colour colour) -> juce::Component*
     {
-        if (auto* section = findSection (group))
-        {
-            addAndMakeVisible (*display);
-            optionalDisplays.push_back (display.get());
-            section->controls.insert (section->controls.begin(), { display.get(), width });
-            controls.push_back (std::move (display));
-        }
+        const juce::String w (which);
+        std::unique_ptr<juce::Component> d;
+        if (w == "waveA")        d = std::make_unique<WaveDisplay> (processor, 0, colour);
+        else if (w == "waveB")   d = std::make_unique<WaveDisplay> (processor, 1, colour);
+        else if (w == "waveC")   d = std::make_unique<WaveDisplay> (processor, 2, colour);
+        else if (w == "sample")  d = std::make_unique<SampleDisplay> (processor, apvts, colour);
+        else if (w == "filter")  d = std::make_unique<FilterCurve> (apvts, colour);
+        else if (w == "fenv")    d = std::make_unique<EnvelopeDisplay> (apvts, "fenv", colour);
+        else if (w == "aenv")    d = std::make_unique<EnvelopeDisplay> (apvts, "aenv", colour);
+        if (d == nullptr) return nullptr;
+        auto* raw = d.get();
+        controls.push_back (std::move (d));
+        return raw;
     };
-    if (auto* f = findSection ("FILTER"))     prepend ("FILTER",     std::make_unique<FilterCurve> (apvts, f->colour), 92);
-    if (auto* f = findSection ("FILTER ENV")) prepend ("FILTER ENV", std::make_unique<EnvelopeDisplay> (apvts, "fenv", f->colour), 84);
-    if (auto* f = findSection ("AMP ENV"))    prepend ("AMP ENV",    std::make_unique<EnvelopeDisplay> (apvts, "aenv", f->colour), 84);
 
-    // ...placed in fixed rows that follow the signal path.
-    for (const auto& spec : rowSpecs())
+    // The cards, in rows that follow the signal path.
+    for (const auto& rowSpec : rowSpecs())
     {
         Row row;
-        row.caption = spec.caption;
-        row.colour = spec.colour;
-        row.height = spec.height > 0 ? spec.height : kTitleH + kCellH + kPad;
-        for (auto* g : spec.groups)
-            if (auto* section = findSection (g))
-                row.sections.push_back (section);
-        if (! row.sections.empty())
-            rows.push_back (std::move (row));
+        row.caption = rowSpec.caption;
+        row.colour = *rowSpec.colour;
+        for (const auto& ss : rowSpec.sections)
+        {
+            sections.push_back (std::make_unique<Section>());
+            auto* section = sections.back().get();
+            section->title = ss.title;
+            section->columns = juce::jmax (1, ss.columns);
+            if (juce::String (ss.title) == kModulatorsSection)
+            {
+                section->colour = colours::rowMovement;
+                section->custom = modulators.get();
+            }
+            else
+            {
+                section->colour = colourForGroup (ss.groups.front());
+                for (auto* g : ss.groups)
+                {
+                    for (auto* c : byGroup[g]) section->cells.push_back (c);
+                    for (auto* a : advancedByGroup[g]) section->advanced.push_back (a);
+                }
+                if (ss.display != nullptr)
+                    section->display = makeDisplay (ss.display, section->colour);
+            }
+            if (! section->advanced.empty())
+            {
+                section->moreButton = std::make_unique<juce::TextButton> (juce::String::fromUTF8 ("\xe2\x80\xa2\xe2\x80\xa2\xe2\x80\xa2"));
+                section->moreButton->setTooltip ("More " + juce::String (ss.title).toLowerCase() + " settings");
+                styleAsTab (*section->moreButton);
+                auto* sectionPtr = section;
+                section->moreButton->onClick = [this, sectionPtr] { showAdvanced (*sectionPtr); };
+            }
+            row.sections.push_back (section);
+        }
+        int w = kBand + kPad, h = 0;
+        for (auto* s : row.sections) { w += s->naturalWidth() + kGap; h = juce::jmax (h, s->naturalHeight()); }
+        row.naturalWidth = w - kGap + kPad;
+        row.naturalHeight = h;
+        rows.push_back (std::move (row));
     }
 
+    // The containers come last, once the rows have their final home in the
+    // vector (each holds a reference to its row); the controls move into them.
     for (auto& row : rows)
     {
         row.container = std::make_unique<RowContainer> (row);
         addAndMakeVisible (*row.container);
-        int w = kBand + kPad;
         for (auto* section : row.sections)
         {
-            int sw = 2 * kPad;
-            for (const auto& [component, cellWidth] : section->controls)
-            {
-                row.container->addAndMakeVisible (*component);   // re-parent into the row
-                sw += cellWidth;
-            }
-            if (section->moreButton != nullptr)
-                row.container->addAndMakeVisible (*section->moreButton);
-            w += sw + kGap;
+            if (section->custom != nullptr)  row.container->addAndMakeVisible (*section->custom);
+            for (auto* c : section->cells)   row.container->addAndMakeVisible (*c);
+            if (section->display != nullptr) row.container->addAndMakeVisible (*section->display);
+            if (section->moreButton != nullptr) row.container->addAndMakeVisible (*section->moreButton);
         }
-        row.naturalWidth = w;
     }
 
     // View tabs: everything, or one row filling the panel.
     auto addViewButton = [this] (const juce::String& text, int mode, juce::Colour colour)
     {
         auto b = std::make_unique<juce::TextButton> (text);
-        b->setClickingTogglesState (false);
-        b->setColour (juce::TextButton::buttonOnColourId, colour.withAlpha (0.35f));
-        b->setColour (juce::TextButton::textColourOnId, colours::text);
+        styleAsTab (*b);
+        b->setColour (juce::TextButton::buttonOnColourId, colour);
         b->onClick = [this, mode] { setView (mode); };
         addAndMakeVisible (*b);
         viewButtons.push_back (std::move (b));
     };
-    addViewButton ("MACROS", -2, kMacro);
+    addViewButton ("MACROS", -2, colours::rowMacro);
     addViewButton ("ALL", -1, colours::accent);
     for (int i = 0; i < (int) rows.size(); ++i)
         addViewButton (rows[(size_t) i].caption, i, rows[(size_t) i].colour);
@@ -713,6 +607,7 @@ void SynthPanel::beginAssign (int source)
         knob->setAssignMode (true, modSourceColour (source));
     modulators->setAssigning (source);
     grabKeyboardFocus();
+    repaint();
 }
 
 void SynthPanel::endAssign()
@@ -721,6 +616,7 @@ void SynthPanel::endAssign()
     for (auto* knob : knobs)
         knob->setAssignMode (false, {});
     modulators->setAssigning (-1);
+    repaint();
 }
 
 void SynthPanel::knobClicked (int paramIndex)
@@ -776,154 +672,139 @@ void SynthPanel::setView (int rowIndex)
     repaint();
 }
 
-int SynthPanel::preferredHeight() const
+// Places a row's cards across `width`: each card gets its natural width plus
+// a share of the leftover (displays and the modulators area take more), cells
+// never wider than kMaxCell; what is still left spreads the cards apart. Every
+// card is `height` tall: the display takes the slack when there is one.
+void SynthPanel::layoutRow (Row& row, int width, int height)
 {
-    int h = 24 + 4 + 2 * kPad + 28;
-    for (const auto& row : rows)
-        h += row.height + kGap;
-    return h - kGap;
+    const int n = (int) row.sections.size();
+    std::vector<int> widths (row.sections.size());
+    int natural = kBand + kPad + kPad + (n - 1) * kGap, totalWeight = 0;
+    for (int i = 0; i < n; ++i) { widths[(size_t) i] = row.sections[(size_t) i]->naturalWidth(); natural += widths[(size_t) i]; totalWeight += row.sections[(size_t) i]->weight(); }
+
+    // Two passes: share the leftover by weight, cap the cells, share what the caps freed.
+    int leftover = juce::jmax (0, width - natural);
+    for (int pass = 0; pass < 2 && leftover > 0 && totalWeight > 0; ++pass)
+    {
+        int given = 0, weightNext = 0;
+        for (int i = 0; i < n; ++i)
+        {
+            auto* s = row.sections[(size_t) i];
+            if (s->weight() == 0) continue;
+            int extra = leftover * s->weight() / totalWeight;
+            const int cap = s->custom != nullptr ? 2 * kPad + 1100 : 2 * kPad + s->columns * kMaxCell;
+            const bool capped = widths[(size_t) i] + extra >= cap;
+            if (capped) extra = juce::jmax (0, cap - widths[(size_t) i]);
+            widths[(size_t) i] += extra;
+            given += extra;
+            if (! capped) weightNext += s->weight();
+        }
+        leftover -= given;
+        totalWeight = weightNext;
+        if (given == 0) break;
+    }
+    const int spread = n > 1 ? leftover / (n - 1) : 0;   // whatever the caps left over spaces the cards out
+
+    int x = kBand + kPad;
+    for (int i = 0; i < n; ++i)
+    {
+        auto* section = row.sections[(size_t) i];
+        const int w = widths[(size_t) i];
+        section->bounds = { x, 0, w, height };
+        if (section->moreButton != nullptr)
+            section->moreButton->setBounds (section->bounds.withHeight (kTitleH).removeFromRight (26).reduced (2, 1));
+
+        auto body = section->bounds.reduced (kPad).withTrimmedTop (kTitleH - kPad);
+        if (section->custom != nullptr)
+        {
+            section->custom->setBounds (body);
+        }
+        else
+        {
+            const int gridRows = section->rows();
+            const int gridH = gridRows * kCellH;
+            if (section->display != nullptr)
+            {
+                auto displayArea = body.removeFromTop (juce::jmax (kDisplayH, body.getHeight() - gridH - kPad));
+                section->display->setBounds (displayArea);
+                body.removeFromTop (kPad);
+            }
+            else
+                body = body.withSizeKeepingCentre (body.getWidth(), juce::jmin (body.getHeight(), gridH));
+            const int cellW = juce::jmax (1, body.getWidth() / section->columns);
+            const int gridW = cellW * section->columns;
+            const int x0 = body.getX() + (body.getWidth() - gridW) / 2;
+            for (int c = 0; c < (int) section->cells.size(); ++c)
+                section->cells[(size_t) c]->setBounds (x0 + (c % section->columns) * cellW, body.getY() + (c / section->columns) * kCellH, cellW, kCellH);
+        }
+        x += w + kGap + spread;
+    }
 }
 
 void SynthPanel::resized()
 {
     auto area = getLocalBounds();
     auto tabs = area.removeFromTop (22);
-    const int tabW = juce::jmin (120, (tabs.getWidth() - kBand) / juce::jmax (1, (int) viewButtons.size()));
     tabs.removeFromLeft (kBand);
+    const int tabW = juce::jmin (96, tabs.getWidth() / juce::jmax (1, (int) viewButtons.size()));
     for (auto& b : viewButtons)
-        b->setBounds (tabs.removeFromLeft (tabW).reduced (1, 0));
+        b->setBounds (tabs.removeFromLeft (tabW));
     area.removeFromTop (6);
-    help->setBounds (area.removeFromBottom (24));
-    area.removeFromBottom (4);
     macroPage->setBounds (area);
 
-    const int normalH = kTitleH + kCellH + kPad;
-    auto isOptional = [this] (juce::Component* c) { return std::find (optionalDisplays.begin(), optionalDisplays.end(), c) != optionalDisplays.end(); };
-    auto sectionWidth = [&] (const Section* section, bool compact)
-    {
-        int w = 2 * kPad;
-        for (const auto& [component, cellWidth] : section->controls)
-            w += compact && isOptional (component) ? 0 : cellWidth;
-        return w;
-    };
-    auto hasTall = [] (const Row& row) { for (auto* section : row.sections) if (section->tall) return true; return false; };
-
-    // Packs a row's sections into lines no wider than maxLineW (in unscaled
-    // pixels); a row with the modulators area never wraps. Returns the line of
-    // each section, the number of lines and the widest line.
-    struct Packing { std::vector<int> lineOf; int lines = 1, widest = 0; };
-    auto pack = [&] (const Row& row, bool compact, int maxLineW)
-    {
-        Packing pk;
-        const bool wrap = ! hasTall (row);
-        int x = kBand + kPad;
-        for (size_t i = 0; i < row.sections.size(); ++i)
-        {
-            const int w = sectionWidth (row.sections[i], compact);
-            if (wrap && i > 0 && x + w > maxLineW)
-            {
-                pk.widest = juce::jmax (pk.widest, x);
-                ++pk.lines;
-                x = kBand + kPad;
-            }
-            pk.lineOf.push_back (pk.lines - 1);
-            x += w + kGap;
-        }
-        pk.widest = juce::jmax (pk.widest, x);
-        return pk;
-    };
-    auto rowHeight = [&] (const Row& row, int lines) { return hasTall (row) ? row.height : lines * normalH + (lines - 1) * kGap; };
-
-    // The rows on show, and the largest scale at which they all fit the panel,
-    // wrapping wide rows onto two lines rather than shrinking everything.
     std::vector<Row*> shown;
     if (viewMode < 0)                           for (auto& row : rows) shown.push_back (&row);
     else if (viewMode < (int) rows.size())      shown.push_back (&rows[(size_t) viewMode]);
-    const bool single = viewMode >= 0;
-    const int availW = area.getWidth() - 8, availH = area.getHeight() - 8;
-    auto fits = [&] (float scale, bool compact, int maxLines)
+    if (shown.empty())
+        return;
+
+    // The largest scale at which every row on show fits, by width and by height.
+    const int availW = area.getWidth() - 2, availH = area.getHeight() - 2;
+    int widest = 0, totalH = (int) (shown.size() - 1) * kGap;
+    for (auto* row : shown) { widest = juce::jmax (widest, row->naturalWidth); totalH += row->naturalHeight; }
+    const float maxScale = viewMode >= 0 ? 2.0f : 1.35f;
+    const float scale = juce::jlimit (0.5f, maxScale, juce::jmin ((float) availW / (float) widest, (float) availH / (float) totalH));
+
+    // Leftover height goes to the rows that can use it: those with displays
+    // first, the modulators area too.
+    const int rowW = (int) ((float) availW / scale);
+    int spareH = (int) ((float) availH / scale) - totalH;
+    std::vector<int> heights;
+    int stretchy = 0;
+    for (auto* row : shown)
     {
-        int totalH = 2 * kPad;
-        for (auto* row : shown)
+        bool can = false;
+        for (auto* s : row->sections) can = can || s->display != nullptr || s->custom != nullptr;
+        heights.push_back (row->naturalHeight);
+        if (can) ++stretchy;
+    }
+    if (spareH > 0 && stretchy > 0)
+    {
+        const int each = juce::jmin (spareH / stretchy, viewMode >= 0 ? 150 : 70);
+        for (size_t i = 0; i < shown.size(); ++i)
         {
-            const auto pk = pack (*row, compact, (int) ((float) availW / scale));
-            if (pk.lines > maxLines || (float) pk.widest * scale > (float) availW)
-                return false;
-            totalH += rowHeight (*row, pk.lines) + kGap;
-        }
-        return (float) totalH * scale <= (float) availH;
-    };
-    auto bestScale = [&] (bool compact, int maxLines, float smin, float smax)
-    {
-        for (float scale = smax; scale > smin; scale -= 0.02f)
-            if (fits (scale, compact, maxLines))
-                return scale;
-        return smin;
-    };
-    float scale;
-    bool compact = false;
-    if (single)
-        scale = bestScale (false, 2, 0.6f, 2.2f);
-    else
-    {
-        scale = bestScale (false, 2, 0.5f, 1.0f);
-        if (scale < 0.85f)                       // dense: drop the optional displays if that buys room
-        {
-            const float compactScale = bestScale (true, 2, 0.5f, 1.0f);
-            if (compactScale > scale + 0.02f) { scale = compactScale; compact = true; }
+            bool can = false;
+            for (auto* s : shown[i]->sections) can = can || s->display != nullptr || s->custom != nullptr;
+            if (can) { heights[i] += each; spareH -= each; }
         }
     }
 
-    // Lay every row out in its own container at natural size...
-    const int maxLineW = (int) ((float) availW / scale);
+    // Lay every row out in its own container at natural size, then place the
+    // containers at the shared scale, stacked and centred in any remaining slack.
     for (auto& row : rows)
+        if (std::find (shown.begin(), shown.end(), &row) == shown.end())
+            layoutRow (row, row.naturalWidth, row.naturalHeight);
+    float y = (float) area.getY() + juce::jmax (0.0f, (float) spareH * scale * 0.5f);
+    const int gapExtra = viewMode < 0 && shown.size() > 1 && spareH > 0 ? juce::jmin (spareH / (int) (shown.size() - 1), 10) : 0;
+    for (size_t i = 0; i < shown.size(); ++i)
     {
-        const auto pk = pack (row, compact, maxLineW);
-        const int h = rowHeight (row, pk.lines);
-        int x = kBand + kPad, line = 0;
-        for (size_t i = 0; i < row.sections.size(); ++i)
-        {
-            auto* section = row.sections[i];
-            if (pk.lineOf[i] != line) { line = pk.lineOf[i]; x = kBand + kPad; }
-            const int y = line * (normalH + kGap);
-            const int w = sectionWidth (section, compact);
-            const int sh = section->tall ? row.height : normalH;
-            section->bounds = { x, y, w, sh };
-            if (section->moreButton != nullptr)
-                section->moreButton->setBounds (section->bounds.withHeight (kTitleH).removeFromRight (40).reduced (3, 1));
-            int cx = x + kPad;
-            for (const auto& [component, cellWidth] : section->controls)
-            {
-                const int cw = compact && isOptional (component) ? 0 : cellWidth;
-                component->setVisible (cw > 0);
-                if (cw > 0)
-                    component->setBounds (cx, y + kTitleH, cw, section->tall ? sh - kTitleH - kPad : kCellH);
-                cx += cw;
-            }
-            x += w + kGap;
-        }
-        row.naturalWidth = pk.widest;
-        row.container->setSize (pk.widest, h);
-    }
-
-    // ...then place them: stacked for ALL, or one row centred, at the shared scale.
-    if (! single)
-    {
-        float y = (float) area.getY() + kPad * scale;
-        for (auto& row : rows)
-        {
-            row.container->setTopLeftPosition (0, 0);
-            row.container->setTransform (juce::AffineTransform::scale (scale).translated ((float) area.getX(), y));
-            y += (row.container->getHeight() + kGap) * scale;
-        }
-    }
-    else if (! shown.empty())
-    {
-        auto& row = *shown.front();
-        const float px = (float) area.getX() + ((float) area.getWidth() - row.container->getWidth() * scale) * 0.5f;
-        const float py = (float) area.getY() + juce::jmax (4.0f, ((float) area.getHeight() - row.container->getHeight() * scale) * 0.35f);
-        row.container->setTopLeftPosition (0, 0);
-        row.container->setTransform (juce::AffineTransform::scale (scale).translated (px, py));
+        auto* row = shown[i];
+        layoutRow (*row, rowW, heights[i]);
+        row->container->setTopLeftPosition (0, 0);
+        row->container->setSize (rowW, heights[i]);
+        row->container->setTransform (juce::AffineTransform::scale (scale).translated ((float) area.getX() + 1.0f, y));
+        y += ((float) heights[i] + (float) (kGap + gapExtra)) * scale;
     }
 }
 
@@ -931,10 +812,17 @@ void SynthPanel::paint (juce::Graphics& g)
 {
     if (assigningSource >= 0)
     {
-        g.setColour (modSourceColour (assigningSource));
-        g.setFont (juce::Font (juce::FontOptions (12.0f, juce::Font::bold)));
-        g.drawText ("Click a knob to modulate it with " + modSourceNames()[assigningSource] + "   (Esc cancels)",
-                    getLocalBounds().removeFromTop (22).withTrimmedLeft (kBand + (int) viewButtons.size() * 120 + 12), juce::Justification::centredLeft);
+        const auto colour = modSourceColour (assigningSource);
+        const auto text = "Click a knob to modulate it with " + modSourceNames()[assigningSource] + "   (Esc cancels)";
+        g.setFont (StacksLookAndFeel::font (11.5f, true));
+        auto pill = getLocalBounds().removeFromTop (22).toFloat();
+        const float w = (float) juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), text) + 24.0f;
+        pill = pill.removeFromRight (w + 4.0f).withHeight (20.0f);
+        g.setColour (colour.withAlpha (0.2f));
+        g.fillRoundedRectangle (pill, 10.0f);
+        g.setColour (colour);
+        g.drawRoundedRectangle (pill.reduced (0.5f), 10.0f, 1.0f);
+        g.drawText (text, pill.toNearestInt(), juce::Justification::centred);
     }
 }
 

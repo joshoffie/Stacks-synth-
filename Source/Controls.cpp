@@ -1,4 +1,5 @@
 #include "Controls.h"
+#include "StacksLookAndFeel.h"
 
 namespace stacks
 {
@@ -26,6 +27,7 @@ void loadThemeFile (const juce::File& file)
     pick ("accentDim",   colours::accentDim);
     pick ("text",        colours::text);
     pick ("muted",       colours::muted);
+    pick ("outline",     colours::outline);
     pick ("rowSound",    colours::rowSound);
     pick ("rowFilter",   colours::rowFilter);
     pick ("rowMovement", colours::rowMovement);
@@ -39,21 +41,27 @@ juce::Colour modSourceColour (int source)
 {
     switch (source)
     {
-        case SrcLfo1:       return juce::Colour (0xff5ec8c0);
-        case SrcLfo2:       return juce::Colour (0xff7fa7d8);
+        case SrcLfo1:       return juce::Colour (0xff3fd1c4);
+        case SrcLfo2:       return juce::Colour (0xff5c9dff);
         case SrcLfo3:       return juce::Colour (0xffa08cf0);
         case SrcLfo4:       return juce::Colour (0xfff08cc0);
-        case SrcFilterEnv:  return juce::Colour (0xffe8775a);
-        case SrcModEnv:     return juce::Colour (0xfff2a541);
+        case SrcFilterEnv:  return juce::Colour (0xffff6f61);
+        case SrcModEnv:     return juce::Colour (0xfff5a524);
         case SrcVelocity:   return juce::Colour (0xff8fd18f);
         case SrcKey:        return juce::Colour (0xffc8c86a);
         case SrcModWheel:   return juce::Colour (0xffd9a06a);
         case SrcMacro1: case SrcMacro2: case SrcMacro3: case SrcMacro4: case SrcMacro5: case SrcMacro6:
-                            return juce::Colour (0xffe0c070);   // the big knobs: gold
+                            return colours::rowMacro;
         case SrcAftertouch: return juce::Colour (0xffc08cf0);
         case SrcRandom:     return juce::Colour (0xffa0a0a0);
         default:            return colours::muted;
     }
+}
+
+void styleAsTab (juce::Button& b)
+{
+    b.getProperties().set ("tab", true);
+    b.setClickingTogglesState (false);
 }
 
 //==============================================================================
@@ -77,7 +85,7 @@ public:
         const auto local = p + getPosition().toFloat();          // overlay space -> knob space
         const float d = local.getDistanceFrom (b.getCentre());
         for (int i = 0; i < (int) knob.modulations.size(); ++i)
-            if (std::abs (d - knob.ringRadiusFor (i)) <= 3.5f)
+            if (std::abs (d - knob.ringRadiusFor (i)) <= 3.0f)
                 return i;
         return -1;
     }
@@ -118,19 +126,17 @@ ParamKnob::ParamKnob (juce::AudioProcessorValueTreeState& apvts, const ParamSpec
 {
     label.setText (spec.name, juce::dontSendNotification);
     label.setJustificationType (juce::Justification::centred);
-    label.setFont (juce::Font (juce::FontOptions (11.0f)));
+    label.setFont (StacksLookAndFeel::font (11.0f));
     label.setColour (juce::Label::textColourId, colours::muted);
-    addAndMakeVisible (label);
+    label.setInterceptsMouseClicks (false, false);
+    label.setVisible (! compact);
+    addChildComponent (label);
 
     slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-    if (compact)
-        slider.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
-    else
-        slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 58, 15);
+    slider.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
     slider.setTooltip (juce::String (spec.aiHint));
-    slider.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
-    slider.setColour (juce::Slider::textBoxTextColourId, colours::text);
-    slider.onValueChange = [this] { if (! modulations.empty()) repaint(); };
+    slider.onValueChange = [this] { if (showingValue) updateCaption(); if (! modulations.empty()) repaint(); };
+    slider.addMouseListener (this, false);   // enter / exit reach the cell, so the caption can switch to the value
     addAndMakeVisible (slider);
 
     attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (apvts, spec.id, slider);
@@ -140,21 +146,21 @@ ParamKnob::ParamKnob (juce::AudioProcessorValueTreeState& apvts, const ParamSpec
     overlay->toFront (false);
 }
 
-ParamKnob::~ParamKnob() = default;
+ParamKnob::~ParamKnob()
+{
+    slider.removeMouseListener (this);
+}
 
 juce::Rectangle<float> ParamKnob::knobBounds() const
 {
-    auto area = slider.getBounds();
-    if (! compact)
-        area.removeFromBottom (15);
-    const auto bounds = area.toFloat().reduced (10.0f);
+    const auto bounds = slider.getBounds().toFloat().reduced (StacksLookAndFeel::kKnobMargin);
     const float radius = juce::jmin (bounds.getWidth(), bounds.getHeight()) * 0.5f;
     return juce::Rectangle<float> (2.0f * radius, 2.0f * radius).withCentre (bounds.getCentre());
 }
 
 float ParamKnob::ringRadiusFor (int which) const
 {
-    return knobBounds().getWidth() * 0.5f + 2.5f + 3.2f * (float) which;
+    return knobBounds().getWidth() * 0.5f + 2.0f + 3.0f * (float) which;
 }
 
 bool ParamKnob::isInterestedInDragSource (const SourceDetails& details)
@@ -212,17 +218,15 @@ void ParamKnob::setAssignMode (bool on, juce::Colour sourceColour)
     assignMode = on && isModulatableParam (paramIndex);
     assignColour = sourceColour;
     // JUCE hit-testing always descends into children that accept clicks, so in
-    // assign mode the slider and label must step aside for the cell to get the click.
+    // assign mode the slider must step aside for the cell to get the click.
     slider.setInterceptsMouseClicks (! assignMode, ! assignMode);
-    label.setInterceptsMouseClicks (! assignMode, ! assignMode);
     setMouseCursor (assignMode ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
 
     // While assigning, the whole cell is one "Assign to <name>" button for
     // accessibility too; otherwise the slider speaks for itself.
     slider.setAccessible (! assignMode);
-    label.setAccessible (! assignMode);
     setAccessible (assignMode);
-    setTitle (assignMode ? "Assign to " + label.getText() : juce::String());
+    setTitle (assignMode ? "Assign to " + juce::String (spec ((P) paramIndex).name) : juce::String());
     invalidateAccessibilityHandler();
     repaint();
 }
@@ -231,6 +235,43 @@ void ParamKnob::mouseDown (const juce::MouseEvent&)
 {
     if (assignMode && onAssignClick)
         onAssignClick (paramIndex);
+}
+
+// The caption reads the value while the mouse is on the knob (and while it is
+// being dragged), the name otherwise.
+void ParamKnob::mouseEnter (const juce::MouseEvent&)
+{
+    showingValue = true;
+    updateCaption();
+}
+
+void ParamKnob::mouseExit (const juce::MouseEvent&)
+{
+    if (slider.isMouseButtonDown())
+        return;
+    showingValue = false;
+    updateCaption();
+}
+
+void ParamKnob::updateCaption()
+{
+    if (compact || paramIndex < 0)
+        return;
+    const auto& s = spec ((P) paramIndex);
+    if (showingValue)
+    {
+        auto text = slider.getTextFromValue (slider.getValue());
+        const juce::String unit (s.unit);
+        if (unit.isNotEmpty() && ! text.endsWith (unit) && ! text.endsWithChar ('k') && ! text.endsWith ("ms"))
+            text << " " << unit;
+        label.setText (text, juce::dontSendNotification);
+        label.setColour (juce::Label::textColourId, colours::text);
+    }
+    else
+    {
+        label.setText (s.name, juce::dontSendNotification);
+        label.setColour (juce::Label::textColourId, large ? colours::text : colours::muted);
+    }
 }
 
 std::unique_ptr<juce::AccessibilityHandler> ParamKnob::createAccessibilityHandler()
@@ -243,11 +284,11 @@ std::unique_ptr<juce::AccessibilityHandler> ParamKnob::createAccessibilityHandle
         }));
 }
 
-void ParamKnob::setLarge (bool large)
+void ParamKnob::setLarge (bool isLarge)
 {
-    label.setFont (juce::Font (juce::FontOptions (large ? 15.0f : 11.0f, large ? juce::Font::bold : juce::Font::plain)));
+    large = isLarge;
+    label.setFont (StacksLookAndFeel::font (large ? 14.0f : 11.0f, large));
     label.setColour (juce::Label::textColourId, large ? colours::text : colours::muted);
-    if (! compact) slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, large ? 80 : 58, large ? 20 : 15);
     resized();
 }
 
@@ -259,7 +300,8 @@ void ParamKnob::clearLiveValue()
 void ParamKnob::resized()
 {
     auto r = getLocalBounds();
-    label.setBounds (r.removeFromTop (label.getFont().getHeight() > 13.0f ? 22 : 14));
+    if (! compact)
+        label.setBounds (r.removeFromBottom (large ? 22 : kCaptionH));
     slider.setBounds (r);
     if (overlay) overlay->setBounds (r);
 }
@@ -269,16 +311,16 @@ void ParamKnob::paint (juce::Graphics& g)
     if (assignMode || dragOver)
     {
         const auto c = dragOver ? dragColour : assignColour;
-        g.setColour (c.withAlpha (dragOver ? 0.3f : 0.18f));
+        g.setColour (c.withAlpha (dragOver ? 0.3f : 0.16f));
         g.fillRoundedRectangle (getLocalBounds().toFloat().reduced (1.0f), 5.0f);
         g.setColour (c);
-        g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (1.0f), 5.0f, 1.5f);
+        g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (1.0f), 5.0f, 1.2f);
     }
 
     if (modulations.empty())
         return;
 
-    // Mirror LookAndFeel_V4's rotary geometry so the rings sit just outside the knob arc.
+    // Mirror the look-and-feel's rotary geometry so the rings sit just outside the knob arc.
     const auto kb = knobBounds();
     const auto centre = kb.getCentre();
     const auto rotary = slider.getRotaryParameters();
@@ -302,11 +344,11 @@ void ParamKnob::paint (juce::Graphics& g)
         ring.addCentredArc (centre.x, centre.y, ringRadius, ringRadius, 0.0f,
                             rotary.startAngleRadians + from * span, rotary.startAngleRadians + to * span, true);
         g.setColour (modSourceColour (source).withAlpha (0.95f));
-        g.strokePath (ring, juce::PathStrokeType (2.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        g.strokePath (ring, juce::PathStrokeType (2.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
         // a dot at the knob's own value, so the ring reads as "around here"
         const float a = rotary.startAngleRadians + v0 * span;
-        g.fillEllipse (centre.x + ringRadius * std::sin (a) - 1.8f, centre.y - ringRadius * std::cos (a) - 1.8f, 3.6f, 3.6f);
+        g.fillEllipse (centre.x + ringRadius * std::sin (a) - 1.6f, centre.y - ringRadius * std::cos (a) - 1.6f, 3.2f, 3.2f);
     }
 
     // Live marker: where the modulation has the value right now.
@@ -318,9 +360,9 @@ void ParamKnob::paint (juce::Graphics& g)
         juce::Path sweep;
         sweep.addCentredArc (centre.x, centre.y, outer, outer, 0.0f, juce::jmin (a0, a1), juce::jmax (a0, a1), true);
         g.setColour (colours::text.withAlpha (0.85f));
-        g.strokePath (sweep, juce::PathStrokeType (2.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        g.strokePath (sweep, juce::PathStrokeType (2.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
         g.setColour (colours::text);
-        g.fillEllipse (centre.x + outer * std::sin (a1) - 3.0f, centre.y - outer * std::cos (a1) - 3.0f, 6.0f, 6.0f);
+        g.fillEllipse (centre.x + outer * std::sin (a1) - 2.6f, centre.y - outer * std::cos (a1) - 2.6f, 5.2f, 5.2f);
     }
 }
 
@@ -329,7 +371,7 @@ ParamChoice::ParamChoice (juce::AudioProcessorValueTreeState& apvts, const Param
 {
     label.setText (spec.name, juce::dontSendNotification);
     label.setJustificationType (juce::Justification::centred);
-    label.setFont (juce::Font (juce::FontOptions (11.0f)));
+    label.setFont (StacksLookAndFeel::font (11.0f));
     label.setColour (juce::Label::textColourId, colours::muted);
     addAndMakeVisible (label);
 
@@ -343,8 +385,66 @@ ParamChoice::ParamChoice (juce::AudioProcessorValueTreeState& apvts, const Param
 void ParamChoice::resized()
 {
     auto r = getLocalBounds();
-    label.setBounds (r.removeFromTop (14));
-    combo.setBounds (r.withSizeKeepingCentre (r.getWidth() - 2, 22));
+    label.setBounds (r.removeFromBottom (ParamKnob::kCaptionH));
+    combo.setBounds (r.withSizeKeepingCentre (juce::jmin (r.getWidth() - 4, 96), 22));
+}
+
+//==============================================================================
+StacksKeyboard::StacksKeyboard (juce::MidiKeyboardState& state)
+    : juce::MidiKeyboardComponent (state, juce::MidiKeyboardComponent::horizontalKeyboard)
+{
+    setAvailableRange (21, 108);   // A0 to C8
+    setScrollButtonsVisible (false);
+    setBlackNoteLengthProportion (0.62f);
+    setBlackNoteWidthProportion (0.6f);
+    setColour (juce::MidiKeyboardComponent::keySeparatorLineColourId, juce::Colour (0xff0b0c0e));
+    setColour (juce::MidiKeyboardComponent::shadowColourId, juce::Colours::transparentBlack);
+}
+
+void StacksKeyboard::resized()
+{
+    setKeyWidth (juce::jmax (4.0f, (float) getWidth() / 52.0f));   // 52 white keys across the full width
+    juce::MidiKeyboardComponent::resized();
+}
+
+void StacksKeyboard::drawWhiteNote (int midiNoteNumber, juce::Graphics& g, juce::Rectangle<float> area, bool isDown, bool isOver,
+                                    juce::Colour, juce::Colour)
+{
+    auto key = area.reduced (0.5f, 0.0f).withTrimmedBottom (1.0f);
+    juce::Colour top (0xffe4e6ea), bottom (0xffc9ccd2);
+    if (isDown)      { top = colours::accent.brighter (0.2f); bottom = colours::accent; }
+    else if (isOver) { top = juce::Colour (0xfff2f3f5); bottom = juce::Colour (0xffd9dce1); }
+    juce::ColourGradient grad (top, 0.0f, key.getY(), bottom, 0.0f, key.getBottom(), false);
+    g.setGradientFill (grad);
+    g.fillRoundedRectangle (key, 2.0f);
+    g.setColour (juce::Colours::black.withAlpha (0.35f));
+    g.drawLine (key.getRight(), key.getY(), key.getRight(), key.getBottom(), 1.0f);
+
+    const auto text = getWhiteNoteText (midiNoteNumber);
+    if (text.isNotEmpty())
+    {
+        g.setColour (isDown ? juce::Colours::white : juce::Colour (0xff6b7079));
+        g.setFont (StacksLookAndFeel::font (juce::jmin (9.5f, key.getWidth() * 0.45f)));
+        g.drawText (text, key.withTrimmedBottom (2.0f).toNearestInt(), juce::Justification::centredBottom, false);
+    }
+}
+
+void StacksKeyboard::drawBlackNote (int, juce::Graphics& g, juce::Rectangle<float> area, bool isDown, bool isOver, juce::Colour)
+{
+    auto key = area.reduced (0.5f, 0.0f);
+    juce::Colour top (0xff33373d), bottom (0xff15171a);
+    if (isDown)      { top = colours::accent; bottom = colours::accent.darker (0.4f); }
+    else if (isOver) { top = juce::Colour (0xff454a52); bottom = juce::Colour (0xff22252a); }
+    g.setColour (juce::Colour (0xff0b0c0e));
+    g.fillRoundedRectangle (key, 2.0f);
+    juce::ColourGradient grad (top, 0.0f, key.getY(), bottom, 0.0f, key.getBottom(), false);
+    g.setGradientFill (grad);
+    g.fillRoundedRectangle (key.reduced (1.0f, 0.0f).withTrimmedBottom (2.0f), 1.5f);
+}
+
+juce::String StacksKeyboard::getWhiteNoteText (int midiNoteNumber)
+{
+    return midiNoteNumber % 12 == 0 ? "C" + juce::String (midiNoteNumber / 12 - 1) : juce::String();
 }
 
 } // namespace stacks

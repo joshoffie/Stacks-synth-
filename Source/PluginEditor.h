@@ -33,14 +33,15 @@ private:
     StacksAudioProcessor& synthProcessor;
     StacksLookAndFeel lookAndFeel;
 
-    juce::Label title, patchName;
+    juce::Label patchName;
     ParamKnob masterKnob;
     ScopeView scope;
     TunerView tuner;
     juce::TextButton settingsButton, undoButton, redoButton;
     SynthPanel synthPanel;
     LabPanel labPanel;
-    juce::MidiKeyboardComponent keyboard;
+    StacksKeyboard keyboard;
+    juce::Rectangle<int> headerBounds;
     juce::TooltipWindow tooltips { this, 600 };
 };
 

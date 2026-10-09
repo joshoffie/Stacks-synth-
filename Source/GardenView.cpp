@@ -160,7 +160,8 @@ juce::Point<float> GardenView::seedCentre() const
 
 float GardenView::branchLength() const
 {
-    const float room = juce::jmin (getWidth(), getHeight()) * 0.5f - 30.0f;
+    // Leaves need their names beside them: keep 84 px free at the sides.
+    const float room = juce::jmin ((float) getWidth() * 0.5f - 84.0f, (float) getHeight() * 0.5f - 34.0f);
     const float v = getVariation ? getVariation() : 0.5f;
     return juce::jlimit (kSeedRadius + 30.0f, room, kSeedRadius + 40.0f + v * (room - kSeedRadius - 40.0f));
 }
@@ -358,12 +359,15 @@ void GardenView::paint (juce::Graphics& g)
         const auto anchor = pos + unit * (kLeafRadius + 6.0f);
         const bool right = unit.x >= 0.0f;
         juce::Rectangle<float> box (right ? anchor.x : anchor.x - 90.0f, anchor.y - 8.0f, 90.0f, 16.0f);
+        // Never off the edge: a label near the side swings to where there is room.
+        if (box.getX() < 2.0f)                           box.setX (2.0f);
+        if (box.getRight() > (float) getWidth() - 2.0f)  box.setX ((float) getWidth() - 2.0f - box.getWidth());
         g.setColour (i == lab.auditioned ? colours::text : colours::muted);
         g.drawFittedText (leaf.name, box.toNearestInt(), right ? juce::Justification::centredLeft : juce::Justification::centredRight, 1);
     }
 
-    // Caption / hover description
-    auto footer = getLocalBounds().removeFromBottom (34).reduced (6, 0);
+    // The hovered leaf's description, or what the model is doing; nothing otherwise.
+    auto footer = getLocalBounds().removeFromBottom (30).reduced (6, 0);
     g.setColour (colours::muted);
     g.setFont (juce::Font (juce::FontOptions (10.5f)));
     juce::String text;
@@ -372,18 +376,9 @@ void GardenView::paint (juce::Graphics& g)
     else if (generating)
         text = lab.progressDetail.isNotEmpty() ? lab.progressDetail : "growing...";
     else if (lab.candidates.empty())
-        text = "Describe a sound above and press Generate to grow the first leaves. Click a leaf to hear it, drag it in or out to blend it with the seed.";
-    else
-        text = lab.seedIsPatch ? "click a leaf: hear   -   click the seed: hear the parent again   -   drag a leaf in or out: blend it with the seed, live   -   right-click: plant or save"
-                               : "click a leaf: hear   -   drag a leaf outward: wilder   -   right-click a leaf: plant it   -   Evolve grows from what you're hearing";
-    g.drawFittedText (text, footer, juce::Justification::centred, 2, 0.9f);
-
-    if (lab.generation > 0)
-    {
-        g.setColour (colours::muted);
-        g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
-        g.drawText ("GEN " + juce::String (lab.generation), getLocalBounds().removeFromTop (14).withTrimmedLeft (6), juce::Justification::centredLeft);
-    }
+        text = "Describe a sound and press Generate";
+    if (text.isNotEmpty())
+        g.drawFittedText (text, footer, juce::Justification::centred, 2, 0.9f);
 }
 
 } // namespace stacks

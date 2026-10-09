@@ -1,11 +1,12 @@
 #include "ModulatorsPanel.h"
+#include "StacksLookAndFeel.h"
 
 namespace stacks
 {
 
 namespace
 {
-    constexpr int kRowH = 22;
+    constexpr int kRowH = 20;
 
     int sourceForTab (int tab)
     {
@@ -18,6 +19,12 @@ namespace
             case 4: return SrcModEnv;
             default: return SrcVelocity;
         }
+    }
+
+    const char* tabName (int tab)
+    {
+        static const char* names[] = { "LFO 1", "LFO 2", "LFO 3", "LFO 4", "MOD ENV", "MORE" };
+        return names[juce::jlimit (0, 5, tab)];
     }
 }
 
@@ -120,15 +127,14 @@ void LfoDisplay::mouseDoubleClick (const juce::MouseEvent& e)
 void LfoDisplay::paint (juce::Graphics& g)
 {
     auto r = getLocalBounds().toFloat();
-    g.setColour (colours::background);
-    g.fillRoundedRectangle (r, 5.0f);
+    StacksLookAndFeel::drawInset (g, r);
 
     // grid
-    g.setColour (juce::Colours::white.withAlpha (0.06f));
+    g.setColour (juce::Colours::white.withAlpha (0.05f));
     const auto inner = r.reduced (4.0f);
     for (int i = 1; i < 4; ++i)
         g.drawVerticalLine ((int) (inner.getX() + inner.getWidth() * (float) i / 4.0f), inner.getY(), inner.getBottom());
-    g.setColour (juce::Colours::white.withAlpha (0.12f));
+    g.setColour (juce::Colours::white.withAlpha (0.1f));
     g.drawHorizontalLine ((int) inner.getCentreY(), inner.getX(), inner.getRight());
 
     // shape
@@ -143,14 +149,20 @@ void LfoDisplay::paint (juce::Graphics& g)
         const auto s = toScreen ({ x, y });
         if (i == 0) path.startNewSubPath (s); else path.lineTo (s);
     }
+    juce::Path fill (path);
+    fill.lineTo (toScreen ({ 1.0f, 0.0f }));
+    fill.lineTo (toScreen ({ 0.0f, 0.0f }));
+    fill.closeSubPath();
+    g.setColour (colour.withAlpha (0.12f));
+    g.fillPath (fill);
     g.setColour (colour);
-    g.strokePath (path, juce::PathStrokeType (2.0f));
+    g.strokePath (path, juce::PathStrokeType (1.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
     if (shape == ShapeRandom)
     {
         g.setColour (colours::muted);
-        g.setFont (juce::Font (juce::FontOptions (11.0f)));
-        g.drawText ("random: a new value every cycle", inner, juce::Justification::centred);
+        g.setFont (StacksLookAndFeel::font (10.5f));
+        g.drawText ("new value every cycle", inner, juce::Justification::centred);
     }
 
     // points when custom
@@ -161,7 +173,7 @@ void LfoDisplay::paint (juce::Graphics& g)
         {
             const auto s = toScreen (p);
             g.setColour (colours::text);
-            g.fillEllipse (s.x - 3.5f, s.y - 3.5f, 7.0f, 7.0f);
+            g.fillEllipse (s.x - 3.0f, s.y - 3.0f, 6.0f, 6.0f);
         }
     }
 
@@ -169,23 +181,21 @@ void LfoDisplay::paint (juce::Graphics& g)
     if (processor.calmMode()) return;
     const float phase = processor.lfoDisplayPhase (lfo) + processor.apvts.getRawParameterValue (paramId (lfoPhaseParam (lfo)))->load();
     const float px = inner.getX() + (phase - std::floor (phase)) * inner.getWidth();
-    g.setColour (colours::text.withAlpha (0.5f));
+    g.setColour (colours::text.withAlpha (0.45f));
     g.drawVerticalLine ((int) px, inner.getY(), inner.getBottom());
 }
 
 //==============================================================================
 ModulatorsPanel::ModulatorsPanel (StacksAudioProcessor& p) : processor (p)
 {
-    const char* names[kNumTabs] = { "LFO 1", "LFO 2", "LFO 3", "LFO 4", "MOD ENV", "MORE" };
     for (int t = 0; t < kNumTabs; ++t)
     {
         auto& b = tabButtons[t];
-        b.setButtonText (names[t]);
+        b.setButtonText (tabName (t));
         b.source = sourceForTab (t);
         b.setTooltip (t == TabSources ? "Velocity, key, wheel, aftertouch, random" : "Click to edit. Drag onto any knob to connect it.");
-        b.setClickingTogglesState (false);
-        b.setColour (juce::TextButton::buttonOnColourId, modSourceColour (sourceForTab (t)).withAlpha (0.35f));
-        b.setColour (juce::TextButton::textColourOnId, colours::text);
+        styleAsTab (b);
+        b.setColour (juce::TextButton::buttonOnColourId, modSourceColour (sourceForTab (t)));
         b.onClick = [this, t] { showTab (t); };
         addAndMakeVisible (b);
     }
@@ -203,12 +213,7 @@ ModulatorsPanel::ModulatorsPanel (StacksAudioProcessor& p) : processor (p)
     sourcePicker.onChange = [this] { refreshConnections(); };
     addChildComponent (sourcePicker);
 
-    hintLabel.setFont (juce::Font (juce::FontOptions (11.0f)));
-    hintLabel.setColour (juce::Label::textColourId, colours::muted);
-    hintLabel.setJustificationType (juce::Justification::centredLeft);
-    addAndMakeVisible (hintLabel);
-
-    assignButton.setButtonText ("Assign  >");
+    assignButton.setButtonText ("Assign");
     assignButton.setTooltip ("Then click any knob to modulate it (click here again to cancel)");
     assignButton.onClick = [this]
     {
@@ -222,8 +227,16 @@ ModulatorsPanel::ModulatorsPanel (StacksAudioProcessor& p) : processor (p)
     virtualButton.onClick = [this] { addVirtualTargetMenu(); };
     addAndMakeVisible (virtualButton);
 
+    emptyLabel.setText ("no connections", juce::dontSendNotification);
+    emptyLabel.setFont (StacksLookAndFeel::font (10.5f));
+    emptyLabel.setColour (juce::Label::textColourId, colours::muted.withAlpha (0.7f));
+    emptyLabel.setJustificationType (juce::Justification::centred);
+    emptyLabel.setInterceptsMouseClicks (false, false);
+    addChildComponent (emptyLabel);
+
     viewport.setViewedComponent (&list, false);
     viewport.setScrollBarsShown (true, false);
+    viewport.setScrollBarThickness (6);
     addAndMakeVisible (viewport);
 
     processor.labBroadcaster.addChangeListener (this);
@@ -244,8 +257,8 @@ void ModulatorsPanel::setAssigning (int source)
 {
     assigningSource = source;
     const bool on = source >= 0;
-    assignButton.setButtonText (on ? "Click a knob..." : "Assign  >");
-    assignButton.setColour (juce::TextButton::buttonColourId, on ? modSourceColour (source) : juce::Colour (0xff343943));
+    assignButton.setButtonText (on ? "Click a knob..." : "Assign");
+    assignButton.setColour (juce::TextButton::buttonColourId, on ? modSourceColour (source) : juce::Colour (0xff23272d));
     assignButton.setColour (juce::TextButton::textColourOffId, on ? juce::Colours::black : colours::text);
 }
 
@@ -282,7 +295,6 @@ void ModulatorsPanel::showTab (int tab)
         add (lfoModeParam (k), false);
         add (lfoRateParam (k), true);
         add (lfoPhaseParam (k), true);
-        hintLabel.setText ("Draw in the display to make your own shape.", juce::dontSendNotification);
     }
     else if (tab == TabModEnv)
     {
@@ -293,11 +305,6 @@ void ModulatorsPanel::showTab (int tab)
             addAndMakeVisible (*kn);
             content.push_back (std::move (kn));
         }
-        hintLabel.setText ("A third envelope, free for anything: attacks on FM, filter sweeps, pitch drops.", juce::dontSendNotification);
-    }
-    else
-    {
-        hintLabel.setText ("How you play: velocity, key position, mod wheel, aftertouch, a random value per note.", juce::dontSendNotification);
     }
 
     refreshConnections();
@@ -324,8 +331,9 @@ void ModulatorsPanel::refreshConnections()
         auto row = std::make_unique<Row>();
         const int target = (int) processor.apvts.getRawParameterValue (paramId (modDestParam (slot)))->load();
         row->name.setText (modTargetNames()[juce::jlimit (0, modTargetNames().size() - 1, target)], juce::dontSendNotification);
-        row->name.setFont (juce::Font (juce::FontOptions (11.5f)));
+        row->name.setFont (StacksLookAndFeel::font (11.0f));
         row->name.setColour (juce::Label::textColourId, colours::text);
+        row->name.setInterceptsMouseClicks (false, false);
         row->depth.setSliderStyle (juce::Slider::LinearHorizontal);
         row->depth.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
         row->depth.setPopupDisplayEnabled (true, false, this);
@@ -333,7 +341,9 @@ void ModulatorsPanel::refreshConnections()
         row->depth.setColour (juce::Slider::thumbColourId, colours::text);
         row->depth.setTooltip ("Depth: drag left/right (negative inverts)");
         row->attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (processor.apvts, paramId (modAmountParam (slot)), row->depth);
+        row->remove.setButtonText (juce::String::fromUTF8 ("\xc3\x97"));   // ×
         row->remove.setTooltip ("Remove this connection");
+        styleAsTab (row->remove);
         row->remove.onClick = [this, slot] { processor.clearModulation (slot); };
         list.addAndMakeVisible (row->name);
         list.addAndMakeVisible (row->depth);
@@ -344,8 +354,7 @@ void ModulatorsPanel::refreshConnections()
     for (int t = 0; t < kNumTabs; ++t)
     {
         const int count = (int) processor.modulationsFor (sourceForTab (t)).size();
-        const char* names[kNumTabs] = { "LFO 1", "LFO 2", "LFO 3", "LFO 4", "MOD ENV", "MORE" };
-        tabButtons[t].setButtonText (count > 0 && t != TabSources ? juce::String (names[t]) + " (" + juce::String (count) + ")" : juce::String (names[t]));
+        tabButtons[t].setButtonText (count > 0 && t != TabSources ? juce::String (tabName (t)) + " " + juce::String (count) : juce::String (tabName (t)));
     }
 
     resized();
@@ -359,60 +368,59 @@ void ModulatorsPanel::paint (juce::Graphics& g)
 void ModulatorsPanel::resized()
 {
     auto r = getLocalBounds();
-    auto tabs = r.removeFromTop (22);
-    const int tabW = juce::jmin (84, tabs.getWidth() / kNumTabs);
+    auto tabs = r.removeFromTop (20);
+    const int tabW = juce::jmin (74, tabs.getWidth() / kNumTabs);
     for (auto& b : tabButtons)
-        b.setBounds (tabs.removeFromLeft (tabW).reduced (1, 0));
-    r.removeFromTop (6);
+        b.setBounds (tabs.removeFromLeft (tabW));
+    r.removeFromTop (4);
 
-    auto right = r.removeFromRight (224);
+    auto right = r.removeFromRight (juce::jmin (236, r.getWidth() / 3));
+    r.removeFromRight (8);
     auto body = r;
 
+    const int cell = 62, cellH = juce::jmin (70, body.getHeight());
     if (currentTab <= TabLfo4)
     {
-        auto left = body.removeFromLeft (204);
-        if (display) display->setBounds (left.withTrimmedBottom (14));
-        hintLabel.setBounds (left.removeFromBottom (14));
-        body.removeFromLeft (8);
-        auto combos = body.removeFromLeft (94);
+        auto knobsArea = body.removeFromRight (2 * cell);
+        body.removeFromRight (4);
+        auto combos = body.removeFromRight (92);
+        body.removeFromRight (6);
+        if (display) display->setBounds (body);
+        const int comboH = juce::jmin (36, combos.getHeight() / 3);
         for (int i = 0; i < 3 && i < (int) content.size(); ++i)
-        {
-            content[(size_t) i]->setBounds (combos.removeFromTop (38));
-            combos.removeFromTop (2);
-        }
-        body.removeFromLeft (6);
+            content[(size_t) i]->setBounds (combos.removeFromTop (comboH));
+        auto knobRow = knobsArea.withSizeKeepingCentre (knobsArea.getWidth(), cellH);
         for (int i = 3; i < (int) content.size(); ++i)
-            content[(size_t) i]->setBounds (body.removeFromLeft (60).withHeight (86));
+            content[(size_t) i]->setBounds (knobRow.removeFromLeft (cell));
     }
     else if (currentTab == TabModEnv)
     {
+        auto knobRow = body.withSizeKeepingCentre (body.getWidth(), cellH);
         for (auto& c : content)
-            c->setBounds (body.removeFromLeft (60).withHeight (86));
-        body.removeFromLeft (8);
-        hintLabel.setBounds (body.withHeight (86).reduced (0, 30));
+            c->setBounds (knobRow.removeFromLeft (cell));
     }
     else
     {
-        sourcePicker.setBounds (body.removeFromTop (24).removeFromLeft (170));
-        body.removeFromTop (6);
-        hintLabel.setBounds (body.removeFromTop (28));
+        sourcePicker.setBounds (body.removeFromTop (22).removeFromLeft (180));
     }
 
-    auto buttons = right.removeFromTop (24);
-    assignButton.setBounds (buttons.removeFromLeft (104));
+    auto buttons = right.removeFromTop (22);
+    assignButton.setBounds (buttons.removeFromLeft (juce::jmin (96, buttons.getWidth() / 2)));
     buttons.removeFromLeft (4);
     virtualButton.setBounds (buttons);
     right.removeFromTop (4);
     viewport.setBounds (right);
+    emptyLabel.setBounds (right);
+    emptyLabel.setVisible (rows.empty());
 
     const int width = viewport.getWidth() - (viewport.isVerticalScrollBarShown() ? viewport.getScrollBarThickness() : 0);
     list.setSize (juce::jmax (1, width), (int) rows.size() * kRowH);
     int y = 0;
     for (auto& row : rows)
     {
-        auto rr = juce::Rectangle<int> (0, y, width, kRowH).reduced (0, 1);
-        row->remove.setBounds (rr.removeFromRight (20));
-        row->name.setBounds (rr.removeFromLeft (96));
+        auto rr = juce::Rectangle<int> (0, y, width, kRowH);
+        row->remove.setBounds (rr.removeFromRight (22));
+        row->name.setBounds (rr.removeFromLeft (juce::jmin (96, rr.getWidth() / 2)));
         row->depth.setBounds (rr);
         y += kRowH;
     }

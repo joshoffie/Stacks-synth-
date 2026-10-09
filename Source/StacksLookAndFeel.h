@@ -5,8 +5,8 @@
 namespace stacks
 {
 
-// The plug-in's look: a warm dark palette, one display typeface, shaded knobs
-// with a glowing value arc, flat rounded buttons and menus.
+// The plug-in's look: graphite surfaces, one display typeface, flat knobs
+// with a coloured value arc and pointer, flat buttons, underlined tabs.
 class StacksLookAndFeel : public juce::LookAndFeel_V4
 {
 public:
@@ -14,6 +14,14 @@ public:
 
     static juce::String displayFontName();                    // the typeface the whole UI uses
     static juce::Font font (float height, bool bold = false); // a Font in that typeface
+
+    // Space kept around a rotary knob inside its slider bounds (room for the
+    // modulation rings). ParamKnob mirrors this to place the rings.
+    static constexpr float kKnobMargin = 7.0f;
+
+    // Section cards and small framed displays share this treatment.
+    static void drawCard (juce::Graphics&, juce::Rectangle<float>, float corner = 6.0f);
+    static void drawInset (juce::Graphics&, juce::Rectangle<float>, float corner = 4.0f);
 
     juce::Typeface::Ptr getTypefaceForFont (const juce::Font&) override;
     juce::Font getLabelFont (juce::Label&) override;
@@ -29,6 +37,7 @@ public:
                            float minSliderPos, float maxSliderPos, juce::Slider::SliderStyle, juce::Slider&) override;
     void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour& backgroundColour,
                                bool shouldDrawButtonAsHighlighted, bool shouldDrawButtonAsDown) override;
+    void drawButtonText (juce::Graphics&, juce::TextButton&, bool shouldDrawButtonAsHighlighted, bool shouldDrawButtonAsDown) override;
     void drawToggleButton (juce::Graphics&, juce::ToggleButton&, bool shouldDrawButtonAsHighlighted, bool shouldDrawButtonAsDown) override;
     void drawComboBox (juce::Graphics&, int width, int height, bool isButtonDown, int buttonX, int buttonY,
                        int buttonW, int buttonH, juce::ComboBox&) override;
@@ -36,6 +45,8 @@ public:
     void fillTextEditorBackground (juce::Graphics&, int width, int height, juce::TextEditor&) override;
     void drawTextEditorOutline (juce::Graphics&, int width, int height, juce::TextEditor&) override;
     void drawPopupMenuBackground (juce::Graphics&, int width, int height) override;
+    void drawScrollbar (juce::Graphics&, juce::ScrollBar&, int x, int y, int width, int height, bool isScrollbarVertical,
+                        int thumbStartPosition, int thumbSize, bool isMouseOver, bool isMouseDown) override;
     juce::Label* createSliderTextBox (juce::Slider&) override;
 
 private:

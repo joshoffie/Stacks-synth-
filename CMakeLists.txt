@@ -134,6 +134,7 @@ target_sources(Stacks PRIVATE
     Source/Sampler.cpp
     ThirdParty/MTS-ESP/libMTSClient.cpp
     Source/PatchGenerator.cpp
+    Source/QuickTweak.cpp
     Source/ai/OllamaBackend.cpp
     Source/ai/LlamaBackend.cpp
     Source/ai/ModelManager.cpp
@@ -181,6 +182,7 @@ target_sources(StacksTests PRIVATE
     Source/Wavetable.cpp
     Source/Patch.cpp
     Source/PatchGenerator.cpp
+    Source/QuickTweak.cpp
     Source/Arpeggiator.cpp
     Source/Sampler.cpp
     ThirdParty/MTS-ESP/libMTSClient.cpp

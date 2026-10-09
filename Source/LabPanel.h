@@ -17,7 +17,7 @@ class PatchCard : public juce::Component,
 {
 public:
     enum class Style { nowPlaying, ai, random };
-    static constexpr int kHeight = 60, kCompactHeight = 50;
+    static constexpr int kHeight = 58, kCompactHeight = 46;
 
     PatchCard();
     void set (const Patch&, Style, bool isAuditioned, bool isFavourite, int changesFromSeed = -1);
@@ -41,7 +41,7 @@ private:
 class SectionHeader : public juce::Component
 {
 public:
-    static constexpr int kHeight = 24;
+    static constexpr int kHeight = 22;
     void set (const juce::String& title, bool collapsible, bool expanded, juce::Colour colour);
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override { if (collapsible && onToggle) onToggle(); }
@@ -70,8 +70,7 @@ private:
     int done = 0, total = 0;
 };
 
-// The generate -> audition -> pick -> evolve workflow.
-// The prompt box. It never takes the keyboard on its own (a host's musical
+// A text box that never takes the keyboard on its own (a host's musical
 // typing must keep working when the plug-in window comes to the front); it
 // takes focus when you click it and gives it back when you click away or press
 // Escape.
@@ -94,6 +93,8 @@ public:
     }
 };
 
+// The generate -> audition -> pick -> evolve workflow, plus quick tweaks of
+// the playing sound.
 class LabPanel : public juce::Component,
                  public juce::FileDragAndDropTarget,
                  private juce::ChangeListener,
@@ -118,12 +119,13 @@ private:
     enum class View { garden, tree, ideas, library, explain };
     void showView (View);
     void savePresetDialog();                               // folder + name, saves exactly what's playing
+    void scrollTreeToNewest();
 
     StacksAudioProcessor& processor;
 
-    juce::Label header, variationLabel, status;
+    juce::Label header, generationLabel, variationLabel, status;
     ProgressStrip progressStrip;
-    PromptEditor hint;
+    PromptEditor hint, tweak;
     juce::Slider variation;
     juce::ToggleButton designWavesToggle { "Design wavetables" };
     juce::TextButton savePresetButton;
@@ -145,8 +147,8 @@ private:
     bool randomExpanded = false, randomExpandedByUser = false;
     juce::String shownNowPlaying;
 
-
     int shownGeneration = -1;
+    int treeGeneration = -1;
 };
 
 } // namespace stacks

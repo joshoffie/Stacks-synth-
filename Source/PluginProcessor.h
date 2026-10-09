@@ -8,6 +8,7 @@
 #include "Patch.h"
 #include "LfoTable.h"
 #include "PatchGenerator.h"
+#include "QuickTweak.h"
 #include "Effects.h"
 #include "Arpeggiator.h"
 #include "Sampler.h"
@@ -33,6 +34,7 @@ struct LabState
     juce::String explanation, modelExplanation; // quick tips, and the model's streamed explanation
     juce::String explanationKey;                // which sound they describe
     bool explaining = false;
+    bool tweaking = false;                      // a quick tweak is with the model
     juce::String progressDetail;                // what the model is doing right now
 };
 
@@ -107,6 +109,11 @@ public:
     // Why it sounds like this: quick tips at once, then the model's explanation streams in.
     void explainCurrentPatch();
     juce::String currentExplanationKey() const;
+
+    // Quick tweak: a few words ("slightly brighter", "more reverb") change the
+    // playing sound in place. Plain words act at once; anything else goes to the
+    // model and lands a moment later. One undo step either way.
+    void quickTweak (const juce::String& request);
 
     // Tags on the playing sound and on saved files
     const juce::StringArray& currentTags() const           { return patchTags; }
@@ -325,6 +332,8 @@ private:
     juce::String patchCategory, patchOrigin, patchFile;    // of the loaded patch, for the Now Playing card
     juce::StringArray patchTags;
     std::atomic<int> explainToken { 0 };
+    std::atomic<int> tweakToken { 0 };
+    void applyTweak (const std::vector<TweakChange>&, const juce::String& summary);
     bool patchFavourite = false;
     Patch loadedSnapshot;                                  // values as loaded, to spot edits
     std::vector<Patch> undoStack, redoStack;

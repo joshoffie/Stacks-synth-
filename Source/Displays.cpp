@@ -17,10 +17,7 @@ namespace
 
     void frame (juce::Graphics& g, juce::Rectangle<float> r)
     {
-        g.setColour (colours::background);
-        g.fillRoundedRectangle (r, 4.0f);
-        g.setColour (juce::Colours::white.withAlpha (0.05f));
-        g.drawRoundedRectangle (r.reduced (0.5f), 4.0f, 1.0f);
+        StacksLookAndFeel::drawInset (g, r);
     }
 }
 
@@ -144,9 +141,9 @@ void EnvelopeDisplay::timerCallback()
 
 void EnvelopeDisplay::paint (juce::Graphics& g)
 {
-    auto r0 = getLocalBounds().toFloat().reduced (2.0f, 15.0f).withTrimmedBottom (2.0f);
+    auto r0 = getLocalBounds().toFloat();
     frame (g, r0);
-    auto inner = r0.reduced (4.0f, 4.0f);
+    auto inner = r0.reduced (6.0f, 5.0f);
 
     // Time axis: square-root scaling so a 5 ms attack and a 3 s release both read.
     auto len = [] (float seconds) { return std::sqrt (juce::jlimit (0.0f, 10.0f, seconds)); };
@@ -172,10 +169,6 @@ void EnvelopeDisplay::paint (juce::Graphics& g)
     g.fillPath (fill);
     g.setColour (colour);
     g.strokePath (p, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-
-    g.setColour (colours::muted);
-    g.setFont (StacksLookAndFeel::font (9.5f));
-    g.drawText ("Envelope", getLocalBounds().removeFromTop (14), juce::Justification::centred, false);
 }
 
 //==============================================================================
@@ -204,9 +197,9 @@ void FilterCurve::timerCallback()
 
 void FilterCurve::paint (juce::Graphics& g)
 {
-    auto r0 = getLocalBounds().toFloat().reduced (2.0f, 15.0f).withTrimmedBottom (2.0f);
+    auto r0 = getLocalBounds().toFloat();
     frame (g, r0);
-    auto inner = r0.reduced (4.0f, 4.0f);
+    auto inner = r0.reduced (6.0f, 5.0f);
 
     // One filter's magnitude response (type, cutoff, resonance); filter 2 is drawn
     // with the same function when its routing is on.
@@ -287,9 +280,16 @@ void FilterCurve::paint (juce::Graphics& g)
     g.setColour (colour);
     g.strokePath (p, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
-    g.setColour (colours::muted);
-    g.setFont (StacksLookAndFeel::font (9.5f));
-    g.drawText ("Response", getLocalBounds().removeFromTop (14), juce::Justification::centred, false);
+    // frequency marks
+    g.setColour (colours::muted.withAlpha (0.5f));
+    g.setFont (StacksLookAndFeel::font (8.5f));
+    for (float hz : { 100.0f, 1000.0f, 10000.0f })
+    {
+        const float x = inner.getX() + xForHz (hz, inner.getWidth());
+        g.drawVerticalLine ((int) x, inner.getBottom() - 3.0f, inner.getBottom());
+        g.drawText (hz >= 1000.0f ? juce::String ((int) (hz / 1000.0f)) + "k" : juce::String ((int) hz),
+                    juce::Rectangle<float> (x - 14.0f, inner.getBottom() - 13.0f, 28.0f, 10.0f), juce::Justification::centred, false);
+    }
 }
 
 } // namespace stacks

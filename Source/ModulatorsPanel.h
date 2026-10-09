@@ -93,7 +93,6 @@ private:
     std::vector<std::unique_ptr<juce::Component>> content;
     std::unique_ptr<LfoDisplay> display;
     juce::ComboBox sourcePicker;                 // Sources tab
-    juce::Label hintLabel;
 
     juce::TextButton assignButton, virtualButton;
     struct Row
@@ -101,11 +100,12 @@ private:
         juce::Label name;
         juce::Slider depth;
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
-        juce::TextButton remove { "x" };
+        juce::TextButton remove;
     };
     std::vector<std::unique_ptr<Row>> rows;
     juce::Viewport viewport;
     juce::Component list;
+    juce::Label emptyLabel;                      // "no connections" in the list
 };
 
 } // namespace stacks

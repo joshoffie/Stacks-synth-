@@ -61,16 +61,19 @@ private:
     std::unique_ptr<juce::FileChooser> chooser;
 };
 
-// All the synth controls in fixed, captioned rows that follow the signal path,
-// plus the modulators area. Owns the "assign a modulator to a knob" flow.
+// All the synth controls as cards in rows that follow the signal path: SOUND,
+// FILTER, EFFECTS, then the MODULATORS. Each card is a grid of cells with an
+// optional display across the top; rows stretch to fill the panel. Owns the
+// "assign a modulator to a knob" flow.
 class SynthPanel : public juce::Component,
                    private juce::AudioProcessorValueTreeState::Listener,
                    private juce::AsyncUpdater,
                    private juce::Timer
 {
 public:
-    static constexpr int kCell = 60, kChoiceCell = 82, kCellH = 86, kTitleH = 16, kPad = 6, kGap = 6, kBand = 20;
-    static constexpr int kModulatorsHeight = 176;
+    static constexpr int kCell = 62, kCellH = 70, kTitleH = 17, kPad = 5, kGap = 6, kBand = 14, kDisplayH = 60;
+    static constexpr int kMaxCell = 100;                     // cells never stretch past this
+    static constexpr int kModulatorsHeight = 168;            // the modulators area's natural inner height
 
     explicit SynthPanel (StacksAudioProcessor&);
     ~SynthPanel() override;
@@ -79,7 +82,6 @@ public:
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;   // clicking the background cancels assigning
     bool keyPressed (const juce::KeyPress&) override;
-    int preferredHeight() const;
 
     void beginAssign (int source);
     void endAssign();
@@ -87,26 +89,29 @@ public:
 
 private:
     class RowContainer;
-    class HelpStrip;
     class MacroPage;
     struct Section
     {
         juce::String title;
         juce::Colour colour;
-        std::vector<std::pair<juce::Component*, int>> controls; // component, width
-        std::vector<const ParamSpec*> advanced;                  // shown in a pop-out
+        std::vector<juce::Component*> cells;                    // the grid, left to right then down
+        int columns = 1;
+        juce::Component* display = nullptr;                     // across the top of the grid
+        juce::Component* custom = nullptr;                      // fills the body instead of a grid (the modulators area)
+        std::vector<const ParamSpec*> advanced;                 // shown in a pop-out
         std::unique_ptr<juce::TextButton> moreButton;
-        juce::Rectangle<int> bounds;
-        bool tall = false;                                       // fills the row (the modulators area)
+        juce::Rectangle<int> bounds;                            // within its row container
+        int rows() const        { return custom != nullptr ? 0 : ((int) cells.size() + columns - 1) / columns; }
+        int naturalWidth() const;
+        int naturalHeight() const;
+        int weight() const      { return custom != nullptr ? 5 : display != nullptr ? columns * 2 : columns; }
     };
     struct Row
     {
         juce::String caption;
         juce::Colour colour;
-        int height = 0;
         std::vector<Section*> sections;
-        juce::Rectangle<int> bounds;          // within its container
-        int naturalWidth = 0;
+        int naturalWidth = 0, naturalHeight = 0;
         std::unique_ptr<RowContainer> container;
     };
 
@@ -114,6 +119,7 @@ private:
     void handleAsyncUpdate() override;                       // refresh rings + connection lists
     void timerCallback() override;                           // live markers on modulated knobs
     void refreshModulationDisplay();
+    void layoutRow (Row&, int width, int height);            // places the sections and their cells
     Section* findSection (const juce::String& title);
     void showAdvanced (Section&);
     void knobClicked (int paramIndex);
@@ -126,9 +132,7 @@ private:
     std::vector<Row> rows;
     std::unique_ptr<ModulatorsPanel> modulators;
     std::vector<std::unique_ptr<juce::TextButton>> viewButtons;
-    std::unique_ptr<HelpStrip> help;
     std::unique_ptr<MacroPage> macroPage;
-    std::vector<juce::Component*> optionalDisplays;          // shown when the row has room (always in a single-row view)
     int viewMode = -1;                                        // -1 = all
     int assigningSource = -1;
 };
