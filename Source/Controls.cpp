@@ -58,6 +58,13 @@ juce::Colour modSourceColour (int source)
     }
 }
 
+juce::String modSourceLabel (int source)
+{
+    const auto& names = modSourceNames();
+    if (source < 0 || source >= names.size()) return "?";
+    return isMacroSource (source) ? names[source] + " (macro)" : names[source];
+}
+
 void styleAsTab (juce::Button& b)
 {
     b.getProperties().set ("tab", true);
@@ -93,6 +100,8 @@ public:
     void mouseDown (const juce::MouseEvent& e) override
     {
         active = ringAt (e.position);
+        dragged = false;
+        if (e.mods.isPopupMenu()) { knob.showModulationMenu(); active = -1; return; }
         if (active >= 0)
         {
             startAmount = knob.modulations[(size_t) active].amount;
@@ -104,11 +113,20 @@ public:
     {
         if (active < 0 || active >= (int) knob.modulations.size() || ! knob.onRingDrag)
             return;
+        if (e.getDistanceFromDragStart() > 3) dragged = true;
+        if (! dragged) return;
         const float amount = juce::jlimit (-1.0f, 1.0f, startAmount - (float) e.getDistanceFromDragStartY() / 150.0f);
         knob.onRingDrag (knob.modulations[(size_t) active].slot, amount);
     }
 
-    void mouseUp (const juce::MouseEvent&) override { active = -1; setMouseCursor (juce::MouseCursor::NormalCursor); }
+    // A plain click on a ring opens that source in the modulators area.
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        if (! dragged && active >= 0 && active < (int) knob.modulations.size() && knob.onShowSource)
+            knob.onShowSource (knob.modulations[(size_t) active].source);
+        active = -1;
+        setMouseCursor (juce::MouseCursor::NormalCursor);
+    }
     void mouseMove (const juce::MouseEvent& e) override
     {
         setMouseCursor (ringAt (e.position) >= 0 ? juce::MouseCursor::UpDownResizeCursor : juce::MouseCursor::NormalCursor);
@@ -117,6 +135,7 @@ public:
 private:
     ParamKnob& knob;
     int active = -1;
+    bool dragged = false;
     float startAmount = 0.0f;
 };
 
@@ -134,7 +153,9 @@ ParamKnob::ParamKnob (juce::AudioProcessorValueTreeState& apvts, const ParamSpec
 
     slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
     slider.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
-    slider.setTooltip (juce::String (spec.aiHint));
+    baseTip = spec.aiHint;
+    slider.setTooltip (baseTip);
+    slider.onPopup = [this] { showModulationMenu(); };
     slider.onValueChange = [this] { if (showingValue) updateCaption(); if (! modulations.empty()) repaint(); };
     slider.addMouseListener (this, false);   // enter / exit reach the cell, so the caption can switch to the value
     addAndMakeVisible (slider);
@@ -199,7 +220,73 @@ void ParamKnob::setModulations (std::vector<KnobModulation> mods)
 {
     modulations = std::move (mods);
     if (modulations.empty()) liveNorm = -1.0f;
+    updateTooltip();
     repaint();
+}
+
+// The tooltip says what moves this knob, so a ring never has to be guessed at.
+void ParamKnob::updateTooltip()
+{
+    juce::String tip = baseTip;
+    if (! modulations.empty())
+    {
+        juce::StringArray parts;
+        for (const auto& m : modulations)
+            parts.add (modSourceLabel (m.source) + " " + (m.amount >= 0 ? "+" : "") + juce::String (juce::roundToInt (m.amount * 100)) + "%");
+        tip << "\n\nModulated by " << parts.joinIntoString (", ")
+            << "\nClick a ring to open its source, drag it to set the depth, right-click the knob for the list.";
+    }
+    slider.setTooltip (tip);
+}
+
+// Right-click: what modulates this knob, each one removable, each one a jump to its source.
+void ParamKnob::showModulationMenu()
+{
+    if (paramIndex < 0) return;
+    const juce::String name (spec ((P) paramIndex).name);
+    juce::PopupMenu menu;
+    if (modulations.empty())
+    {
+        menu.addItem (1, "Nothing modulates " + name, false);
+        menu.addItem (2, "To add one: press Assign in MODULATORS and click this knob, or drag an LFO tab here", false);
+    }
+    else
+    {
+        menu.addSectionHeader ("Modulates " + name);
+        for (int i = 0; i < (int) modulations.size(); ++i)
+        {
+            const auto& m = modulations[(size_t) i];
+            const auto amount = juce::String (m.amount >= 0 ? "+" : "") + juce::String (juce::roundToInt (m.amount * 100)) + "%";
+            juce::PopupMenu sub;
+            sub.addItem (100 + i, "Open " + modSourceLabel (m.source) + " in MODULATORS");
+            sub.addItem (200 + i, "Remove this connection");
+            menu.addSubMenu (modSourceLabel (m.source) + "   " + amount, sub, true, nullptr, false, 0);
+        }
+        if (modulations.size() > 1)
+        {
+            menu.addSeparator();
+            menu.addItem (300, "Remove all modulation on " + name);
+        }
+    }
+    juce::Component::SafePointer<ParamKnob> safe (this);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this), [safe] (int result)
+    {
+        if (safe == nullptr || result <= 0) return;
+        auto& mods = safe->modulations;
+        if (result >= 300)
+        {
+            if (safe->onRemoveModulation)
+                for (const auto& m : std::vector<KnobModulation> (mods)) safe->onRemoveModulation (m.slot);
+        }
+        else if (result >= 200 && result - 200 < (int) mods.size())
+        {
+            if (safe->onRemoveModulation) safe->onRemoveModulation (mods[(size_t) (result - 200)].slot);
+        }
+        else if (result >= 100 && result - 100 < (int) mods.size())
+        {
+            if (safe->onShowSource) safe->onShowSource (mods[(size_t) (result - 100)].source);
+        }
+    });
 }
 
 void ParamKnob::setLiveValue (float realValue)
@@ -368,7 +455,16 @@ void ParamKnob::paint (juce::Graphics& g)
         ring.addCentredArc (centre.x, centre.y, ringRadius, ringRadius, 0.0f,
                             rotary.startAngleRadians + from * span, rotary.startAngleRadians + to * span, true);
         g.setColour (modSourceColour (source).withAlpha (isEnabled() ? 0.95f : 0.3f));   // dim with the knob when a sync setting overrides it
-        g.strokePath (ring, juce::PathStrokeType (2.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        if (isMacroSource (source))
+        {
+            // Macro wiring is dashed: it only moves when you turn that macro.
+            const float dashes[] = { 3.0f, 2.5f };
+            juce::Path dashed;
+            juce::PathStrokeType (1.8f).createDashedStroke (dashed, ring, dashes, 2);
+            g.fillPath (dashed);
+        }
+        else
+            g.strokePath (ring, juce::PathStrokeType (2.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
         // a dot at the knob's own value, so the ring reads as "around here"
         const float a = rotary.startAngleRadians + v0 * span;

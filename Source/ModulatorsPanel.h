@@ -52,6 +52,7 @@ public:
 
     void refreshConnections();
     void refreshEnabled();                       // the Rate knob dims while its LFO is tempo-synced
+    void showSource (int source);                // open the tab (and pick the source) that owns a connection
     void setAssigning (int source);              // -1 = not assigning
     int currentSource() const;
 

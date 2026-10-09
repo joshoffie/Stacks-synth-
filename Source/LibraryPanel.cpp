@@ -240,7 +240,7 @@ void LibraryPanel::confirmDelete (const juce::File& file)
                                            .withButton ("Cancel"),
                                        [this, file] (int result)
                                        {
-                                           if (result == 1)
+                                           if (result == 0)   // the first button, Move to Trash (JUCE counts from 0)
                                            {
                                                file.moveToTrash();
                                                refresh();

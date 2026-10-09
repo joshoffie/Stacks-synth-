@@ -140,9 +140,15 @@ void ProgressStrip::set (bool isActive, float f, const juce::String& text, int d
 
 void ProgressStrip::paint (juce::Graphics& g)
 {
-    if (! active)
-        return;
     auto r = getLocalBounds().toFloat();
+    if (! active)
+    {
+        // Idle: the last word from the Lab, quietly.
+        g.setColour (colours::muted);
+        g.setFont (StacksLookAndFeel::font (10.5f));
+        g.drawFittedText (detail, r.toNearestInt(), juce::Justification::centredLeft, 1, 0.8f);
+        return;
+    }
     auto bar = r.removeFromTop (6.0f).reduced (0.0f, 1.0f);
     g.setColour (colours::card);
     g.fillRoundedRectangle (bar, 2.0f);
@@ -177,9 +183,9 @@ void ProgressStrip::paint (juce::Graphics& g)
         }
     }
 
-    g.setColour (colours::text.withAlpha (0.85f));
-    g.setFont (StacksLookAndFeel::font (10.0f));
-    g.drawFittedText (detail, r.toNearestInt().withTrimmedTop (1), juce::Justification::centredLeft, 1);
+    g.setColour (colours::text.withAlpha (0.9f));
+    g.setFont (StacksLookAndFeel::font (11.0f));
+    g.drawFittedText (detail, r.toNearestInt().withTrimmedTop (1), juce::Justification::centredLeft, 1, 0.8f);
 }
 
 //==============================================================================
@@ -206,7 +212,7 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
                                                .withButton ("Clear").withButton ("Cancel").withAssociatedComponent (this),
                                            [this] (int result)
                                            {
-                                               if (result != 1) return;
+                                               if (result != 0) return;   // the first button, Clear
                                                processor.clearLab();
                                                hint.setText ({}, juce::dontSendNotification);
                                                tweak.setText ({}, juce::dontSendNotification);
@@ -352,10 +358,6 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
 
     nowPlaying.setTooltip ("What you're hearing. Evolve grows from it. Save stores it as a preset in a folder you choose.");
 
-    status.setFont (StacksLookAndFeel::font (10.5f));
-    status.setColour (juce::Label::textColourId, colours::muted);
-    status.setMinimumHorizontalScale (0.7f);
-    addAndMakeVisible (status);
     addAndMakeVisible (progressStrip);
 
     processor.labBroadcaster.addChangeListener (this);
@@ -456,8 +458,8 @@ void LabPanel::resized()
     fromAudioButton.setBounds (buttons.removeFromLeft (bw));
     buttons.removeFromLeft (5);
     savePresetButton.setBounds (buttons);
-    r.removeFromTop (4);
-    progressStrip.setBounds (r.removeFromTop (18));
+    r.removeFromTop (5);
+    progressStrip.setBounds (r.removeFromTop (22));
     r.removeFromTop (2);
 
     auto tabs = r.removeFromTop (22);
@@ -468,9 +470,6 @@ void LabPanel::resized()
     libraryTab.setBounds (tabs.removeFromLeft (tabW));
     explainTab.setBounds (tabs);
     r.removeFromTop (6);
-
-    status.setBounds (r.removeFromBottom (16));
-    r.removeFromBottom (4);
 
     viewport.setBounds (r);
     library.setBounds (r);
@@ -646,18 +645,20 @@ void LabPanel::refresh()
         viewport.setViewPosition (0, 0);
     }
 
+    // Every word from the model lands in the strip: the bar while a batch is
+    // designed, a sweep while a tweak, an explanation or a download runs, and
+    // the last status line when nothing is happening.
     {
         int aiDone = 0;
         for (const auto& c : lab.candidates) if (c.origin == "AI") ++aiDone;
         const bool aiEngine = processor.engine().kind != EngineKind::Random;
-        if (lab.tweaking)
-            progressStrip.set (true, -1.0f, "Tweaking with " + processor.engineName() + "...", 0, 1);
-        else
-            progressStrip.set (lab.generating && aiEngine, lab.progress, lab.progressDetail, aiDone, StacksAudioProcessor::kAiPatchesPerBatch);
+        const bool batch = lab.generating && aiEngine;
+        const bool otherWork = lab.tweaking || lab.explaining || processor.isDownloading();
+        juce::String text = lab.status.isNotEmpty() ? lab.status : processor.engineName();
+        if (batch && lab.progressDetail.isNotEmpty())
+            text = lab.status.isNotEmpty() && lab.status != lab.progressDetail ? lab.status + juce::String (juce::CharPointer_UTF8 ("  \xc2\xb7  ")) + lab.progressDetail : lab.progressDetail;
+        progressStrip.set (batch || otherWork, batch ? lab.progress : -1.0f, text, batch ? aiDone : 0, batch ? StacksAudioProcessor::kAiPatchesPerBatch : 1);
     }
-
-    status.setText (lab.status.isNotEmpty() ? lab.status : processor.engineName(), juce::dontSendNotification);
-    status.setColour (juce::Label::textColourId, lab.tweaking ? colours::accent : colours::muted);
 
     resized();
 }

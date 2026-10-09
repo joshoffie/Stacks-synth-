@@ -42,6 +42,9 @@ void loadThemeFile (const juce::File&);
 // One colour per modulation source, used for rings, editors and tabs.
 juce::Colour modSourceColour (int source);
 
+// "LFO 1", "Movement (macro)"...
+juce::String modSourceLabel (int source);
+
 // Marks a TextButton as a tab: no box, just the caption, underlined in its
 // colour when it is the selected one.
 void styleAsTab (juce::Button&);
@@ -86,18 +89,34 @@ public:
     std::function<void (int paramIndex)> onAssignClick;
     std::function<void (int source, int paramIndex)> onModulatorDropped;
     std::function<void (int slot, float amount)> onRingDrag;
+    std::function<void (int source)> onShowSource;         // a ring was clicked, or "show" picked from the menu
+    std::function<void (int slot)> onRemoveModulation;     // "remove" picked from the menu
 
     static constexpr int kCaptionH = 13;
 
 private:
     class RingOverlay;
+    // The slider itself; a right-click opens the knob's modulation menu instead of starting a drag.
+    class KnobSlider : public juce::Slider
+    {
+    public:
+        std::function<void()> onPopup;
+        void mouseDown (const juce::MouseEvent& e) override
+        {
+            if (e.mods.isPopupMenu()) { if (onPopup) onPopup(); return; }
+            juce::Slider::mouseDown (e);
+        }
+    };
     juce::Rectangle<float> knobBounds() const;      // the rotary's own square
     float ringRadiusFor (int which) const;
     void updateCaption();
+    void updateTooltip();
+    void showModulationMenu();
     void timerCallback() override;                  // ends a flash
 
     juce::Label label;
-    juce::Slider slider;
+    KnobSlider slider;
+    juce::String baseTip;
     std::unique_ptr<RingOverlay> overlay;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
     std::vector<KnobModulation> modulations;

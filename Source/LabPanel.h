@@ -123,7 +123,7 @@ private:
 
     StacksAudioProcessor& processor;
 
-    juce::Label header, generationLabel, variationLabel, status;
+    juce::Label header, generationLabel, variationLabel;
     ProgressStrip progressStrip;
     PromptEditor hint, tweak;
     juce::Slider variation;

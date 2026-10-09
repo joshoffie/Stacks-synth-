@@ -361,6 +361,17 @@ void ModulatorsPanel::refreshConnections()
     resized();
 }
 
+void ModulatorsPanel::showSource (int source)
+{
+    if (source >= SrcLfo1 && source <= SrcLfo4)      showTab (TabLfo1 + (source - SrcLfo1));
+    else if (source == SrcModEnv)                    showTab (TabModEnv);
+    else
+    {
+        sourcePicker.setSelectedId (source, juce::dontSendNotification);
+        showTab (TabSources);
+    }
+}
+
 void ModulatorsPanel::refreshEnabled()
 {
     if (currentTab > TabLfo4 || content.size() < 4)

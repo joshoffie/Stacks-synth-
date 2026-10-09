@@ -448,6 +448,12 @@ SynthPanel::SynthPanel (StacksAudioProcessor& p) : processor (p), apvts (p.apvts
             knob->onAssignClick = [this] (int paramIndex) { knobClicked (paramIndex); };
             knob->onModulatorDropped = [this] (int source, int paramIndex) { processor.addModulation (source, modTargetForParam (paramIndex)); };
             knob->onRingDrag = [this] (int slot, float amount) { processor.setModulationAmount (slot, amount); };
+            knob->onRemoveModulation = [this] (int slot) { processor.clearModulation (slot); };
+            knob->onShowSource = [this] (int source)
+            {
+                if (viewMode >= 0 && viewMode != (int) rows.size() - 1) setView (-1);   // the modulators row must be on screen
+                modulators->showSource (source);
+            };
             if (juce::String (spec.id) == "delay_time") delayTimeKnob = knob.get();
             knobs.push_back (knob.get());
             control = std::move (knob);
