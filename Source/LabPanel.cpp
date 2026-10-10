@@ -327,7 +327,7 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
         tab->setColour (juce::TextButton::buttonOnColourId, colours::accent);
         addAndMakeVisible (*tab);
     }
-    gardenTab.setTooltip ("Stacks: your sound is the seed in the middle, the new ideas grow around it. Click a leaf to hear it, drag it in or out to blend it with the seed, right-click to plant or save it.");
+    gardenTab.setTooltip ("Stacks: your sound is the slab at the bottom, the new ideas pile up on it, each block shaped like its sound. Click a block to hear it, drag it up to exaggerate it or down to blend it with the seed, right-click to plant or save it.");
     gardenTab.onClick = [this] { showView (View::garden); };
     ideasTab.setTooltip ("The same candidates as a list with descriptions");
     ideasTab.onClick = [this] { showView (View::ideas); };
