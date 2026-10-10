@@ -71,17 +71,19 @@ namespace
                 }
             return false;
         }
-        // Slow motion on A Morph from the first LFO nobody uses.
-        void addMovement (float amount, float rateHz)
+        // An LFO nobody uses yet (the last one when all are taken), set up and wired to a target.
+        void addLfo (int target, float amount, int shape, float rateHz, int syncIndex = 0)
         {
             int lfo = -1;
             for (int k = 0; k < kNumLfos && lfo < 0; ++k) if (! lfoInUse (k)) lfo = k;
-            if (lfo < 0) return;
-            set (lfoShapeParam (lfo), (float) ShapeSine);
-            set (lfoSyncParam (lfo), 0.0f);
+            if (lfo < 0) lfo = kNumLfos - 1;
+            set (lfoShapeParam (lfo), (float) shape);
+            set (lfoSyncParam (lfo), (float) juce::jmax (0, syncIndex));
             set (lfoRateParam (lfo), rateHz);
-            addConnection (SrcLfo1 + lfo, modTargetForParam ((int) P::oscA_morph), amount);
+            addConnection (SrcLfo1 + lfo, target, amount);
         }
+        // Slow motion on A Morph from the first LFO nobody uses.
+        void addMovement (float amount, float rateHz) { addLfo (modTargetForParam ((int) P::oscA_morph), amount, ShapeSine, rateHz); }
 
         // Every connection from an LFO, scaled; `pitchOnly` limits it to vibrato.
         void scaleLfoAmounts (float factor, bool pitchOnly)
@@ -156,8 +158,8 @@ namespace
             if (! noun) continue;
             for (int j = juce::jmax (0, i - 3); j < i; ++j)
             {
-                if (words[j] == "more" || words[j] == "extra" || words[j] == "add" || words[j] == "some" || words[j] == "with") return 1;
-                if (words[j] == "less" || words[j] == "fewer" || words[j] == "reduce" || words[j] == "lower" || words[j] == "drop") return -1;
+                if (words[j] == "more" || words[j] == "extra" || words[j] == "add" || words[j] == "some" || words[j] == "with" || words[j] == "boost" || words[j] == "raise") return 1;
+                if (words[j] == "less" || words[j] == "fewer" || words[j] == "reduce" || words[j] == "lower" || words[j] == "drop" || words[j] == "cut" || words[j] == "tame") return -1;
                 if (words[j] == "no" || words[j] == "without" || words[j] == "remove" || words[j] == "kill") return -2;
             }
             if (i + 1 < words.size() && (words[i + 1] == "up" || words[i + 1] == "down"))
@@ -181,8 +183,8 @@ namespace
             if (! noun) continue;
             for (int j = juce::jmax (0, i - 3); j < i; ++j)
             {
-                if (words[j] == "more" || words[j] == "extra" || words[j] == "add" || words[j] == "some") return 1;
-                if (words[j] == "less" || words[j] == "fewer" || words[j] == "reduce" || words[j] == "lower" || words[j] == "drop") return -1;
+                if (words[j] == "more" || words[j] == "extra" || words[j] == "add" || words[j] == "some" || words[j] == "boost" || words[j] == "raise") return 1;
+                if (words[j] == "less" || words[j] == "fewer" || words[j] == "reduce" || words[j] == "lower" || words[j] == "drop" || words[j] == "cut" || words[j] == "tame") return -1;
                 if (words[j] == "no" || words[j] == "without" || words[j] == "remove" || words[j] == "kill") return -2;
             }
             if (i + 1 < words.size() && (words[i + 1] == "up" || words[i + 1] == "down"))
@@ -205,6 +207,11 @@ bool ruleTweak (const juce::String& request, const Patch& current, std::vector<T
     if (hasWord (words, { "slightly", "slight", "bit", "little", "touch", "tad", "subtle", "subtly", "hint" })) e.strength = 0.5f;
     if (hasWord (words, { "much", "way", "lot", "lots", "very", "really", "massively", "far", "heavily", "double" })) e.strength = 2.0f;
     juce::StringArray understood;
+    const auto text = " " + words.joinIntoString (" ") + " ";
+    auto phrase = [&] (const char* p) { return text.contains (" " + juce::String (p) + " "); };
+    auto option = [] (const juce::StringArray& names, const char* name) { return (float) juce::jmax (0, names.indexOf (name)); };
+    const bool steep  = hasWord (words, { "24", "24db", "steep", "steeper", "sharper" });
+    const bool gentle = hasWord (words, { "12", "12db", "gentle", "gentler" });
 
     // A sound type by name ("short pluck", "make it a pad", "like a bass") reshapes
     // the envelopes and the filter to that type and keeps the oscillators; "short"
@@ -351,18 +358,208 @@ bool ruleTweak (const juce::String& request, const Patch& current, std::vector<T
         understood.add ("arpeggiated");
     }
 
-    // Tone
-    if (hasWord (words, { "brighter", "bright", "brighten", "open", "opener", "airy", "airier", "sparkle", "sparklier", "crisper", "crisp", "sharper" }))
+    // The filter by type: "high pass", "band pass", "notch", "formant"... The
+    // cutoff moves to where that type is useful (a high-pass at 8 kHz would
+    // kill the sound).
+    bool filterTyped = false;
     {
-        e.nudge (P::filter_cutoff, 0.12f);
-        e.nudge (P::eq_high_gain, 0.08f);
-        if ((int) current.get (P::filter_routing) != 0) e.nudge (P::filter2_cutoff, 0.1f);
+        int type = -1;
+        juce::String label;
+        if (phrase ("high pass") || phrase ("highpass") || phrase ("hi pass") || phrase ("hipass") || hasWord (words, { "hpf" }))          { type = (int) option (filterTypeNames(), steep ? "HP24" : "HP12"); label = "high-pass"; }
+        else if (phrase ("low pass") || phrase ("lowpass") || phrase ("lo pass") || hasWord (words, { "lpf" }))                             { type = (int) option (filterTypeNames(), gentle ? "LP12" : "LP24"); label = "low-pass"; }
+        else if (phrase ("band pass") || phrase ("bandpass") || hasWord (words, { "bpf" }))                                                 { type = (int) option (filterTypeNames(), steep ? "BP24" : "BP12"); label = "band-pass"; }
+        else if (hasWord (words, { "notch" }))                                                                                              { type = (int) option (filterTypeNames(), "Notch"); label = "notch"; }
+        else if (hasWord (words, { "comb" }))                                                                                               { type = (int) option (filterTypeNames(), "Comb"); label = "comb"; }
+        else if (hasWord (words, { "formant", "vowel", "vowels", "talking", "talkbox", "voicelike" }) && ! hasWord (words, { "wave" }))     { type = (int) option (filterTypeNames(), "Formant"); label = "formant"; }
+        if (type >= 0)
+        {
+            e.set (P::filter_type, (float) type);
+            const float cutoff = current.get (P::filter_cutoff);
+            const auto& names = filterTypeNames();
+            const auto typeName = names[type];
+            if (typeName.startsWith ("HP"))      { if (cutoff > 1200.0f || cutoff < 60.0f) e.set (P::filter_cutoff, hasWord (words, { "aggressive", "hard", "high" }) && ! phrase ("high pass") ? 600.0f : 250.0f); }
+            else if (typeName.startsWith ("LP")) { if (cutoff < 500.0f) e.set (P::filter_cutoff, 2000.0f); }
+            else if (typeName.startsWith ("BP")) { if (cutoff < 300.0f || cutoff > 5000.0f) e.set (P::filter_cutoff, 1200.0f); }
+            else if (typeName == "Notch")        { if (cutoff < 200.0f || cutoff > 6000.0f) e.set (P::filter_cutoff, 1000.0f); e.atLeast (P::filter_res, 0.4f); }
+            else if (typeName == "Comb")         { if (cutoff < 100.0f || cutoff > 2000.0f) e.set (P::filter_cutoff, 440.0f); e.atLeast (P::filter_res, 0.4f); }
+            else                                 { if (cutoff < 200.0f || cutoff > 3000.0f) e.set (P::filter_cutoff, 700.0f); e.atLeast (P::filter_res, 0.3f); }
+            understood.add (label + " filter");
+            filterTyped = true;
+            for (auto* w : { "high", "low", "band", "pass", "hi", "lo" }) words.removeString (w);   // "high" is not "more highs" here
+        }
+        else if (hasWord (words, { "filter" }) && hasWord (words, { "no", "bypass", "remove", "without", "off", "kill" }) && qualified (words, { "filter" }) <= -1)
+        {
+            e.set (P::filter_type, option (filterTypeNames(), "LP24"));
+            e.set (P::filter_cutoff, 20000.0f);
+            e.set (P::filter_res, 0.0f);
+            e.set (P::filter_env, 0.0f);
+            understood.add ("filter opened");
+            filterTyped = true;
+        }
+    }
+
+    // Oscillator A's wave and warp by name.
+    {
+        int wave = -1;
+        if (hasWord (words, { "supersaw", "hypersaw" }))
+        {
+            e.set (P::oscA_wave, option (waveNames(), "Saw")); e.set (P::oscA_morph, 0.7f);
+            e.set (P::unison_voices, 7.0f); e.atLeast (P::unison_detune, 18.0f); e.atLeast (P::unison_spread, 0.8f);
+            understood.add ("supersaw");
+        }
+        else if (hasWord (words, { "saw", "sawtooth", "saws" }) && ! hasWord (words, { "lfo" })) wave = (int) option (waveNames(), "Saw");
+        else if (hasWord (words, { "square", "squarewave" }) && ! hasWord (words, { "lfo" }))     { wave = (int) option (waveNames(), "Pulse"); e.set (P::oscA_morph, 0.5f); }
+        else if (hasWord (words, { "pulse" }) && ! hasWord (words, { "lfo" }))                   wave = (int) option (waveNames(), "Pulse");
+        else if (hasWord (words, { "sine", "sinewave" }) && ! hasWord (words, { "lfo", "sub" }))  wave = (int) option (waveNames(), "Sine");
+        else if (hasWord (words, { "triangle" }) && ! hasWord (words, { "lfo" }))                wave = (int) option (waveNames(), "Triangle");
+        else if (hasWord (words, { "glass" }))                                                    wave = (int) option (waveNames(), "Glass");
+        else if (hasWord (words, { "organ" }))                                                    wave = (int) option (waveNames(), "Organ");
+        if (wave >= 0) { e.set (P::oscA_wave, (float) wave); understood.add (waveNames()[wave] + " wave"); }
+
+        const bool delayish = hasWord (words, { "delay", "echo", "tempo", "synced", "arp", "lfo" });
+        if (hasWord (words, { "sync", "hardsync" }) && ! delayish)                            { e.set (P::oscA_warp, option (warpNames(), "Sync")); e.atLeast (P::oscA_warp_amt, 0.4f); understood.add ("hard sync"); }
+        if (hasWord (words, { "pwm", "pulsewidth" }))                                          { e.set (P::oscA_warp, option (warpNames(), "PWM")); e.atLeast (P::oscA_warp_amt, 0.5f); e.addLfo (modTargetForParam ((int) P::oscA_warp_amt), 0.35f, ShapeTriangle, 0.3f); understood.add ("PWM"); }
+        if (hasWord (words, { "wavefold", "wavefolded", "wavefolder", "folded" }) || (hasWord (words, { "fold" }) && ! hasWord (words, { "distortion", "dist" })))
+                                                                                                { e.set (P::oscA_warp, option (warpNames(), "Fold")); e.atLeast (P::oscA_warp_amt, 0.5f); understood.add ("wavefold"); }
+        if (hasWord (words, { "bend", "bent" }) && ! hasWord (words, { "pitch" }))             { e.set (P::oscA_warp, option (warpNames(), "Bend")); e.atLeast (P::oscA_warp_amt, 0.5f); understood.add ("bend"); }
+    }
+
+    // Effect modes and timings by name.
+    bool reverbSized = false, delaySized = false;
+    {
+        const bool delayWord = hasWord (words, { "delay", "delays", "echo", "echoes", "repeats" });
+        if (phrase ("ping pong") || hasWord (words, { "pingpong" }))                      { e.set (P::delay_mode, option (delayModeNames(), "Ping-Pong")); e.atLeast (P::delay_mix, 0.25f); understood.add ("ping-pong delay"); }
+        if (hasWord (words, { "tape" }) && delayWord)                                     { e.set (P::delay_mode, option (delayModeNames(), "Tape")); e.atLeast (P::delay_mix, 0.25f); understood.add ("tape delay"); }
+        if (hasWord (words, { "slapback", "slap" }))                                       { e.set (P::delay_mode, option (delayModeNames(), "Stereo")); e.set (P::delay_sync, 0.0f); e.set (P::delay_time, 0.09f); e.set (P::delay_feedback, 0.1f); e.atLeast (P::delay_mix, 0.3f); understood.add ("slapback"); }
+        const char* note = nullptr;
+        if (phrase ("dotted eighth") || phrase ("dotted 8th") || hasWord (words, { "dotted", "1/8d" })) note = "1/8D";
+        else if (hasWord (words, { "triplet", "triplets", "1/8t" }))                        note = "1/8T";
+        else if (hasWord (words, { "sixteenth", "sixteenths", "16th", "1/16" }))            note = "1/16";
+        else if (hasWord (words, { "eighth", "eighths", "8th", "1/8" }))                    note = "1/8";
+        else if (hasWord (words, { "quarter", "quarters", "1/4" }))                         note = "1/4";
+        else if (hasWord (words, { "half", "1/2" }) && (delayWord || hasWord (words, { "lfo", "note" }))) note = "1/2";
+        if (note != nullptr || (delayWord && hasWord (words, { "sync", "synced", "tempo" })))
+        {
+            const char* n = note != nullptr ? note : "1/8";
+            if (hasWord (words, { "lfo" }) && ! delayWord)
+            {
+                int k = 0;
+                for (int i = 0; i < kNumLfos; ++i) if (e.lfoInUse (i)) { k = i; break; }
+                if (lfoSyncNames().contains (n)) e.set (lfoSyncParam (k), option (lfoSyncNames(), n));
+                understood.add (juce::String ("LFO at ") + n);
+            }
+            else
+            {
+                if (delaySyncNames().contains (n)) e.set (P::delay_sync, option (delaySyncNames(), n));
+                e.atLeast (P::delay_mix, 0.25f);
+                understood.add (juce::String ("delay at ") + n);
+            }
+        }
+        if (delayWord && hasWord (words, { "longer", "more", "bigger", "endless", "infinite" }) && qualified (words, { "delay", "echo", "repeats" }) <= 0)
+        {
+            e.nudge (P::delay_feedback, hasWord (words, { "endless", "infinite" }) ? 0.5f : 0.2f); e.atLeast (P::delay_mix, 0.25f); delaySized = true; understood.add ("more repeats");
+        }
+        if (delayWord && hasWord (words, { "shorter", "fewer", "tighter" }))                { e.nudge (P::delay_feedback, -0.2f); delaySized = true; understood.add ("fewer repeats"); }
+
+        const bool reverbWord = hasWord (words, { "reverb", "verb", "room", "hall", "plate", "cathedral", "church" });
+        if (hasWord (words, { "shimmer", "shimmery", "shimmering" }))                      { e.set (P::reverb_type, option (reverbTypeNames(), "Shimmer")); e.atLeast (P::reverb_shimmer, 0.45f); e.atLeast (P::reverb_mix, 0.3f); e.atLeast (P::reverb_size, 0.6f); understood.add ("shimmer reverb"); }
+        else if (hasWord (words, { "hall", "cathedral", "church" }))                       { e.set (P::reverb_type, option (reverbTypeNames(), "Hall")); e.atLeast (P::reverb_mix, 0.3f); e.atLeast (P::reverb_size, hasWord (words, { "cathedral", "church" }) ? 0.9f : 0.7f); understood.add ("hall reverb"); }
+        else if (hasWord (words, { "plate" }))                                              { e.set (P::reverb_type, option (reverbTypeNames(), "Plate")); e.atLeast (P::reverb_mix, 0.25f); understood.add ("plate reverb"); }
+        else if (hasWord (words, { "room" }) && qualified (words, { "room" }) == 0 && hasWord (words, { "reverb", "small", "tight", "short", "a" }))
+                                                                                            { e.set (P::reverb_type, option (reverbTypeNames(), "Room")); e.atLeast (P::reverb_mix, 0.2f); e.atMost (P::reverb_size, 0.4f); understood.add ("room reverb"); }
+        if (reverbWord && hasWord (words, { "bigger", "larger", "longer", "huge", "massive", "giant" }))  { e.nudge (P::reverb_size, 0.25f); e.atLeast (P::reverb_mix, 0.25f); reverbSized = true; understood.add ("bigger reverb"); }
+        if (reverbWord && hasWord (words, { "smaller", "shorter", "tighter", "tiny" }))                  { e.nudge (P::reverb_size, -0.25f); reverbSized = true; understood.add ("smaller reverb"); }
+
+        if (hasWord (words, { "ensemble" }))                                               { e.set (P::chorus_mode, option (chorusModeNames(), "Ensemble")); e.atLeast (P::chorus_mix, 0.3f); understood.add ("ensemble"); }
+        if (hasWord (words, { "flanger", "flange", "flanged", "flanging" }))               { e.set (P::chorus_mode, option (chorusModeNames(), "Flanger")); e.atLeast (P::chorus_feedback, 0.5f); e.atLeast (P::chorus_mix, 0.35f); understood.add ("flanger"); }
+        if (hasWord (words, { "dimension" }))                                              { e.set (P::chorus_mode, option (chorusModeNames(), "Dimension")); e.atLeast (P::chorus_mix, 0.3f); understood.add ("dimension chorus"); }
+
+        if (hasWord (words, { "tube", "valve", "saturate", "saturation" }))               { e.set (P::dist_mode, option (distModeNames(), "Tube")); e.atLeast (P::dist_mix, 0.3f); e.atLeast (P::dist_drive, 10.0f); understood.add ("tube saturation"); }
+        if (hasWord (words, { "fuzz", "fuzzy", "clip", "clipped", "clipping" }))          { e.set (P::dist_mode, option (distModeNames(), "Hard")); e.atLeast (P::dist_mix, 0.4f); e.atLeast (P::dist_drive, 20.0f); understood.add ("fuzz"); }
+        if (hasWord (words, { "fold" }) && hasWord (words, { "distortion", "dist" }))     { e.set (P::dist_mode, option (distModeNames(), "Fold")); e.atLeast (P::dist_mix, 0.4f); understood.add ("fold distortion"); }
+
+        if (hasWord (words, { "pumping", "pump", "sidechain", "sidechained", "ducking", "ducked" }))
+        {
+            e.set (P::comp_mix, 0.8f); e.set (P::comp_threshold, -28.0f); e.set (P::comp_ratio, 6.0f); e.set (P::comp_release, 180.0f);
+            understood.add ("pumping compression");
+        }
+    }
+
+    // Modulation by name: tremolo, auto-pan, wobble, sweeps, velocity, key tracking, the wheel.
+    {
+        const int cutoffTarget = modTargetForParam ((int) P::filter_cutoff);
+        if (hasWord (words, { "tremolo" }))                                                                  { e.addLfo (TargetAmp, 0.35f * e.strength, ShapeSine, 5.0f); understood.add ("tremolo"); }
+        if (phrase ("auto pan") || hasWord (words, { "autopan", "panning", "panner" }))                      { e.addLfo (TargetPan, 0.7f, ShapeSine, 0.4f); understood.add ("auto-pan"); }
+        if (hasWord (words, { "wobble", "wobbly", "wub", "wubs", "wubby", "dubstep" }))
+        {
+            e.addLfo (cutoffTarget, 0.5f, ShapeSine, 2.0f, (int) option (lfoSyncNames(), hasWord (words, { "fast", "faster" }) ? "1/16" : "1/8"));
+            if (current.get (P::filter_cutoff) > 3000.0f || current.get (P::filter_cutoff) < 200.0f) e.set (P::filter_cutoff, 900.0f);
+            e.atLeast (P::filter_res, 0.3f);
+            if ((int) current.get (P::filter_type) > 1) e.set (P::filter_type, option (filterTypeNames(), "LP24"));
+            understood.add ("wobble");
+        }
+        if (hasWord (words, { "sweep", "sweeps", "sweeping", "swept" }))                                     { e.addLfo (cutoffTarget, 0.5f, ShapeTriangle, 0.08f); understood.add ("filter sweep"); }
+        if (hasWord (words, { "lfo" }) && ! hasWord (words, { "tremolo", "wobble", "sweep", "pwm", "panning", "autopan" }))
+        {
+            if (hasWord (words, { "filter", "cutoff" }))          { e.addLfo (cutoffTarget, 0.3f * e.strength, ShapeSine, 0.5f); understood.add ("LFO on the filter"); }
+            else if (hasWord (words, { "pitch" }))                { if (! e.hasVibrato()) e.addVibrato (0.02f); understood.add ("vibrato"); }
+            else if (hasWord (words, { "pan" }))                  { e.addLfo (TargetPan, 0.6f, ShapeSine, 0.4f); understood.add ("auto-pan"); }
+            else if (hasWord (words, { "volume", "amp", "level" })) { e.addLfo (TargetAmp, 0.3f, ShapeSine, 4.0f); understood.add ("tremolo"); }
+            else if (qualified (words, { "lfo" }) >= 0)           { e.addMovement (0.3f * e.strength, 0.25f); understood.add ("LFO on the wave"); }
+        }
+        if (hasWord (words, { "velocity", "dynamic", "dynamics", "expressive", "touch" }) && qualified (words, { "velocity", "dynamics" }) >= 0)
+        {
+            if (! e.hasConnection (SrcVelocity, cutoffTarget)) e.addConnection (SrcVelocity, cutoffTarget, 0.4f);
+            if (! e.hasConnection (SrcVelocity, TargetAmp))    e.addConnection (SrcVelocity, TargetAmp, 0.5f);
+            understood.add ("velocity");
+        }
+        if (phrase ("key track") || phrase ("key tracking") || hasWord (words, { "keytrack", "keytracking", "tracking" }))  { e.set (P::filter_keytrack, 0.8f); understood.add ("key tracking"); }
+        if (phrase ("mod wheel") || hasWord (words, { "modwheel", "wheel" }))                                 { if (! e.hasConnection (SrcModWheel, cutoffTarget)) e.addConnection (SrcModWheel, cutoffTarget, 0.5f); understood.add ("mod wheel"); }
+        if (hasWord (words, { "aftertouch", "pressure" }))                                                   { if (! e.hasConnection (SrcAftertouch, cutoffTarget)) e.addConnection (SrcAftertouch, cutoffTarget, 0.4f); understood.add ("aftertouch"); }
+    }
+
+    // EQ bands by name: highs, mids, scoop, presence.
+    {
+        const int highs = qualified (words, { "highs", "treble", "top", "sparkle" });
+        if (highs != 0) { e.nudge (P::eq_high_gain, highs > 0 ? 0.125f : -0.125f); understood.add (highs > 0 ? "more highs" : "less highs"); }
+        const int mids = qualified (words, { "mids", "mid", "middle", "midrange", "body", "boxy", "honk" });
+        if (mids != 0)  { e.nudge (P::eq_mid_gain, mids > 0 ? 0.125f : -0.125f); understood.add (mids > 0 ? "more mids" : "less mids"); }
+        if (hasWord (words, { "scoop", "scooped" }))                                 { e.nudge (P::eq_mid_gain, -0.17f); understood.add ("scooped mids"); }
+        if (hasWord (words, { "presence", "forward", "upfront" }) || phrase ("cut through")) { e.set (P::eq_mid_freq, 2500.0f); e.nudge (P::eq_mid_gain, 0.125f); understood.add ("presence"); }
+    }
+
+    // Tone
+    // Which cutoff makes the sound darker: the main filter when it is a low-pass,
+    // otherwise a low-pass filter 2 in series (set up when there is none), since
+    // closing a high-pass only makes it fuller.
+    auto darkeningCutoff = [&] () -> int
+    {
+        const auto& names = filterTypeNames();
+        if (names[(int) e.value (P::filter_type)].startsWith ("LP")) return (int) P::filter_cutoff;
+        if ((int) e.value (P::filter_routing) == 1 && names[(int) e.value (P::filter2_type)].startsWith ("LP")) return (int) P::filter2_cutoff;
+        return -1;
+    };
+    if (hasWord (words, { "brighter", "bright", "brighten", "opener", "airy", "airier", "sparklier", "crisper", "crisp" }) || (hasWord (words, { "open" }) && ! filterTyped))
+    {
+        const int cutoff = darkeningCutoff();
+        if (cutoff >= 0) e.nudge ((P) cutoff, 0.18f);
+        e.nudge (P::eq_high_gain, cutoff >= 0 ? 0.1f : 0.17f);
         understood.add ("brighter");
     }
-    if (hasWord (words, { "darker", "dark", "darken", "duller", "dull", "muffled", "muddier", "mellow", "mellower", "softer-top", "rounder" }))
+    if (hasWord (words, { "darker", "dark", "darken", "duller", "dull", "muddier", "mellow", "mellower", "rounder", "smokier", "smoky" }) || (hasWord (words, { "muffled" }) && ! hasWord (words, { "underwater" })))
     {
-        e.nudge (P::filter_cutoff, -0.12f);
-        e.nudge (P::eq_high_gain, -0.08f);
+        const int cutoff = darkeningCutoff();
+        if (cutoff >= 0)
+            e.nudge ((P) cutoff, -0.18f);
+        else
+        {
+            // A high-pass or band-pass patch: a low-pass in series takes the top off.
+            e.set (P::filter_routing, option (filterRoutingNames(), "Series"));
+            e.set (P::filter2_type, option (filterTypeNames(), "LP24"));
+            e.atMost (P::filter2_cutoff, e.strength >= 2.0f ? 1200.0f : 2500.0f);   // never up: darker is darker
+            e.atMost (P::filter2_res, 0.3f);
+        }
+        e.nudge (P::eq_high_gain, -0.12f);
         understood.add ("darker");
     }
     if (hasWord (words, { "warmer", "warm", "warmth" }))
@@ -400,7 +597,7 @@ bool ruleTweak (const juce::String& request, const Patch& current, std::vector<T
         e.atLeast (P::chorus_mix, 0.25f);
         understood.add ("dreamier");
     }
-    if (hasWord (words, { "lofi", "lo-fi", "vintage", "retro", "old", "dusty", "worn", "tape", "cassette", "vinyl", "record" }))
+    if (hasWord (words, { "lofi", "lo-fi", "vintage", "retro", "old", "dusty", "worn", "cassette", "vinyl", "record" }) || (hasWord (words, { "tape" }) && ! hasWord (words, { "delay", "echo" })))
     {
         e.nudge (P::filter_cutoff, -0.1f);
         e.nudge (P::eq_high_gain, -0.15f);
@@ -415,12 +612,13 @@ bool ruleTweak (const juce::String& request, const Patch& current, std::vector<T
         e.atLeast (P::dist_mix, 0.5f * e.strength);
         understood.add ("crushed");
     }
-    if (hasWord (words, { "hollow", "hollower", "nasal", "boxy" }))
+    if (hasWord (words, { "hollow", "hollower" }))
     {
-        e.nudge (P::eq_low_gain, -0.1f);
-        e.nudge (P::eq_mid_gain, 0.2f);
+        e.nudge (P::eq_mid_gain, -0.2f);
+        if ((int) current.get (P::oscA_wave) == (int) option (waveNames(), "Saw")) { e.set (P::oscA_wave, option (waveNames(), "Pulse")); e.set (P::oscA_morph, 0.5f); }
         understood.add ("hollower");
     }
+    if (hasWord (words, { "nasal", "honky" })) { e.set (P::eq_mid_freq, 1200.0f); e.nudge (P::eq_mid_gain, 0.2f); understood.add ("nasal"); }
 
     // Width
     if (hasWord (words, { "wider", "wide", "widen", "stereo", "bigger", "huge", "massive" }))
@@ -457,21 +655,21 @@ bool ruleTweak (const juce::String& request, const Patch& current, std::vector<T
         if (hasWord (words, { "attack" }))          { e.scale (P::aenv_attack, factor);  understood.add (shorterWord ? "faster attack" : "slower attack"); }
         if (hasWord (words, { "sustain" }))         { e.nudge (P::aenv_sustain, shorterWord ? -0.25f : 0.25f); understood.add (shorterWord ? "less sustain" : "more sustain"); }
     }
-    else if (archetype.isEmpty() && hasWord (words, { "shorter", "short", "snappier", "snappy", "tighter", "staccato", "clipped" }))
+    else if (archetype.isEmpty() && ! reverbSized && ! delaySized && hasWord (words, { "shorter", "short", "snappier", "snappy", "tighter", "staccato" }))
     {
         e.scale (P::aenv_release, 0.5f);
         e.scale (P::aenv_decay, 0.7f);
         if (current.get (P::aenv_sustain) > 0.6f) e.nudge (P::aenv_sustain, -0.25f);
         understood.add ("shorter");
     }
-    else if (archetype.isEmpty() && hasWord (words, { "longer", "long", "sustained", "held", "drawn", "lingering" }))
+    else if (archetype.isEmpty() && ! reverbSized && ! delaySized && hasWord (words, { "longer", "long", "sustained", "held", "drawn", "lingering" }))
     {
         e.scale (P::aenv_release, 2.0f);
         if (current.get (P::aenv_sustain) < 0.3f) e.nudge (P::aenv_sustain, 0.25f);
         understood.add ("longer");
     }
     // The filter by name: "open the filter", "lower the cutoff", "less filter".
-    if (hasWord (words, { "cutoff", "filter" }) && ! stageNamed)
+    if (hasWord (words, { "cutoff", "filter" }) && ! stageNamed && ! filterTyped)
     {
         const bool down = hasWord (words, { "lower", "less", "close", "closed", "down", "darker", "reduce" });
         const bool up   = hasWord (words, { "higher", "more", "open", "up", "raise", "brighter" });
@@ -565,7 +763,7 @@ bool ruleTweak (const juce::String& request, const Patch& current, std::vector<T
     };
     effect ({ "reverb", "verb", "room", "hall", "space", "spacious", "ambience", "ambient", "atmosphere" }, P::reverb_mix, "reverb");
     effect ({ "delay", "echo", "echoes", "repeats" }, P::delay_mix, "delay");
-    effect ({ "chorus", "shimmer", "ensemble", "lush", "lusher" }, P::chorus_mix, "chorus");
+    effect ({ "chorus", "lush", "lusher" }, P::chorus_mix, "chorus");
     effect ({ "compression", "compressor", "glue", "squash", "squashed" }, P::comp_mix, "compression");
     effect ({ "distortion", "drive", "overdrive", "fuzz", "crunch", "grit" }, P::dist_mix, "distortion");
     if (hasWord (words, { "wetter", "wet" }))  { e.nudge (P::reverb_mix, 0.2f); e.nudge (P::delay_mix, 0.1f); understood.add ("wetter"); }
@@ -573,7 +771,7 @@ bool ruleTweak (const juce::String& request, const Patch& current, std::vector<T
 
     // Movement
     {
-        const int mov = moreOrLess (words, { "movement", "motion", "moving", "wobble", "wobbly", "modulation", "animated", "animation", "alive", "evolving" });
+        const int mov = moreOrLess (words, { "movement", "motion", "moving", "modulation", "animated", "animation", "alive", "evolving" });
         if (mov != 0)
         {
             if (mov > 0 && ! e.lfoInUse (0) && ! e.lfoInUse (1))
@@ -605,7 +803,8 @@ bool ruleTweak (const juce::String& request, const Patch& current, std::vector<T
     if (! stageNamed && archetype.isEmpty() && hasWord (words, { "slower", "slow", "lazier", "calmer", "calm" })) { e.scaleFreeLfoRates (0.6f); e.scale (P::chorus_rate, 0.8f); understood.add ("slower"); }
 
     // Pitch and voice
-    if (hasWord (words, { "octave" }) || hasWord (words, { "higher", "lower" }))
+    const bool pitchNoun = hasWord (words, { "cutoff", "filter", "volume", "level", "gain", "release", "decay", "attack", "sustain", "resonance", "reverb", "delay", "rate", "highs", "mids", "lows", "bass", "treble", "threshold" });
+    if (hasWord (words, { "octave", "octaves", "oct", "transpose", "transposed" }) || (! pitchNoun && hasWord (words, { "higher", "lower" }) && ! archetype.isNotEmpty()))
     {
         const bool down = hasWord (words, { "down", "lower", "below" });
         for (int osc = 0; osc < kNumOscs; ++osc)
@@ -633,11 +832,15 @@ bool ruleTweak (const juce::String& request, const Patch& current, std::vector<T
     if (hasWord (words, { "louder", "loud" }))   { e.nudge (P::master_gain, 0.1f); understood.add ("louder"); }
     if (hasWord (words, { "quieter", "quiet" })) { e.nudge (P::master_gain, -0.1f); understood.add ("quieter"); }
 
-    if (understood.isEmpty() || e.changes.empty())
+    if (understood.isEmpty())
         return false;
-    changes = e.changes;
+    // Only real moves: a setting already where it should be is not a change.
+    changes.clear();
+    for (const auto& c : e.changes)
+        if (std::abs (c.value - current.get ((P) c.paramIndex)) > 1.0e-5f)
+            changes.push_back (c);
     summary = understood.joinIntoString (", ");
-    summary = summary.substring (0, 1).toUpperCase() + summary.substring (1) + ": " + describeChanges (current, changes);
+    summary = summary.substring (0, 1).toUpperCase() + summary.substring (1) + ": " + (changes.empty() ? juce::String ("already there") : describeChanges (current, changes));
     return true;
 }
 
@@ -660,13 +863,31 @@ juce::String describeChanges (const Patch& current, const std::vector<TweakChang
 namespace
 {
     // The settings the model may touch: every knob that is not a connection,
-    // a macro, the master or fine print behind a "more" button.
+    // a macro, the master or fine print behind a "more" button...
     bool tweakable (const ParamSpec& s)
     {
         const juce::String id (s.id);
         if (id == "master_gain" || id.startsWith ("macro") || id.startsWith ("mod")) return false;
         if (s.kind == ParamKind::Choice) return false;
         return ! isAdvancedParam (s.id);
+    }
+    // ...and these choices, by option name.
+    bool tweakableChoice (const ParamSpec& s)
+    {
+        if (s.kind != ParamKind::Choice) return false;
+        static const juce::StringArray ids { "oscA_wave", "oscB_wave", "oscC_wave", "oscA_warp", "oscB_warp", "oscC_warp",
+                                             "filter_type", "filter_routing", "filter2_type",
+                                             "lfo1_shape", "lfo2_shape", "lfo3_shape", "lfo4_shape", "lfo1_sync", "lfo2_sync", "lfo3_sync", "lfo4_sync",
+                                             "arp_mode", "arp_rate", "dist_mode", "chorus_mode", "delay_mode", "delay_sync", "reverb_type" };
+        return ids.contains (s.id);
+    }
+    // The options the model may pick (the player's imported wavetables are not for it).
+    juce::StringArray optionsFor (const ParamSpec& s)
+    {
+        juce::StringArray options = s.choices();
+        if (juce::String (s.id).endsWith ("_wave"))
+            while (options.size() > WavetableBank::kNumBuiltIn) options.remove (options.size() - 1);
+        return options;
     }
 }
 
@@ -679,12 +900,18 @@ juce::String tweakSystemPrompt()
       << "Settings (id: min to max [unit] - meaning):\n";
     for (const auto& spec : paramSpecs())
     {
-        if (! tweakable (spec)) continue;
+        if (! tweakable (spec) && ! tweakableChoice (spec)) continue;
         juce::String hint (spec.aiHint);
         hint = hint.upToFirstOccurrenceOf (";", false, false).upToFirstOccurrenceOf (" (", false, false);
-        s << spec.id << ": " << juce::String (spec.min) << " to " << juce::String (spec.max)
-          << (spec.unit[0] != 0 ? juce::String (" ") + spec.unit : juce::String()) << " - " << hint << "\n";
+        s << spec.id << ": ";
+        if (spec.kind == ParamKind::Choice)
+            s << "one of " << optionsFor (spec).joinIntoString (", ");
+        else
+            s << juce::String (spec.min) << " to " << juce::String (spec.max) << (spec.unit[0] != 0 ? juce::String (" ") + spec.unit : juce::String());
+        s << " - " << hint << "\n";
     }
+    s << "Choice settings take the exact option name as a string. Filter types: LP = low-pass (lower cutoff = darker), HP = high-pass (removes lows; keep its cutoff under 1000 or the sound disappears), "
+      << "BP = band-pass, Notch, Comb (metallic), Formant (vowels). To darken a high-pass patch, set filter_routing Series with filter2_type LP24 and filter2_cutoff 1000 to 3000, or lower eq_high_gain.\n";
     s << "How to read a request (move 2 to 6 settings, each by a clear but tasteful amount, relative to the current values; never touch what the request does not mention):\n"
       << "- Tone: brighter = filter_cutoff up (x1.5 to x2) and eq_high_gain +2 to +4; darker = the opposite; warmer = cutoff a little down, eq_low_gain +2, dist_mix 0.1 to 0.2 (Soft); thinner/colder = sub_level and eq_low_gain down.\n"
       << "- Size: wider = unison_spread up, unison_voices 3 to 4, chorus_mix 0.2 to 0.4; fatter = unison_voices +2, unison_detune up, sub_level up; narrower/mono = unison_spread and chorus_mix down.\n"
@@ -705,6 +932,7 @@ juce::String tweakSystemPrompt()
       << "  perc: aenv 0.001 / 0.1 / 0 / 0.08, filter_env 4, fenv_decay 0.08\n"
       << "  \"short\" or \"long\" with a type picks its tighter or longer version (decay and release).\n"
       << "- Amount words: slightly / a bit = small moves (10 to 20% of the range); much / way / a lot = big moves; plain requests sit between. Several requests in one line each get their changes.\n"
+      << "- Waves and effects by name: saw / square (Pulse, morph 0.5) / sine / triangle set oscA_wave; ping-pong, tape, dotted eighth set delay_mode and delay_sync; shimmer / hall / plate / room set reverb_type; ensemble / flanger / dimension set chorus_mode; tube / fuzz (Hard) / crush set dist_mode.\n"
       << "Examples (current cutoff 2000, reverb_mix 0.1, aenv_attack 0.01):\n"
       << "\"underwater\" -> {\"changes\":[{\"id\":\"filter_cutoff\",\"value\":350},{\"id\":\"reverb_mix\",\"value\":0.5},{\"id\":\"reverb_size\",\"value\":0.8},{\"id\":\"chorus_mix\",\"value\":0.3}]}\n"
       << "\"dreamier\" -> {\"changes\":[{\"id\":\"aenv_attack\",\"value\":0.6},{\"id\":\"aenv_release\",\"value\":2},{\"id\":\"reverb_mix\",\"value\":0.45},{\"id\":\"chorus_mix\",\"value\":0.3}]}\n"
@@ -720,8 +948,13 @@ juce::String tweakUserPrompt (const Patch& current, const juce::String& request)
     s << "Current settings: ";
     juce::StringArray parts;
     for (const auto& spec : paramSpecs())
-        if (tweakable (spec))
-            parts.add (juce::String (spec.id) + "=" + juce::String (current.get ((P) paramIndexForId (spec.id)), 3).trimCharactersAtEnd ("0").trimCharactersAtEnd ("."));
+    {
+        const float v = current.get ((P) paramIndexForId (spec.id));
+        if (tweakableChoice (spec))
+            parts.add (juce::String (spec.id) + "=" + spec.choices()[juce::jlimit (0, spec.choices().size() - 1, (int) std::round (v))]);
+        else if (tweakable (spec))
+            parts.add (juce::String (spec.id) + "=" + juce::String (v, 3).trimCharactersAtEnd ("0").trimCharactersAtEnd ("."));
+    }
     s << parts.joinIntoString (" ") << "\n"
       << "Request: \"" << request.trim() << "\". Change only what that needs.\n/no_think";
     return s;
@@ -734,9 +967,23 @@ juce::String tweakGrammar()
     for (const auto& spec : paramSpecs())
         if (tweakable (spec))
             ids.add (lit (spec.id));
+    // Choice settings: one rule each, the option names spelled out.
+    juce::StringArray choiceRules, choiceDefs;
+    for (const auto& spec : paramSpecs())
+    {
+        if (! tweakableChoice (spec)) continue;
+        const auto rule = "c-" + juce::String (spec.id).replaceCharacter ('_', '-');
+        juce::StringArray options;
+        for (const auto& o : optionsFor (spec)) options.add (lit (o));
+        choiceRules.add (rule);
+        choiceDefs.add (rule + " ::= " + lit ("{\"id\":\"" + juce::String (spec.id) + "\",\"value\":\"") + " (" + options.joinIntoString (" | ") + ") " + lit ("\"}"));
+    }
     juce::String g;
     g << "root ::= " << lit ("{\"changes\":[") << " change (" << lit (",") << " change){0,7} " << lit ("]}") << "\n"
-      << "change ::= " << lit ("{\"id\":\"") << " pid " << lit ("\",\"value\":") << " num " << lit ("}") << "\n"
+      << "change ::= nchange | cchange\n"
+      << "nchange ::= " << lit ("{\"id\":\"") << " pid " << lit ("\",\"value\":") << " num " << lit ("}") << "\n"
+      << "cchange ::= " << choiceRules.joinIntoString (" | ") << "\n"
+      << choiceDefs.joinIntoString ("\n") << "\n"
       << "pid ::= " << ids.joinIntoString (" | ") << "\n"
       << "num ::= \"-\"? [0-9]{1,5} (\".\" [0-9]{1,4})?\n";
     return g;
@@ -761,8 +1008,28 @@ bool parseTweakReply (const juce::String& json, const Patch& current, std::vecto
         auto* c = item.getDynamicObject();
         if (c == nullptr) continue;
         const int index = paramIndexForId (c->getProperty ("id").toString());
-        if (index < 0 || ! tweakable (paramSpecs()[(size_t) index])) continue;
-        scratch.set (index, (float) c->getProperty ("value"));
+        if (index < 0) continue;
+        const auto& spec = paramSpecs()[(size_t) index];
+        const auto value = c->getProperty ("value");
+        if (tweakableChoice (spec))
+        {
+            // The option by name, case not mattering; a number is taken as the index.
+            int choice = -1;
+            if (value.isString())
+            {
+                const auto& names = spec.choices();
+                for (int k = 0; k < names.size() && choice < 0; ++k)
+                    if (names[k].equalsIgnoreCase (value.toString().trim())) choice = k;
+            }
+            else
+                choice = (int) value;
+            if (choice < 0 || choice >= optionsFor (spec).size()) continue;
+            scratch.set (index, (float) choice);
+        }
+        else if (tweakable (spec) && ! value.isString())
+            scratch.set (index, (float) value);
+        else
+            continue;
         if (std::abs (scratch.get ((P) index) - current.get ((P) index)) < 1.0e-5f) continue;
         bool known = false;
         for (auto& ch : changes) if (ch.paramIndex == index) { ch.value = scratch.get ((P) index); known = true; }

@@ -1276,6 +1276,63 @@ static void testQuickTweak()
     changes.clear();
     CHECK (! ruleTweak ("like the inside of a whale", pad, changes, summary));   // the model's job
 
+    // The filter by type and filter-aware darkening.
+    changes.clear();
+    CHECK (ruleTweak ("high pass filter", pad, changes, summary));
+    CHECK (filterTypeNames()[(int) valueAfter (pad, changes, P::filter_type)].startsWith ("HP"));
+    CHECK (valueAfter (pad, changes, P::filter_cutoff) <= 1200.0f);
+    CHECK (valueAfter (pad, changes, P::eq_high_gain) == pad.get (P::eq_high_gain));   // "high" here is not "more highs"
+    Patch hp = pad;
+    hp.set (P::filter_type, (float) filterTypeNames().indexOf ("HP12"));
+    changes.clear();
+    CHECK (ruleTweak ("darker", hp, changes, summary));
+    CHECK (valueAfter (hp, changes, P::filter_cutoff) == hp.get (P::filter_cutoff));   // closing a high-pass would not darken it
+    CHECK ((int) valueAfter (hp, changes, P::filter_routing) == filterRoutingNames().indexOf ("Series"));
+    CHECK (filterTypeNames()[(int) valueAfter (hp, changes, P::filter2_type)].startsWith ("LP"));
+    CHECK (valueAfter (hp, changes, P::eq_high_gain) < hp.get (P::eq_high_gain));
+    changes.clear();
+    CHECK (ruleTweak ("lower the cutoff", pad, changes, summary));
+    CHECK (valueAfter (pad, changes, P::filter_cutoff) < 900.0f);
+    CHECK (valueAfter (pad, changes, P::oscA_coarse) == pad.get (P::oscA_coarse));   // not an octave down
+
+    // Named modulation, waves and effect modes.
+    changes.clear();
+    CHECK (ruleTweak ("add tremolo", pad, changes, summary));
+    {
+        bool tremolo = false;
+        for (int i = 0; i < kNumModSlots; ++i)
+        {
+            const int src = (int) valueAfter (pad, changes, modSourceParam (i));
+            if (src >= SrcLfo1 && src <= SrcLfo4 && (int) valueAfter (pad, changes, modDestParam (i)) == TargetAmp) tremolo = true;
+        }
+        CHECK (tremolo);
+    }
+    changes.clear();
+    CHECK (ruleTweak ("ping pong delay, dotted eighth", pad, changes, summary));
+    CHECK ((int) valueAfter (pad, changes, P::delay_mode) == delayModeNames().indexOf ("Ping-Pong"));
+    CHECK ((int) valueAfter (pad, changes, P::delay_sync) == delaySyncNames().indexOf ("1/8D"));
+    changes.clear();
+    CHECK (ruleTweak ("shimmer reverb", pad, changes, summary));
+    CHECK ((int) valueAfter (pad, changes, P::reverb_type) == reverbTypeNames().indexOf ("Shimmer"));
+    changes.clear();
+    CHECK (ruleTweak ("supersaw", pad, changes, summary));
+    CHECK ((int) valueAfter (pad, changes, P::oscA_wave) == waveNames().indexOf ("Saw"));
+    CHECK (valueAfter (pad, changes, P::unison_voices) >= 5.0f);
+    changes.clear();
+    CHECK (ruleTweak ("less highs, scoop the mids", pad, changes, summary));
+    CHECK (valueAfter (pad, changes, P::eq_high_gain) < 0.0f);
+    CHECK (valueAfter (pad, changes, P::eq_mid_gain) < 0.0f);
+    changes.clear();
+    CHECK (ruleTweak ("shorter reverb", pad, changes, summary));
+    CHECK (valueAfter (pad, changes, P::reverb_size) < pad.get (P::reverb_size));
+    CHECK (valueAfter (pad, changes, P::aenv_release) == pad.get (P::aenv_release));   // the reverb, not the note
+
+    // The model may name options now.
+    CHECK (tweakGrammar().contains ("\"HP24\""));
+    std::vector<TweakChange> choice;
+    CHECK (parseTweakReply ("{\"changes\":[{\"id\":\"filter_type\",\"value\":\"hp24\"},{\"id\":\"oscA_wave\",\"value\":\"User 1\"}]}", pad, choice, summary));
+    CHECK (choice.size() == 1 && choice.front().paramIndex == (int) P::filter_type && (int) choice.front().value == filterTypeNames().indexOf ("HP24"));
+
     // The model's grammar and prompt mention the archetypes and only numeric settings.
     CHECK (tweakGrammar().contains ("\"filter_cutoff\""));
     CHECK (! tweakGrammar().contains ("mod1_source"));
