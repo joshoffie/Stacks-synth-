@@ -11,6 +11,7 @@
 #include "Wavetable.h"
 #include "Patch.h"
 #include "PatchGenerator.h"
+#include "QuickTweak.h"
 #include "ai/LlmPatchGenerator.h"
 #include "ai/LlamaBackend.h"
 #include "ai/ModelManager.h"
@@ -1225,6 +1226,65 @@ static int retouchFactory()
     return 0;
 }
 
+//==============================================================================
+static void testQuickTweak()
+{
+    section ("quick tweak rules");
+    Patch pad;                                   // a lush pad to reshape
+    pad.set (P::aenv_attack, 0.6f); pad.set (P::aenv_decay, 1.0f); pad.set (P::aenv_sustain, 0.9f); pad.set (P::aenv_release, 2.5f);
+    pad.set (P::filter_cutoff, 900.0f); pad.set (P::unison_voices, 4); pad.set (P::reverb_mix, 0.5f); pad.set (P::sub_level, 0.1f);
+    auto valueAfter = [] (const Patch& base, const std::vector<TweakChange>& changes, P p)
+    {
+        for (const auto& c : changes) if (c.paramIndex == (int) p) return c.value;
+        return base.get (p);
+    };
+
+    std::vector<TweakChange> changes;
+    juce::String summary;
+    CHECK (ruleTweak ("short pluck", pad, changes, summary));
+    CHECK (summary.startsWith ("Short pluck"));
+    CHECK (valueAfter (pad, changes, P::aenv_attack) < 0.01f);
+    CHECK (valueAfter (pad, changes, P::aenv_sustain) < 0.05f);
+    CHECK (valueAfter (pad, changes, P::aenv_release) < 0.2f);
+    CHECK (valueAfter (pad, changes, P::filter_env) >= 2.0f);
+    CHECK (valueAfter (pad, changes, P::reverb_mix) <= 0.25f);
+
+    changes.clear();
+    CHECK (ruleTweak ("make it a bass", pad, changes, summary));
+    CHECK (valueAfter (pad, changes, P::oscA_coarse) <= -12.0f);
+    CHECK (valueAfter (pad, changes, P::sub_level) >= 0.5f);
+    CHECK (valueAfter (pad, changes, P::unison_voices) <= 1.5f);
+
+    changes.clear();                              // "more bass" is the low end, not the type
+    CHECK (ruleTweak ("more bass", pad, changes, summary));
+    CHECK (valueAfter (pad, changes, P::oscA_coarse) == pad.get (P::oscA_coarse));
+    CHECK (valueAfter (pad, changes, P::sub_level) > pad.get (P::sub_level));
+
+    changes.clear();                              // adjectives move relative to the type
+    CHECK (ruleTweak ("dark pluck", pad, changes, summary));
+    CHECK (valueAfter (pad, changes, P::aenv_sustain) < 0.05f);
+    CHECK (valueAfter (pad, changes, P::filter_cutoff) < 900.0f);
+
+    changes.clear();                              // a named stage moves only that stage
+    CHECK (ruleTweak ("shorter release", pad, changes, summary));
+    CHECK_NEAR (valueAfter (pad, changes, P::aenv_release), 1.25f, 0.01f);
+    CHECK (valueAfter (pad, changes, P::aenv_decay) == pad.get (P::aenv_decay));
+
+    changes.clear();
+    CHECK (ruleTweak ("slightly brighter", pad, changes, summary));
+    CHECK (valueAfter (pad, changes, P::filter_cutoff) > 900.0f);
+    changes.clear();
+    CHECK (! ruleTweak ("like the inside of a whale", pad, changes, summary));   // the model's job
+
+    // The model's grammar and prompt mention the archetypes and only numeric settings.
+    CHECK (tweakGrammar().contains ("\"filter_cutoff\""));
+    CHECK (! tweakGrammar().contains ("mod1_source"));
+    CHECK (tweakSystemPrompt().contains ("pluck:"));
+    std::vector<TweakChange> parsed;
+    CHECK (parseTweakReply ("{\"changes\":[{\"id\":\"filter_cutoff\",\"value\":2400},{\"id\":\"nonsense\",\"value\":1}]}", pad, parsed, summary));
+    CHECK (parsed.size() == 1 && parsed.front().paramIndex == (int) P::filter_cutoff);
+}
+
 static void testPromptCues()
 {
     std::printf ("prompt cues\n");
@@ -1365,6 +1425,7 @@ int main (int argc, char** argv)
     testMacroRoutings();
     testWarpsAndSources();
     testPromptCues();
+    testQuickTweak();
     testSampler();
     testSampleAnalyser();
     testSongAnalyser();

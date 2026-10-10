@@ -159,7 +159,7 @@ LibraryPanel::LibraryPanel (StacksAudioProcessor& p) : processor (p)
     favouritesOnly.onClick = [this] { showFavouritesOnly = favouritesOnly.getToggleState(); refresh(); };
     addAndMakeVisible (favouritesOnly);
 
-    playOnClick.setTooltip ("Play: clicking a patch plays one note of it (low for a bass) so you can browse without the keyboard. Click to turn it off.");
+    playOnClick.setTooltip ("Play on pick: off by default. On, picking a preset or a block plays one note of it (low for a bass) so you can browse without the keyboard.");
     playOnClick.setClickingTogglesState (true);
     playOnClick.setColour (juce::TextButton::buttonOnColourId, colours::accent);
     playOnClick.setToggleState (processor.previewOnClick(), juce::dontSendNotification);

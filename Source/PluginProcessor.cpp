@@ -822,7 +822,7 @@ void StacksAudioProcessor::loadEngineFromSettings()
     designWaves = s.getBoolValue ("designWaves", true);
     calm = s.getBoolValue ("calm", false);
     mpe = s.getBoolValue ("mpe", false);
-    previewClicks = s.getBoolValue ("previewOnClick", true);
+    previewClicks = s.getBoolValue ("auditionPreview", false);   // off unless the Play button in the library is on
     voiceContext.mpe.store (mpe);
     EngineChoice choice;
     const auto kind = s.getValue ("engine", "builtin");   // Qwen3 4B out of the box; it downloads itself on first use
@@ -1101,7 +1101,7 @@ void StacksAudioProcessor::setPreviewOnClick (bool shouldPlay)
 {
     previewClicks = shouldPlay;
     auto& s = settings();
-    s.setValue ("previewOnClick", shouldPlay);
+    s.setValue ("auditionPreview", shouldPlay);
     s.saveIfNeeded();
 }
 
