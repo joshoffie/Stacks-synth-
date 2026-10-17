@@ -1,4 +1,5 @@
 #include "PluginProcessor.h"
+#include <map>
 #include "Controls.h"
 #include "PluginEditor.h"
 #include "ai/PatchExplainer.h"
@@ -1244,9 +1245,29 @@ void StacksAudioProcessor::requestNewBatch (const juce::String& hint, float vari
     GenerationRequest req;
     req.hint = hint;
     req.variation = variation;
-    req.count = kBatchSize;
+    req.count = kAiPatchesPerBatch;   // five, all grown; no random filler
     req.generation = labState.generation + 1;
     startGeneration (std::move (req));
+}
+
+// A kind of sound from the home screen becomes a brief the player never sees.
+void StacksAudioProcessor::requestFromKind (const juce::String& kind)
+{
+    static const std::map<juce::String, std::vector<const char*>> briefs = {
+        { "Pad",     { "warm analog pad with slow movement", "glassy evolving pad, cinematic and wide", "soft string machine pad", "ambient shimmer pad with a long tail", "choir-like vocal pad", "dark cold pad with a slow formant sweep", "80s synthwave pad, lush chorus" } },
+        { "Keys",    { "warm electric piano", "bell-like FM keys", "organ with rotary chorus", "wooden marimba-like keys", "clavinet funk keys, percussive", "music box, delicate", "soft felt piano" } },
+        { "Bass",    { "warm 80s synth bass", "reese bass, wide and growling", "squelchy acid bass with resonance", "deep clean sub bass", "funky synth bass with filter envelope", "rubbery FM bass", "distorted mid bass" } },
+        { "Lead",    { "bright supersaw lead", "mono lead with portamento, 80s solo", "chiptune square lead", "soft flute-like lead", "vocal formant lead that talks", "whistling sine lead with vibrato", "screaming distorted lead" } },
+        { "Pluck",   { "punchy pluck for house music", "glassy FM pluck with delay", "trance pluck, bright and bouncy", "lo-fi dusty pluck with tape wobble", "harp-like pluck with long release", "stab chord for house, short and punchy" } },
+        { "Bell",    { "crystal bell, pure and bright", "church bell with a long decay", "metallic gamelan bell", "tiny glass chime", "tubular bell", "music-box bell with shimmer" } },
+        { "Texture", { "noisy granular-sounding texture", "underwater texture with slow filter movement", "sci-fi spaceship drone", "wind-like noise texture", "tape-worn melancholic drone", "rhythmic gated texture synced to tempo" } },
+        { "Drums",   { "punchy electronic kick drum", "tight 808-style kick with a long sub tail", "snappy snare hit with noise", "crisp closed hi-hat", "clap with a short reverb", "tom with a pitch drop" } },
+    };
+    const auto it = briefs.find (kind);
+    const auto& list = it != briefs.end() ? it->second : briefs.at ("Pad");
+    juce::Random rng;
+    const juce::String brief = juce::String (list[(size_t) rng.nextInt ((int) list.size())]) + ", five different takes on it";
+    requestNewBatch (brief, 0.6f);
 }
 
 void StacksAudioProcessor::requestEvolve (const juce::String& hint, float variation)
@@ -1254,7 +1275,7 @@ void StacksAudioProcessor::requestEvolve (const juce::String& hint, float variat
     GenerationRequest req;
     req.hint = hint;
     req.variation = variation;
-    req.count = kBatchSize;
+    req.count = kAiPatchesPerBatch;   // five, all grown; no random filler
     req.generation = labState.generation + 1;
     req.parents = { currentPatch() }; // Evolve grows from the sound you're hearing
     startGeneration (std::move (req));
@@ -1265,7 +1286,7 @@ void StacksAudioProcessor::requestEvolveFrom (const Patch& parent, const juce::S
     GenerationRequest req;
     req.hint = hint;
     req.variation = variation;
-    req.count = kBatchSize;
+    req.count = kAiPatchesPerBatch;   // five, all grown; no random filler
     req.generation = labState.generation + 1;
     req.parents = { parent };
     if (labState.generating)
@@ -1370,11 +1391,8 @@ void StacksAudioProcessor::startGeneration (GenerationRequest req)
 
     if (usingAi)
     {
-        // Instant half: variations from the breeder, so there is something to play immediately.
-        GenerationRequest quick = req;
-        quick.count = kBatchSize - kAiPatchesPerBatch;
-        for (auto& p : randomGenerator->generate (quick, {}))
-            labState.candidates.push_back (std::move (p));
+        // (The breeder's instant variations used to fill the other half of the
+        // batch; the home screen shows only the five grown sounds now.)
 
         GenerationRequest aiReq = req;
         aiReq.count = kAiPatchesPerBatch;

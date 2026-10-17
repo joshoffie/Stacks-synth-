@@ -95,6 +95,7 @@ public:
     juce::ChangeBroadcaster labBroadcaster;
 
     void requestNewBatch (const juce::String& hint, float variation);
+    void requestFromKind (const juce::String& kind);   // home screen: "Pad", "Keys", "Bass"... becomes a brief of its own
     void requestEvolve (const juce::String& hint, float variation);
     void requestEvolveFrom (const Patch& parent, const juce::String& hint, float variation); // "plant" one candidate
     void cancelGeneration();

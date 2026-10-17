@@ -19,6 +19,7 @@ StacksAudioProcessorEditor::StacksAudioProcessorEditor (StacksAudioProcessor& p)
       tuner (p),
       synthPanel (p),
       labPanel (p),
+      homeView (p),
       keyboard (p.keyboardState)
 {
     setLookAndFeel (&lookAndFeel);
@@ -60,6 +61,12 @@ StacksAudioProcessorEditor::StacksAudioProcessorEditor (StacksAudioProcessor& p)
     setFocusContainerType (juce::Component::FocusContainerType::keyboardFocusContainer);
     addAndMakeVisible (synthPanel);
     addAndMakeVisible (labPanel);
+    addAndMakeVisible (homeView);
+    homeView.onOpenSynth = [this] { setHome (false); };
+    modeButton.setTooltip ("Home: pick a kind of sound and grow it. Synth: every knob.");
+    modeButton.onClick = [this] { setHome (! showingHome); };
+    addAndMakeVisible (modeButton);
+    setHome (true);
     addAndMakeVisible (keyboard);
 
     synthProcessor.labBroadcaster.addChangeListener (this);
@@ -139,6 +146,8 @@ void StacksAudioProcessorEditor::resized()
     tuner.setBounds (header.removeFromRight (230).reduced (0, 8));
     header.removeFromRight (10);
     header.removeFromLeft (112);   // the wordmark, painted
+    modeButton.setBounds (header.removeFromLeft (64).withSizeKeepingCentre (62, 24));
+    header.removeFromLeft (8);
     patchName.setBounds (header.removeFromLeft (juce::jmin (360, header.getWidth() / 3)).reduced (0, 8));
     header.removeFromLeft (10);
     scope.setBounds (header.reduced (0, 7));
@@ -148,9 +157,20 @@ void StacksAudioProcessorEditor::resized()
     keyboard.setBounds (r.removeFromBottom (kKeyboardHeight));
     r.removeFromBottom (kMargin);
 
+    homeView.setBounds (r);
     labPanel.setBounds (r.removeFromRight (kLabWidth));
     r.removeFromRight (kMargin);
     synthPanel.setBounds (r);
+}
+
+void StacksAudioProcessorEditor::setHome (bool home)
+{
+    showingHome = home;
+    homeView.setVisible (home);
+    synthPanel.setVisible (! home);
+    labPanel.setVisible (! home);
+    modeButton.setButtonText (home ? "Synth" : "Home");
+    resized();
 }
 
 } // namespace stacks

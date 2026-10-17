@@ -226,6 +226,7 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
     hint.setReturnKeyStartsNewLine (false);
     hint.setFont (StacksLookAndFeel::font (12.0f));
     hint.onReturnKey = [this] { newBatchButton.triggerClick(); };   // a prompt stands on its own: no preset needed
+    hint.setVisible (false);          // the home screen asks by kind of sound instead; the prompt bar is kept for later
     hint.onEscapeKey = [this] { hint.giveAwayKeyboardFocus(); };    // back to the host's keyboard
     addAndMakeVisible (hint);
 
@@ -281,6 +282,7 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
             processor.requestNewBatch (hint.getText(), (float) variation.getValue());
     };
     addAndMakeVisible (newBatchButton);
+    newBatchButton.setVisible (false);   // fresh batches start from the home screen
 
     evolveButton.setColour (juce::TextButton::buttonColourId, colours::accent);
     evolveButton.setColour (juce::TextButton::textColourOffId, juce::Colours::black);
@@ -306,7 +308,7 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
     nowPlaying.showSaveButton (true);
     cardList.addAndMakeVisible (nowPlaying);
 
-    aiHeader.set (spark() + " AI IDEAS", false, true, colours::accent);
+    aiHeader.set (spark() + " IDEAS", false, true, colours::accent);
     cardList.addAndMakeVisible (aiHeader);
     randomHeader.onToggle = [this]
     {
@@ -503,7 +505,7 @@ void LabPanel::layoutCards()
     aiHeader.setVisible (showAi);
     if (showAi)
     {
-        juce::String title = spark() + " AI IDEAS";
+        juce::String title = spark() + " IDEAS";
         if (aiBusy) title << "   -   designing " << (aiCount + 1) << " of " << StacksAudioProcessor::kAiPatchesPerBatch << "...";
         aiHeader.set (title, false, true, colours::accent);
         aiHeader.setBounds (0, y, width, SectionHeader::kHeight);

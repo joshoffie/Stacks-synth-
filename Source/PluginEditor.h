@@ -5,6 +5,7 @@
 #include "PluginProcessor.h"
 #include "Controls.h"
 #include "StacksLookAndFeel.h"
+#include "HomeView.h"
 #include "Displays.h"
 #include "SettingsPanel.h"
 #include "TunerView.h"
@@ -40,6 +41,10 @@ private:
     juce::TextButton settingsButton, undoButton, redoButton;
     SynthPanel synthPanel;
     LabPanel labPanel;
+    HomeView homeView;
+    juce::TextButton modeButton;   // Home <-> Synth
+    bool showingHome = true;
+    void setHome (bool);
     StacksKeyboard keyboard;
     juce::Rectangle<int> headerBounds;
     juce::TooltipWindow tooltips { this, 600 };

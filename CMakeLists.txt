@@ -154,6 +154,7 @@ target_sources(Stacks PRIVATE
     Source/SynthPanel.cpp
     Source/ModulatorsPanel.cpp
     Source/LabPanel.cpp
+    Source/HomeView.cpp
     Source/LibraryPanel.cpp
     Source/GardenView.cpp)
 
