@@ -25,7 +25,7 @@ SettingsPanel::SettingsPanel (StacksAudioProcessor& p) : processor (p)
     title.setColour (juce::Label::textColourId, colours::text);
     addAndMakeVisible (title);
 
-    engineLabel.setText ("AI engine", juce::dontSendNotification);
+    engineLabel.setText ("Engine", juce::dontSendNotification);
     engineLabel.setFont (StacksLookAndFeel::font (12.0f, true));
     engineLabel.setColour (juce::Label::textColourId, colours::muted);
     addAndMakeVisible (engineLabel);
@@ -210,7 +210,7 @@ void SettingsPanel::rebuildMenu()
         engineBox.addItem ("Ollama: " + name, kOllamaItemBase + menuOllama.size() - 1);
     }
 
-    engineBox.addSectionHeading ("No AI");
+    engineBox.addSectionHeading ("Off");
     engineBox.addItem ("Random breeder only", kRandomItemId);
 
     int selected = kRandomItemId;

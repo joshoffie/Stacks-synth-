@@ -37,7 +37,7 @@ StacksAudioProcessorEditor::StacksAudioProcessorEditor (StacksAudioProcessor& p)
     addAndMakeVisible (tuner);
 
     settingsButton.setButtonText (juce::String::fromUTF8 ("\xe2\x9a\x99"));   // gear
-    settingsButton.setTooltip ("Settings: which AI model designs patches, your own models, calm mode, and the model guide");
+    settingsButton.setTooltip ("Settings: the engine that grows sounds, your own models, calm mode, and the guide");
     settingsButton.onClick = [this] { SettingsPanel::show (synthProcessor, this); };
     addAndMakeVisible (settingsButton);
 

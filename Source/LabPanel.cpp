@@ -84,7 +84,7 @@ void PatchCard::paint (juce::Graphics& g)
     g.drawText (name, titleRow.removeFromLeft (nameWidth), juce::Justification::centredLeft, true);
 
     juce::String tags = category.toUpperCase();
-    juce::String badge = isCurrent ? "NOW PLAYING" : isRandom ? "RANDOM" : spark() + " AI";
+    juce::String badge = isCurrent ? "NOW PLAYING" : isRandom ? "RANDOM" : spark() + " GROWN";
     if (tags.isNotEmpty()) tags << "  ";
     tags << badge;
     if (changesFromSeed >= 0 && style != Style::nowPlaying)
@@ -191,7 +191,7 @@ void ProgressStrip::paint (juce::Graphics& g)
 //==============================================================================
 LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garden (p), tree (p), explain (p)
 {
-    header.setText ("AI LAB", juce::dontSendNotification);
+    header.setText ("LAB", juce::dontSendNotification);
     header.setFont (StacksLookAndFeel::font (10.0f, true).withExtraKerningFactor (0.18f));
     header.setColour (juce::Label::textColourId, colours::muted);
     addAndMakeVisible (header);
@@ -236,7 +236,7 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
     tweak.setFont (StacksLookAndFeel::font (12.0f));
     tweak.setTooltip ("A few words that change the sound you're hearing, in place: brighter, darker, warmer, wider, shorter, punchier, softer, dirtier, "
                       "more/less reverb, delay, chorus, bass, noise, movement, vibrato, faster, slower, an octave up... Plain words act at once; "
-                      "anything else goes to the AI model. Cmd+Z undoes a tweak.");
+                      "anything else is worked out for you. Cmd+Z undoes a tweak.");
     tweak.onReturnKey = [this]
     {
         const auto text = tweak.getText().trim();
@@ -247,6 +247,7 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
     };
     tweak.onEscapeKey = [this] { tweak.giveAwayKeyboardFocus(); };
     addAndMakeVisible (tweak);
+    tweak.setVisible (false);   // the quick-tweak bar is parked with the prompt bar
 
     variationLabel.setText ("Variation", juce::dontSendNotification);
     variationLabel.setFont (StacksLookAndFeel::font (10.5f));
@@ -260,8 +261,8 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
     variation.setTooltip ("How far the children may stray from their parents");
     addAndMakeVisible (variation);
 
-    designWavesToggle.setTooltip ("Let the AI and the random breeder invent new wavetables for oscillator A (shown as \"Custom\"), "
-                                  "instead of only picking built-in ones. AI batches take about a third longer.");
+    designWavesToggle.setTooltip ("Invent new wavetables for oscillator A (shown as \"Custom\"), "
+                                  "instead of only picking built-in ones. Batches take about a third longer.");
     designWavesToggle.setColour (juce::ToggleButton::textColourId, colours::muted);
     designWavesToggle.setColour (juce::ToggleButton::tickColourId, colours::accent);
     designWavesToggle.onClick = [this] { processor.setDesignWavetables (designWavesToggle.getToggleState()); };
@@ -323,7 +324,7 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
     viewport.setScrollBarThickness (6);
     addAndMakeVisible (viewport);
 
-    for (auto* tab : { &gardenTab, &treeTab, &ideasTab, &libraryTab, &explainTab })
+    for (auto* tab : { &gardenTab, &treeTab, &ideasTab, &libraryTab })
     {
         styleAsTab (*tab);
         tab->setColour (juce::TextButton::buttonOnColourId, colours::accent);
@@ -471,6 +472,7 @@ void LabPanel::resized()
     ideasTab.setBounds (tabs.removeFromLeft (tabW));
     libraryTab.setBounds (tabs.removeFromLeft (tabW));
     explainTab.setBounds (tabs);
+    explainTab.setVisible (false);   // Explain is parked
     r.removeFromTop (6);
 
     viewport.setBounds (r);

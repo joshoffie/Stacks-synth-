@@ -45,7 +45,7 @@ void ExplainView::refresh()
 
     title.setText (current.name, juce::dontSendNotification);
     explainButton.setEnabled (hasModel && ! (lab.explaining && forThis));
-    explainButton.setButtonText (! hasModel ? "Pick an AI model in Settings for the model's view"
+    explainButton.setButtonText (! hasModel ? "Pick a model in Settings for the model's view"
                                  : lab.explaining && forThis ? "Writing..." : forThis && lab.modelExplanation.isNotEmpty() ? "Explain again" : "Explain this sound");
 
     juce::String body;

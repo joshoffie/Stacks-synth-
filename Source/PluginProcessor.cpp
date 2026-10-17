@@ -1261,7 +1261,6 @@ void StacksAudioProcessor::requestFromKind (const juce::String& kind)
         { "Pluck",   { "punchy pluck for house music", "glassy FM pluck with delay", "trance pluck, bright and bouncy", "lo-fi dusty pluck with tape wobble", "harp-like pluck with long release", "stab chord for house, short and punchy" } },
         { "Bell",    { "crystal bell, pure and bright", "church bell with a long decay", "metallic gamelan bell", "tiny glass chime", "tubular bell", "music-box bell with shimmer" } },
         { "Texture", { "noisy granular-sounding texture", "underwater texture with slow filter movement", "sci-fi spaceship drone", "wind-like noise texture", "tape-worn melancholic drone", "rhythmic gated texture synced to tempo" } },
-        { "Drums",   { "punchy electronic kick drum", "tight 808-style kick with a long sub tail", "snappy snare hit with noise", "crisp closed hi-hat", "clap with a short reverb", "tom with a pitch drop" } },
     };
     const auto it = briefs.find (kind);
     const auto& list = it != briefs.end() ? it->second : briefs.at ("Pad");
@@ -1351,7 +1350,7 @@ void StacksAudioProcessor::startGeneration (GenerationRequest req)
         labState.seedIsPatch = false;
     }
     labState.generating = true;
-    labState.status = "Generating with " + engineName() + "...";
+    labState.status = "Growing...";
 
     const bool usingAi = generator != randomGenerator;
     labState.progress = -1.0f;

@@ -4,6 +4,7 @@
 
 #include "Controls.h"
 #include "PluginProcessor.h"
+#include "GardenView.h"
 
 namespace stacks
 {
@@ -77,6 +78,23 @@ private:
     float anim = 0.0f;
     int growthSeed = 1;
     juce::String stageText;
+
+    // The growing stage: blocks drop in as sounds land and settle on the slab.
+    struct Falling
+    {
+        int index = 0;
+        float x = 0.0f, y = 0.0f, vy = 0.0f;   // front-face top-left and vertical speed
+        float scale = 0.2f, squash = 1.0f, age = 0.0f;
+        bool landed = false;
+        GardenView::Style style;
+        juce::String name;
+    };
+    std::vector<Falling> falling;
+    GardenView::Style seedStyle;
+    juce::String seedName;
+    juce::Rectangle<float> slotFor (int index, juce::Rectangle<float> area) const;
+    float blockWidth (juce::Rectangle<float> area) const  { return juce::jmin (180.0f, (area.getWidth() - 3.0f * 14.0f) / 4.0f); }
+    float blockHeight (juce::Rectangle<float> area) const { return juce::jmin (90.0f, blockWidth (area) * 0.6f); }
 };
 
 } // namespace stacks

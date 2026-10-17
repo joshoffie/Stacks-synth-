@@ -124,47 +124,10 @@ GardenView::Style GardenView::styleFor (const Patch& p, const WavetableBank& ban
 }
 
 //==============================================================================
-class GardenView::Block : public juce::Component,
-                          public juce::SettableTooltipClient
+void GardenView::paintBlock (juce::Graphics& g, juce::Rectangle<float> f, const Style& s, const juce::String& name, bool auditioned, bool hovered, int index)
 {
-public:
-    Block (GardenView& g, int idx) : garden (g), index (idx) {}
-
-    void set (const Patch& p, const Style& s, bool isAuditioned, bool isFavourite, int changesFromSeed)
     {
-        name = p.name;
-        style = s;
-        ai = p.origin == "AI";
-        auditioned = isAuditioned;
-        favourite = isFavourite;
-        setTooltip (p.name + (p.category.isNotEmpty() ? "  (" + p.category + ")" : "")
-                    + (changesFromSeed >= 0 ? "  -  " + juce::String (changesFromSeed) + " audible changes from the seed" : juce::String()) + "\n" + p.description
-                    + "\n\nclick: hear   drag up: exaggerate, drag down: blend toward the seed (live)   right-click: plant / save");
-        setTitle ("Audition " + name);
-        repaint();
-    }
-
-    // The front face, in this component's space.
-    juce::Rectangle<float> face() const
-    {
-        return { kMargin, kMargin + kMaxDepth, (float) getWidth() - kMargin * 2.0f - kSkew, garden.blockHeight() };
-    }
-
-    bool hitTest (int x, int y) override
-    {
-        const auto f = face();
-        if (f.contains ((float) x, (float) y)) return true;
-        return topFace (f, style.depth).contains ((float) x, (float) y) || sideFace (f, style.depth).contains ((float) x, (float) y);
-    }
-
-    void paint (juce::Graphics& g) override
-    {
-        const auto f = face();
-        const auto& s = style;
-        const float alpha = juce::jlimit (0.0f, 1.0f, appear);
-        if (alpha <= 0.0f) return;
-        g.setOpacity (alpha);
-        const auto colour = ai ? s.colour : s.colour.withAlpha (0.92f);
+        const auto colour = s.colour;
 
         // Reverb: a soft glow behind the block.
         if (s.glow > 0.02f)
@@ -253,17 +216,59 @@ public:
             g.drawFittedText (name, f.withTrimmedTop (f.getHeight() * 0.52f).reduced (3.0f, 2.0f).toNearestInt(), juce::Justification::centred, 2, 0.8f);
         }
 
+        if (auditioned || hovered)
+        {
+            g.setColour (auditioned ? colours::text : colours::text.withAlpha (0.5f));
+            g.drawRoundedRectangle (f.expanded (0.5f), s.corner, auditioned ? 1.8f : 1.0f);
+        }
+    }
+}
+
+class GardenView::Block : public juce::Component,
+                          public juce::SettableTooltipClient
+{
+public:
+    Block (GardenView& g, int idx) : garden (g), index (idx) {}
+
+    void set (const Patch& p, const Style& s, bool isAuditioned, bool isFavourite, int changesFromSeed)
+    {
+        name = p.name;
+        style = s;
+        ai = p.origin == "AI";
+        auditioned = isAuditioned;
+        favourite = isFavourite;
+        setTooltip (p.name + (p.category.isNotEmpty() ? "  (" + p.category + ")" : "")
+                    + (changesFromSeed >= 0 ? "  -  " + juce::String (changesFromSeed) + " audible changes from the seed" : juce::String()) + "\n" + p.description
+                    + "\n\nclick: hear   drag up: exaggerate, drag down: blend toward the seed (live)   right-click: plant / save");
+        setTitle ("Audition " + name);
+        repaint();
+    }
+
+    // The front face, in this component's space.
+    juce::Rectangle<float> face() const
+    {
+        return { kMargin, kMargin + kMaxDepth, (float) getWidth() - kMargin * 2.0f - kSkew, garden.blockHeight() };
+    }
+
+    bool hitTest (int x, int y) override
+    {
+        const auto f = face();
+        if (f.contains ((float) x, (float) y)) return true;
+        return topFace (f, style.depth).contains ((float) x, (float) y) || sideFace (f, style.depth).contains ((float) x, (float) y);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto f = face();
+        const float alpha = juce::jlimit (0.0f, 1.0f, appear);
+        if (alpha <= 0.0f) return;
+        g.setOpacity (alpha);
+        GardenView::paintBlock (g, f, ai ? style : [&] { auto s = style; s.colour = s.colour.withAlpha (0.92f); return s; }(), name, auditioned, hovered, index);
         if (favourite)
         {
             g.setColour (colours::rowFilter);
             g.setFont (StacksLookAndFeel::font (11.0f, true));
             g.drawText (heart(), f.withTrimmedLeft (f.getWidth() - 16.0f).withHeight (14.0f).toNearestInt(), juce::Justification::centred, false);
-        }
-
-        if (auditioned || hovered)
-        {
-            g.setColour (auditioned ? colours::text : colours::text.withAlpha (0.5f));
-            g.drawRoundedRectangle (f.expanded (0.5f), s.corner, auditioned ? 1.8f : 1.0f);
         }
     }
 

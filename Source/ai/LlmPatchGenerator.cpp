@@ -633,7 +633,7 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
     juce::String reason;
     if (! backend->isAvailable (reason))
     {
-        progress.status ("AI unavailable (" + reason + ") - using Random");
+        progress.status ("Engine unavailable (" + reason + ") - using Random");
         return fallback->generate (request, progress);
     }
 
@@ -663,7 +663,7 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
             return {};
     }
 
-    progress.status ("Asking " + backend->modelName() + "...");
+    progress.status ("Writing...");
 
     // Written up front so a failed run can still be inspected.
     {
@@ -787,7 +787,7 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
 
         out.push_back (*patch);
         progress.patch (*patch);
-        progress.status (juce::String (out.size()) + " of " + juce::String (req.count) + " from " + backend->modelName() + "...");
+        progress.status (juce::String (out.size()) + " of " + juce::String (req.count) + " grown");
     });
 
     // Progress toward the next patch, read off the half-written JSON: the name
@@ -846,7 +846,7 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
 
     if (out.empty())
     {
-        progress.status ("AI gave nothing usable (" + (ok ? juce::String ("empty reply") : error) + ") - using Random");
+        progress.status ("Nothing usable came back (" + (ok ? juce::String ("empty reply") : error) + ") - using Random");
         return fallback->generate (req, progress);
     }
 

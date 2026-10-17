@@ -52,6 +52,9 @@ public:
         std::vector<float> wave;                // one cycle of oscillator A, -1..1
     };
     static Style styleFor (const Patch&, const WavetableBank&, bool ai);
+    // Draws one block with its front face at `face` (top and side faces rise above and to the right).
+    static void paintBlock (juce::Graphics&, juce::Rectangle<float> face, const Style&, const juce::String& name, bool lit, bool outlined, int speckleSeed);
+    static constexpr float kBlockSkew = 12.0f;
 
 private:
     class Block;

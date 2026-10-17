@@ -162,7 +162,7 @@ bool LlamaBackend::chat (const juce::String& systemPrompt, const juce::String& u
     auto phase = [&] (const juce::String& text) { if (onPhase) onPhase (text); };
     auto cancelled = [&] { return shouldCancel && shouldCancel(); };
     if (model == nullptr)
-        phase ("Loading " + displayName + " into memory...");
+        phase ("Warming up...");
     if (! ensureLoaded (error, cancelled))
         return false;
 

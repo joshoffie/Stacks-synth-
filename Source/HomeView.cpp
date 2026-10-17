@@ -15,7 +15,6 @@ namespace
         { "Pluck",   "short and bouncy",                     0xff5ec8c0 },
         { "Bell",    "glassy and ringing",                   0xffd08ab8 },
         { "Texture", "atmospheres, noise, drones",           0xff9ad17b },
-        { "Drums",   "kicks, hits and percussion",           0xffc9c9c9 },
     };
 
     class PressHandler : public juce::AccessibilityHandler
@@ -173,6 +172,11 @@ void HomeView::pick (const juce::String& kind)
     note.clear();
     growthSeed = (int) (juce::Time::getMillisecondCounter() & 0x7fff) + 1;
     anim = 0.0f;
+    falling.clear();
+    seedName = kind;
+    seedStyle = GardenView::styleFor (processor.currentPatch(), processor.builtInWavetables(), true);
+    for (const auto& k : kKinds)
+        if (kind == k.name) seedStyle.colour = juce::Colour (k.colour);   // the slab wears the kind's colour
     stage = Stage::growing;
     processor.requestFromKind (kind);
     refresh();
@@ -185,6 +189,9 @@ void HomeView::grow()
     note.clear();
     growthSeed = (int) (juce::Time::getMillisecondCounter() & 0x7fff) + 1;
     anim = 0.0f;
+    falling.clear();
+    seedName = processor.currentPatchName();
+    seedStyle = GardenView::styleFor (processor.currentPatch(), processor.builtInWavetables(), true);
     stage = Stage::growing;
     processor.requestEvolve ("", variation);
     refresh();
@@ -230,8 +237,46 @@ void HomeView::refresh()
 
 void HomeView::timerCallback()
 {
-    anim += 1.0f / 30.0f;
+    constexpr float dt = 1.0f / 30.0f;
+    anim += dt;
     const auto& lab = processor.lab();
+
+    // New sounds become blocks that fall onto the pile.
+    auto area = getLocalBounds().reduced (24).toFloat().withTrimmedTop (54.0f + 30.0f + 40.0f);
+    while (falling.size() < lab.candidates.size() && falling.size() < (size_t) StacksAudioProcessor::kAiPatchesPerBatch)
+    {
+        Falling f;
+        f.index = (int) falling.size();
+        const auto& patch = lab.candidates[(size_t) f.index];
+        f.name = patch.name;
+        f.style = GardenView::styleFor (patch, processor.builtInWavetables(), true);
+        const auto slot = slotFor (f.index, area);
+        f.x = slot.getX();
+        f.y = area.getY() - 140.0f;
+        f.vy = 0.0f;
+        falling.push_back (f);
+    }
+    for (auto& f : falling)
+    {
+        f.age += dt;
+        const auto slot = slotFor (f.index, area);
+        const float target = slot.getY();
+        if (! f.landed)
+        {
+            f.vy += 2600.0f * dt;                         // gravity
+            f.y += f.vy * dt;
+            f.scale += (1.06f - f.scale) * juce::jmin (1.0f, 7.0f * dt);   // grows in on the way down
+            if (f.y >= target)
+            {
+                f.y = target;
+                if (f.vy > 160.0f) { f.vy = -f.vy * 0.32f; f.squash = 0.82f; }   // bounce, squash
+                else { f.vy = 0.0f; f.landed = true; f.squash = 0.9f; }
+            }
+        }
+        else
+            f.scale += (1.0f - f.scale) * juce::jmin (1.0f, 6.0f * dt);
+        f.squash += (1.0f - f.squash) * juce::jmin (1.0f, 10.0f * dt);
+    }
     const float p = lab.progress;
     const int done = (int) lab.candidates.size();
     const char* words = p < 0.0f ? "listening" : p < 0.3f ? "listening" : p < 0.6f ? "sketching" : p < 0.85f ? "shaping" : "tuning";
@@ -246,7 +291,7 @@ void HomeView::resized()
 
     if (stage == Stage::pick)
     {
-        const int cols = r.getWidth() > 900 ? 4 : 2, rows = (int) tiles.size() / cols;
+        const int cols = r.getWidth() > 900 ? 4 : 2, rows = ((int) tiles.size() + cols - 1) / cols;
         const int gap = 14;
         const int tileW = (r.getWidth() - gap * (cols - 1)) / cols;
         const int tileH = juce::jmin (230, (r.getHeight() - gap * (rows - 1)) / rows);
@@ -317,55 +362,50 @@ void HomeView::paint (juce::Graphics& g)
         paintGrowth (g, r.withTrimmedTop (40).toFloat());
 }
 
-// Branches growing out of a seed, one trunk per sound; finished sounds light up.
+// The slab is the seed; the five sounds fall onto it as they land, growing in
+// on the way down and settling with a bounce. Empty slots wait as faint frames.
+juce::Rectangle<float> HomeView::slotFor (int index, juce::Rectangle<float> area) const
+{
+    const float bw = blockWidth (area), bh = blockHeight (area), gap = 14.0f;
+    const float rowW = 4.0f * bw + 3.0f * gap;
+    const float x0 = area.getCentreX() - rowW * 0.5f;
+    const float slabTop = area.getBottom() - 46.0f;
+    if (index < 4)
+        return { x0 + (float) index * (bw + gap), slabTop - bh - 6.0f, bw, bh };
+    return { area.getCentreX() - bw * 0.5f, slabTop - 2.0f * bh - 12.0f, bw, bh };   // the fifth sits on top
+}
+
 void HomeView::paintGrowth (juce::Graphics& g, juce::Rectangle<float> area)
 {
-    const auto& lab = processor.lab();
     const int total = StacksAudioProcessor::kAiPatchesPerBatch;
-    const int done = (int) lab.candidates.size();
-    const float progress = juce::jlimit (0.0f, 1.0f, lab.progress < 0.0f ? 0.5f + 0.5f * std::sin (anim * 1.5f) * 0.5f : lab.progress);
-    juce::Random rng (growthSeed);
-    const juce::Point<float> seed (area.getCentreX(), area.getBottom() - 30.0f);
-    g.setColour (colours::accent);
-    g.fillEllipse (seed.x - 6.0f, seed.y - 6.0f, 12.0f, 12.0f);
-    const float maxLen = juce::jmin (area.getHeight() - 60.0f, 260.0f);
-    for (int k = 0; k < total; ++k)
+    const float bw = blockWidth (area), bh = blockHeight (area);
+    // The slab: the kind or the sound this batch grows from.
+    const float rowW = 4.0f * bw + 3.0f * 14.0f;
+    juce::Rectangle<float> slab (area.getCentreX() - rowW * 0.5f - 8.0f, area.getBottom() - 46.0f, rowW + 16.0f, 34.0f);
+    auto slabStyle = seedStyle;
+    slabStyle.depth = 10.0f;
+    slabStyle.wave.clear();
+    GardenView::paintBlock (g, slab, slabStyle, seedName, false, false, 0);
+
+    // Waiting slots: faint frames that breathe.
+    for (int i = (int) falling.size(); i < total; ++i)
     {
-        const float angle = juce::degreesToRadians (-90.0f + (-40.0f + 80.0f * (float) k / (float) (total - 1)) + rng.nextFloat() * 6.0f - 3.0f);
-        const float grown = k < done ? 1.0f : k == done ? progress : juce::jmin (1.0f, anim * 0.12f * (float) (k - done + 1));
-        const float len = maxLen * (0.55f + 0.45f * grown) * (k < done ? 1.0f : grown);
-        juce::Path branch;
-        branch.startNewSubPath (seed);
-        const float bend = rng.nextFloat() * 60.0f - 30.0f;
-        const juce::Point<float> end (seed.x + std::cos (angle) * len, seed.y + std::sin (angle) * len);
-        const juce::Point<float> ctrl (seed.x + std::cos (angle) * len * 0.5f + bend, seed.y + std::sin (angle) * len * 0.5f);
-        branch.quadraticTo (ctrl, end);
-        const bool lit = k < done;
-        g.setColour (lit ? colours::accent : colours::muted.withAlpha (0.35f + 0.4f * grown));
-        g.strokePath (branch, juce::PathStrokeType (lit ? 2.5f : 1.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-        if (lit || k == done)
-        {
-            // leaves along the branch
-            for (int leaf = 1; leaf <= 3; ++leaf)
-            {
-                const float t = (float) leaf / 3.5f;
-                if (t > grown) break;
-                const auto pt = branch.getPointAlongPath (branch.getLength() * t);
-                const float sz = lit ? 5.0f : 3.0f + 2.0f * std::abs (std::sin (anim * 3.0f + (float) leaf));
-                g.setColour (lit ? colours::accent.withAlpha (0.8f) : colours::text.withAlpha (0.5f));
-                g.fillEllipse (pt.x - sz * 0.5f, pt.y - sz * 0.5f, sz, sz);
-            }
-            if (lit)
-            {
-                g.setColour (colours::text);
-                g.setFont (StacksLookAndFeel::font (12.0f, true));
-                g.drawText (lab.candidates[(size_t) k].name, juce::Rectangle<float> (end.x - 70.0f, end.y - 26.0f, 140.0f, 18.0f), juce::Justification::centred);
-            }
-        }
+        const auto slot = slotFor (i, area);
+        g.setColour (colours::muted.withAlpha (0.18f + 0.1f * std::sin (anim * 2.5f + (float) i)));
+        g.drawRoundedRectangle (slot, 4.0f, 1.0f);
+    }
+    // The blocks, in flight or settled.
+    for (const auto& f : falling)
+    {
+        const float w = bw * f.scale, hgt = bh * f.scale * f.squash;
+        juce::Rectangle<float> face (f.x + (bw - w) * 0.5f, f.y + bh - hgt, w, hgt);
+        g.setOpacity (juce::jmin (1.0f, f.age * 4.0f));
+        GardenView::paintBlock (g, face, f.style, f.name, f.landed, false, f.index);
+        g.setOpacity (1.0f);
     }
     g.setColour (colours::muted);
     g.setFont (StacksLookAndFeel::font (13.0f));
-    g.drawText (stageText, area.removeFromBottom (22), juce::Justification::centred);
+    g.drawText (stageText, area.removeFromTop (22), juce::Justification::centred);
 }
 
 } // namespace stacks
