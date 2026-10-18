@@ -1,4 +1,5 @@
 #include "SynthPanel.h"
+#include <algorithm>
 #include "Displays.h"
 #include "StacksLookAndFeel.h"
 
@@ -22,7 +23,7 @@ namespace
             { "FILTER",     &colours::rowFilter,   { { "FILTER", { "FILTER", "FILTER 2" }, 6, "filter" }, { "CHARACTER", { "CHARACTER" }, 2, nullptr }, { "FILTER ENV", { "FILTER ENV" }, 2, "fenv" }, { "AMP ENV", { "AMP ENV" }, 2, "aenv" } } },
             { "EFFECTS",    &colours::rowSpace,    { { "DISTORTION", { "DISTORTION" }, 2, nullptr }, { "EQ", { "EQ" }, 2, nullptr }, { "COMPRESSOR", { "COMPRESSOR" }, 2, nullptr },
                                                      { "CHORUS", { "CHORUS" }, 2, nullptr }, { "HYPER", { "HYPER" }, 1, nullptr }, { "TAPE", { "TAPE" }, 2, nullptr },
-                                                     { "DELAY", { "DELAY" }, 3, nullptr }, { "REVERB", { "REVERB" }, 2, nullptr }, { "CHAIN", { "CHAIN" }, 1, nullptr } } },
+                                                     { "DELAY", { "DELAY" }, 3, nullptr }, { "REVERB", { "REVERB" }, 2, nullptr } } },
             { "MODULATORS", &colours::rowMovement, { { kModulatorsSection, {}, 0, nullptr }, { "VOICE", { "VOICE" }, 3, nullptr }, { "ARP", { "ARP" }, 3, nullptr } } },
         };
         return specs;
@@ -352,7 +353,9 @@ int SynthPanel::Section::naturalHeight() const
 class SynthPanel::RowContainer : public juce::Component
 {
 public:
-    explicit RowContainer (Row& r) : row (r) {}
+    RowContainer (SynthPanel& p, Row& r) : panel (p), row (r) {}
+
+    bool isEffects() const { return row.caption == "EFFECTS"; }
 
     void paint (juce::Graphics& g) override
     {
@@ -369,18 +372,162 @@ public:
                     juce::Justification::centred, false);
         g.restoreState();
 
-        for (const auto* section : row.sections)
+        for (int i = 0; i < (int) row.sections.size(); ++i)
         {
+            const auto* section = row.sections[(size_t) i];
             const auto b = section->bounds.toFloat();
+            const int e = isEffects() ? SynthPanel::effectIndexFor (section->title) : -1;
+            const bool off = e >= 0 && panel.apvts.getRawParameterValue (paramId (fxOnParam (e)))->load() < 0.5f;
+            if (off) g.setOpacity (0.45f);
             StacksLookAndFeel::drawCard (g, b);
             g.setColour (section->colour);
             g.setFont (StacksLookAndFeel::font (9.5f, true).withExtraKerningFactor (0.1f));
             g.drawText (section->title, section->bounds.withHeight (kTitleH).reduced (kPad + 2, 0).withTrimmedTop (2), juce::Justification::centredLeft);
+            if (isEffects() && e >= 0)
+            {
+                // a grip in the title strip: this card can be dragged
+                g.setColour (section->colour.withAlpha (0.5f));
+                const float gx = b.getRight() - 40.0f, gy = b.getY() + 6.0f;
+                for (int k = 0; k < 3; ++k) g.fillEllipse (gx + 4.0f * (float) k, gy, 2.0f, 2.0f);
+                for (int k = 0; k < 3; ++k) g.fillEllipse (gx + 4.0f * (float) k, gy + 4.0f, 2.0f, 2.0f);
+            }
+            g.setOpacity (1.0f);
+            if (dragging && i == dragIndex)
+            {
+                g.setColour (section->colour.withAlpha (0.25f));
+                g.fillRoundedRectangle (b, 6.0f);
+            }
+        }
+        if (isEffects())
+            paintLinks (g);
+    }
+
+    // The signal flows left to right: a link between each pair of cards, an
+    // arrow into the next one. Dimmed and broken when the next effect is off.
+    void paintLinks (juce::Graphics& g)
+    {
+        for (int i = 0; i + 1 < (int) row.sections.size(); ++i)
+        {
+            const auto gapRect = linkRect (i);
+            const int e = SynthPanel::effectIndexFor (row.sections[(size_t) i + 1]->title);
+            const bool on = e < 0 || panel.apvts.getRawParameterValue (paramId (fxOnParam (e)))->load() > 0.5f;
+            const float y = gapRect.getCentreY();
+            const float x0 = gapRect.getX() + 1.0f, x1 = gapRect.getRight() - 1.0f;
+            g.setColour (on ? row.colour.withAlpha (0.9f) : colours::muted.withAlpha (0.6f));
+            if (on)
+                g.drawLine (x0, y, x1 - 5.0f, y, 1.6f);
+            else
+            {
+                const float dashes[] = { 3.0f, 3.0f };
+                juce::Path dash; dash.startNewSubPath (x0, y); dash.lineTo (x1 - 5.0f, y);
+                juce::Path dashed; juce::PathStrokeType (1.4f).createDashedStroke (dashed, dash, dashes, 2);
+                g.fillPath (dashed);
+            }
+            juce::Path arrow;
+            arrow.addTriangle (x1 - 6.0f, y - 4.5f, x1 - 6.0f, y + 4.5f, x1 + 1.0f, y);
+            g.fillPath (arrow);
+            // the switch in the middle of the link
+            const float cx = gapRect.getCentreX() - 2.0f;
+            g.setColour (colours::background);
+            g.fillEllipse (cx - 5.0f, y - 5.0f, 10.0f, 10.0f);
+            g.setColour (on ? row.colour : colours::muted);
+            g.drawEllipse (cx - 5.0f, y - 5.0f, 10.0f, 10.0f, 1.2f);
+            if (on) g.fillEllipse (cx - 2.5f, y - 2.5f, 5.0f, 5.0f);
+        }
+        if (dragging && dragIndex >= 0)
+        {
+            const int target = dropIndex (dragX);
+            // a bar where the card would land
+            float x = (float) (kBand + kPad) - 4.0f;
+            if (target > 0)
+            {
+                const int before = juce::jmin (target, (int) row.sections.size()) - 1;
+                x = (float) row.sections[(size_t) before]->bounds.getRight() + (float) panel.rowGap (row) * 0.5f;
+            }
+            g.setColour (colours::text.withAlpha (0.8f));
+            g.fillRoundedRectangle (x - 1.5f, 2.0f, 3.0f, (float) getHeight() - 4.0f, 1.5f);
         }
     }
 
+    // The gap between card i and card i+1, over the whole row height.
+    juce::Rectangle<float> linkRect (int i) const
+    {
+        const auto& a = row.sections[(size_t) i]->bounds;
+        const auto& b = row.sections[(size_t) i + 1]->bounds;
+        return juce::Rectangle<float> ((float) a.getRight(), (float) a.getY(), (float) (b.getX() - a.getRight()), (float) a.getHeight());
+    }
+
+    int dropIndex (int x) const
+    {
+        int target = 0;
+        for (const auto* s : row.sections)
+            if (x > s->bounds.getCentreX()) ++target;
+        return target;
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        dragIndex = -1; dragging = false;
+        if (! isEffects()) return;
+        // a link's switch: in or out of the chain
+        for (int i = 0; i + 1 < (int) row.sections.size(); ++i)
+            if (linkRect (i).expanded (2.0f, 0.0f).contains (e.position))
+            {
+                panel.toggleEffect (SynthPanel::effectIndexFor (row.sections[(size_t) i + 1]->title));
+                return;
+            }
+        // a card's title strip: pick it up
+        for (int i = 0; i < (int) row.sections.size(); ++i)
+        {
+            const auto strip = row.sections[(size_t) i]->bounds.withHeight (kTitleH);
+            if (strip.contains (e.getPosition()) && SynthPanel::effectIndexFor (row.sections[(size_t) i]->title) >= 0)
+            {
+                dragIndex = i;
+                dragX = e.x;
+                setMouseCursor (juce::MouseCursor::DraggingHandCursor);
+                return;
+            }
+        }
+    }
+
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (dragIndex < 0) return;
+        if (! dragging && std::abs (e.getDistanceFromDragStartX()) > 6) dragging = true;
+        dragX = e.x;
+        if (dragging) repaint();
+    }
+
+    void mouseUp (const juce::MouseEvent& e) override
+    {
+        setMouseCursor (juce::MouseCursor::NormalCursor);
+        if (dragging && dragIndex >= 0)
+        {
+            int target = dropIndex (e.x);
+            if (target > dragIndex) --target;             // the card leaves its own slot first
+            panel.moveEffect (dragIndex, target);
+        }
+        dragIndex = -1;
+        dragging = false;
+        repaint();
+    }
+
+    void mouseMove (const juce::MouseEvent& e) override
+    {
+        if (! isEffects()) return;
+        bool overStrip = false, overLink = false;
+        for (int i = 0; i < (int) row.sections.size(); ++i)
+            if (row.sections[(size_t) i]->bounds.withHeight (kTitleH).contains (e.getPosition()) && SynthPanel::effectIndexFor (row.sections[(size_t) i]->title) >= 0) overStrip = true;
+        for (int i = 0; i + 1 < (int) row.sections.size(); ++i)
+            if (linkRect (i).contains (e.position)) overLink = true;
+        setMouseCursor (overStrip ? juce::MouseCursor::DraggingHandCursor : overLink ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
+    }
+
 private:
+    SynthPanel& panel;
     Row& row;
+    int dragIndex = -1, dragX = 0;
+    bool dragging = false;
 };
 
 //==============================================================================
@@ -476,7 +623,7 @@ SynthPanel::SynthPanel (StacksAudioProcessor& p) : processor (p), apvts (p.apvts
     for (const auto& spec : paramSpecs())
     {
         const juce::String group (spec.group);
-        if (group == "MASTER" || group == "MACROS" || group == "MOD MATRIX" || group == "MOD ENV" || group.startsWith ("LFO "))
+        if (group == "MASTER" || group == "MACROS" || group == "MOD MATRIX" || group == "MOD ENV" || group == "FXROUTE" || group.startsWith ("LFO "))
             continue;
         if (isAdvancedParam (spec.id))
         {
@@ -563,8 +710,8 @@ SynthPanel::SynthPanel (StacksAudioProcessor& p) : processor (p), apvts (p.apvts
             row.sections.push_back (section);
         }
         int w = kBand + kPad, h = 0;
-        for (auto* s : row.sections) { w += s->naturalWidth() + kGap; h = juce::jmax (h, s->naturalHeight()); }
-        row.naturalWidth = w - kGap + kPad;
+        for (auto* s : row.sections) { w += s->naturalWidth() + rowGap (row); h = juce::jmax (h, s->naturalHeight()); }
+        row.naturalWidth = w - rowGap (row) + kPad;
         row.naturalHeight = h;
         rows.push_back (std::move (row));
     }
@@ -573,7 +720,7 @@ SynthPanel::SynthPanel (StacksAudioProcessor& p) : processor (p), apvts (p.apvts
     // vector (each holds a reference to its row); the controls move into them.
     for (auto& row : rows)
     {
-        row.container = std::make_unique<RowContainer> (row);
+        row.container = std::make_unique<RowContainer> (*this, row);
         addAndMakeVisible (*row.container);
         for (auto* section : row.sections)
         {
@@ -583,6 +730,9 @@ SynthPanel::SynthPanel (StacksAudioProcessor& p) : processor (p), apvts (p.apvts
             if (section->moreButton != nullptr) row.container->addAndMakeVisible (*section->moreButton);
         }
     }
+
+    sortEffectsRow();
+    lastEffectOrder = effectOrderSignature();
 
     // View tabs: everything, or one row filling the panel.
     auto addViewButton = [this] (const juce::String& text, int mode, juce::Colour colour)
@@ -600,6 +750,11 @@ SynthPanel::SynthPanel (StacksAudioProcessor& p) : processor (p), apvts (p.apvts
         addViewButton (rows[(size_t) i].caption, i, rows[(size_t) i].colour);
     setView (-1);
 
+    for (int e = 0; e < kNumFx; ++e)
+    {
+        apvts.addParameterListener (paramId (fxPosParam (e)), this);
+        apvts.addParameterListener (paramId (fxOnParam (e)), this);
+    }
     for (int i = 0; i < kNumModSlots; ++i)
     {
         apvts.addParameterListener (paramId (modSourceParam (i)), this);
@@ -647,6 +802,11 @@ SynthPanel::~SynthPanel()
     stopTimer();
     processor.labBroadcaster.removeChangeListener (this);
     cancelPendingUpdate();
+    for (int e = 0; e < kNumFx; ++e)
+    {
+        apvts.removeParameterListener (paramId (fxPosParam (e)), this);
+        apvts.removeParameterListener (paramId (fxOnParam (e)), this);
+    }
     for (int i = 0; i < kNumModSlots; ++i)
     {
         apvts.removeParameterListener (paramId (modSourceParam (i)), this);
@@ -658,6 +818,91 @@ SynthPanel::~SynthPanel()
 void SynthPanel::handleAsyncUpdate()
 {
     refreshModulationDisplay();
+    const auto sig = effectOrderSignature();
+    if (sig != lastEffectOrder)            // a loaded patch or a drag changed the chain
+    {
+        lastEffectOrder = sig;
+        sortEffectsRow();
+        resized();
+        repaint();
+    }
+}
+
+int SynthPanel::effectIndexFor (const juce::String& title)
+{
+    static const char* titles[kNumFx] = { "DISTORTION", "EQ", "CHORUS", "HYPER", "TAPE", "DELAY", "REVERB", "COMPRESSOR" };
+    for (int e = 0; e < kNumFx; ++e) if (title == titles[e]) return e;
+    return -1;
+}
+
+int SynthPanel::rowGap (const Row& row) const
+{
+    return row.caption == "EFFECTS" ? 22 : kGap;
+}
+
+juce::String SynthPanel::effectOrderSignature() const
+{
+    juce::String s;
+    for (int e = 0; e < kNumFx; ++e)
+        s << (int) apvts.getRawParameterValue (paramId (fxPosParam (e)))->load() << ":" << (int) apvts.getRawParameterValue (paramId (fxOnParam (e)))->load() << ",";
+    return s;
+}
+
+void SynthPanel::sortEffectsRow()
+{
+    for (auto& row : rows)
+    {
+        if (row.caption != "EFFECTS") continue;
+        auto posOf = [this] (const Section* s)
+        {
+            const int e = effectIndexFor (s->title);
+            return e < 0 ? 100 : (int) apvts.getRawParameterValue (paramId (fxPosParam (e)))->load() * 10 + e;   // ties break by effect index
+        };
+        std::stable_sort (row.sections.begin(), row.sections.end(), [&] (const Section* a, const Section* b) { return posOf (a) < posOf (b); });
+    }
+}
+
+// The card at `fromIndex` (in the row's current order) lands at `toIndex`; every
+// effect gets a fresh position 0..7 so the order is always a valid permutation.
+void SynthPanel::moveEffect (int fromIndex, int toIndex)
+{
+    for (auto& row : rows)
+    {
+        if (row.caption != "EFFECTS") continue;
+        std::vector<Section*> order = row.sections;
+        const int n = (int) order.size();
+        if (fromIndex < 0 || fromIndex >= n) return;
+        toIndex = juce::jlimit (0, n - 1, toIndex);
+        if (fromIndex == toIndex) return;
+        auto* moved = order[(size_t) fromIndex];
+        order.erase (order.begin() + fromIndex);
+        order.insert (order.begin() + toIndex, moved);
+        processor.pushUndoSnapshot();
+        for (int i = 0; i < n; ++i)
+        {
+            const int e = effectIndexFor (order[(size_t) i]->title);
+            if (e < 0) continue;
+            if (auto* param = apvts.getParameter (paramId (fxPosParam (e))))
+                param->setValueNotifyingHost (param->convertTo0to1 ((float) i));
+        }
+        row.sections = order;
+        lastEffectOrder = effectOrderSignature();
+        resized();
+        repaint();
+    }
+}
+
+void SynthPanel::toggleEffect (int e)
+{
+    if (e < 0 || e >= kNumFx) return;
+    if (auto* param = apvts.getParameter (paramId (fxOnParam (e))))
+    {
+        const bool on = param->getValue() > 0.5f;
+        processor.pushUndoSnapshot();
+        param->setValueNotifyingHost (on ? 0.0f : 1.0f);
+    }
+    lastEffectOrder = effectOrderSignature();
+    repaint();
 }
 
 void SynthPanel::refreshModulationDisplay()
@@ -754,7 +999,8 @@ void SynthPanel::layoutRow (Row& row, int width, int height)
 {
     const int n = (int) row.sections.size();
     std::vector<int> widths (row.sections.size());
-    int natural = kBand + kPad + kPad + (n - 1) * kGap, totalWeight = 0;
+    const int gap = rowGap (row);
+    int natural = kBand + kPad + kPad + (n - 1) * gap, totalWeight = 0;
     for (int i = 0; i < n; ++i) { widths[(size_t) i] = row.sections[(size_t) i]->naturalWidth(); natural += widths[(size_t) i]; totalWeight += row.sections[(size_t) i]->weight(); }
 
     // Two passes: share the leftover by weight, cap the cells, share what the caps freed.
@@ -812,7 +1058,7 @@ void SynthPanel::layoutRow (Row& row, int width, int height)
             for (int c = 0; c < (int) section->cells.size(); ++c)
                 section->cells[(size_t) c]->setBounds (x0 + (c % section->columns) * cellW, body.getY() + (c / section->columns) * kCellH, cellW, kCellH);
         }
-        x += w + kGap + spread;
+        x += w + gap + spread;
     }
 }
 

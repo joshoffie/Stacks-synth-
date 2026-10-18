@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include <map>
+#include <algorithm>
 #include "Controls.h"
 #include "PluginEditor.h"
 #include "ai/PatchExplainer.h"
@@ -546,28 +547,28 @@ void StacksAudioProcessor::processEffects (juce::AudioBuffer<float>& buffer)
     comp.makeupDb = fxParams.get (P::comp_makeup);
     comp.mix = fxParams.get (P::comp_mix);
 
-    enum Fx { FxDist, FxEq, FxChorus, FxHyper, FxTape, FxDelay, FxReverb, FxComp };
-    static const Fx orders[6][8] = {
-        { FxDist, FxEq, FxChorus, FxHyper, FxTape, FxDelay, FxReverb, FxComp },   // Standard
-        { FxTape, FxDist, FxEq, FxChorus, FxHyper, FxDelay, FxReverb, FxComp },   // Tape First
-        { FxDist, FxEq, FxChorus, FxHyper, FxReverb, FxDelay, FxTape, FxComp },   // Reverb Into Delay
-        { FxEq, FxChorus, FxHyper, FxDelay, FxReverb, FxTape, FxDist, FxComp },   // Distortion Last
-        { FxReverb, FxDelay, FxChorus, FxHyper, FxDist, FxEq, FxTape, FxComp },   // Space First
-        { FxComp, FxEq, FxDist, FxChorus, FxHyper, FxTape, FxDelay, FxReverb },   // Compressor First
-    };
-    const int order = juce::jlimit (0, 5, fxParams.geti (P::fx_order));
-    for (Fx fx : orders[order])
-        switch (fx)
+    // The order comes from each effect's position (dragged on the EFFECTS page);
+    // an effect switched off is skipped. Ties and bad values fall back to the
+    // effect's own index, so the chain is always a full, valid order.
+    int order[kNumFx];
+    for (int e = 0; e < kNumFx; ++e) order[e] = e;
+    std::stable_sort (order, order + kNumFx, [&] (int a, int b) { return fxParams.geti (fxPosParam (a)) < fxParams.geti (fxPosParam (b)); });
+    for (int e : order)
+    {
+        if (fxParams.geti (fxOnParam (e)) == 0)
+            continue;
+        switch (e)
         {
-            case FxDist:   distortion.process (*target, dist); break;
-            case FxEq:     eq.process (*target, eqp); break;
-            case FxChorus: if (cp.mix > 0.0005f) chorus.process (*target, cp); break;
-            case FxHyper:  hyper.process (*target, hp); break;
-            case FxTape:   tape.process (*target, tp); break;
-            case FxDelay:  delay.process (*target, dp, currentBpm); break;   // always runs so repeats ring out when the mix is pulled down
-            case FxReverb: if (rp.mix > 0.0005f) reverb.process (*target, rp); break;
-            case FxComp:   compressor.process (*target, comp); break;
+            case 0: distortion.process (*target, dist); break;
+            case 1: eq.process (*target, eqp); break;
+            case 2: if (cp.mix > 0.0005f) chorus.process (*target, cp); break;
+            case 3: hyper.process (*target, hp); break;
+            case 4: tape.process (*target, tp); break;
+            case 5: delay.process (*target, dp, currentBpm); break;   // always runs so repeats ring out when the mix is pulled down
+            case 6: if (rp.mix > 0.0005f) reverb.process (*target, rp); break;
+            default: compressor.process (*target, comp); break;
         }
+    }
 
     if (mono)
     {

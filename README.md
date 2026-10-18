@@ -75,7 +75,9 @@ enlarged to fill the panel:
    three-band EQ, a compressor, chorus/ensemble/flanger/dimension, **Hyper** (a
    cloud of detuned moving copies for width), **Tape** (wow, flutter,
    saturation, hiss), delay and a reverb with Room, Plate, Hall, Shimmer and
-   **Lush** types; **Chain** picks one of six effect orders.
+   **Lush** types. Drag a card by its title strip to change the signal flow;
+   the switch on each link takes that effect in or out of the chain. The
+   order and switches are saved with the sound and with the project.
 6. **SPACE** — effects. Core knobs on the panel, the rest behind each
    section's **more** button:
    - *Chorus*: Chorus / Ensemble (string machine) / Flanger / Dimension modes;

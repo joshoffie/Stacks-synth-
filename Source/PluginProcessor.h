@@ -171,6 +171,7 @@ public:
     void redo();
     bool canUndo() const                                   { return ! undoStack.empty(); }
     bool canRedo() const                                   { return ! redoStack.empty(); }
+    void pushUndoSnapshot();                               // before a change made outside applyPatch (a dragged chain, a sample)
 
     // Calm mode: no live knob markers or LFO playhead. Persisted.
     bool calmMode() const                                  { return calm; }
@@ -267,7 +268,6 @@ private:
     void timerCallback() override;                         // frees an idle built-in model
     void parameterValueChanged (int, float) override {}
     void parameterGestureChanged (int, bool gestureIsStarting) override;
-    void pushUndoSnapshot();
     void parameterChanged (const juce::String&, float) override;
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
     void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override;

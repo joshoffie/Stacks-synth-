@@ -292,7 +292,22 @@ inline bool isBipolarSource (int src) noexcept
  X(tape_sat,       "Tape Sat",     "TAPE",       Float,   0,     1,     0.4,   0,     "",   nullptr,            "tape saturation, soft and warm") \
  X(tape_hiss,      "Hiss",         "TAPE",       Float,   0,     1,     0.1,   0,     "",   nullptr,            "tape hiss level (advanced)") \
  X(tape_tone,      "Tape Tone",    "TAPE",       Float,   2000,  20000, 12000, 6000,  "Hz", nullptr,            "high roll-off of the tape stage (advanced)") \
- X(fx_order,       "Chain",        "CHAIN",      Choice,  0,     5,     0,     0,     "",   fxOrderNames,       "the order of the effects: Standard = distortion, EQ, chorus, hyper, tape, delay, reverb, compressor; Tape First; Reverb Into Delay; Distortion Last; Space First; Compressor First") \
+ X(fx_pos_dist,     "Dist Pos",      "FXROUTE",    Int,     0,     7,     0,     0,     "",   nullptr,            "position of the dist in the effect chain (drag the cards on the EFFECTS page)") \
+ X(fx_on_dist,      "Dist On",       "FXROUTE",    Choice,  0,     1,     1,     0,     "",   onOffNames,         "whether the dist is in the chain (click the link before it)") \
+ X(fx_pos_eq,       "EQ Pos",        "FXROUTE",    Int,     0,     7,     1,     0,     "",   nullptr,            "position of the eq in the effect chain (drag the cards on the EFFECTS page)") \
+ X(fx_on_eq,        "EQ On",         "FXROUTE",    Choice,  0,     1,     1,     0,     "",   onOffNames,         "whether the eq is in the chain (click the link before it)") \
+ X(fx_pos_chorus,   "Chorus Pos",    "FXROUTE",    Int,     0,     7,     2,     0,     "",   nullptr,            "position of the chorus in the effect chain (drag the cards on the EFFECTS page)") \
+ X(fx_on_chorus,    "Chorus On",     "FXROUTE",    Choice,  0,     1,     1,     0,     "",   onOffNames,         "whether the chorus is in the chain (click the link before it)") \
+ X(fx_pos_hyper,    "Hyper Pos",     "FXROUTE",    Int,     0,     7,     3,     0,     "",   nullptr,            "position of the hyper in the effect chain (drag the cards on the EFFECTS page)") \
+ X(fx_on_hyper,     "Hyper On",      "FXROUTE",    Choice,  0,     1,     1,     0,     "",   onOffNames,         "whether the hyper is in the chain (click the link before it)") \
+ X(fx_pos_tape,     "Tape Pos",      "FXROUTE",    Int,     0,     7,     4,     0,     "",   nullptr,            "position of the tape in the effect chain (drag the cards on the EFFECTS page)") \
+ X(fx_on_tape,      "Tape On",       "FXROUTE",    Choice,  0,     1,     1,     0,     "",   onOffNames,         "whether the tape is in the chain (click the link before it)") \
+ X(fx_pos_delay,    "Delay Pos",     "FXROUTE",    Int,     0,     7,     5,     0,     "",   nullptr,            "position of the delay in the effect chain (drag the cards on the EFFECTS page)") \
+ X(fx_on_delay,     "Delay On",      "FXROUTE",    Choice,  0,     1,     1,     0,     "",   onOffNames,         "whether the delay is in the chain (click the link before it)") \
+ X(fx_pos_reverb,   "Reverb Pos",    "FXROUTE",    Int,     0,     7,     6,     0,     "",   nullptr,            "position of the reverb in the effect chain (drag the cards on the EFFECTS page)") \
+ X(fx_on_reverb,    "Reverb On",     "FXROUTE",    Choice,  0,     1,     1,     0,     "",   onOffNames,         "whether the reverb is in the chain (click the link before it)") \
+ X(fx_pos_comp,     "Comp Pos",      "FXROUTE",    Int,     0,     7,     7,     0,     "",   nullptr,            "position of the comp in the effect chain (drag the cards on the EFFECTS page)") \
+ X(fx_on_comp,      "Comp On",       "FXROUTE",    Choice,  0,     1,     1,     0,     "",   onOffNames,         "whether the comp is in the chain (click the link before it)") \
  X(master_gain,    "Master",       "MASTER",     Float,  -24,    6,    -6,     0,     "dB", nullptr,            "output level in dB")
 
 enum class P : int
@@ -311,6 +326,17 @@ inline P oscMorphParam   (int osc) noexcept { return osc == 0 ? P::oscA_morph   
 inline P oscCoarseParam  (int osc) noexcept { return osc == 0 ? P::oscA_coarse   : osc == 1 ? P::oscB_coarse   : P::oscC_coarse; }
 inline P oscLevelParam   (int osc) noexcept { return osc == 0 ? P::oscA_level    : osc == 1 ? P::oscB_level    : P::oscC_level; }
 inline P oscWarpParam    (int osc) noexcept { return osc == 0 ? P::oscA_warp     : osc == 1 ? P::oscB_warp     : P::oscC_warp; }
+constexpr int kNumFx = 8;   // distortion, EQ, chorus, hyper, tape, delay, reverb, compressor
+inline P fxPosParam (int e) noexcept
+{
+    switch (e) { case 0: return P::fx_pos_dist; case 1: return P::fx_pos_eq; case 2: return P::fx_pos_chorus; case 3: return P::fx_pos_hyper;
+                 case 4: return P::fx_pos_tape; case 5: return P::fx_pos_delay; case 6: return P::fx_pos_reverb; default: return P::fx_pos_comp; }
+}
+inline P fxOnParam (int e) noexcept
+{
+    switch (e) { case 0: return P::fx_on_dist; case 1: return P::fx_on_eq; case 2: return P::fx_on_chorus; case 3: return P::fx_on_hyper;
+                 case 4: return P::fx_on_tape; case 5: return P::fx_on_delay; case 6: return P::fx_on_reverb; default: return P::fx_on_comp; }
+}
 inline P oscWarpAmtParam (int osc) noexcept { return osc == 0 ? P::oscA_warp_amt : osc == 1 ? P::oscB_warp_amt : P::oscC_warp_amt; }
 
 const std::vector<ParamSpec>& paramSpecs();

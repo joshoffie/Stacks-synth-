@@ -1289,7 +1289,40 @@ static int audioMode (const juce::String& mode, const juce::File& file, bool noM
 static void testCharacterAndEffects()
 {
     std::printf ("character and effects\n");
-    CHECK (filterModelNames().size() == 4 && fxOrderNames().size() == 6 && reverbTypeNames()[4] == "Lush");
+    CHECK (filterModelNames().size() == 4 && reverbTypeNames()[4] == "Lush");
+    // The default chain positions are a full permutation; every effect is on; a
+    // patch saved before routing existed loads with the standard order.
+    {
+        std::set<int> seen;
+        for (int e = 0; e < kNumFx; ++e) { seen.insert ((int) spec (fxPosParam (e)).def); CHECK (spec (fxOnParam (e)).def == 1.0f); }
+        CHECK ((int) seen.size() == kNumFx && *seen.begin() == 0 && *seen.rbegin() == kNumFx - 1);
+        if (auto old = Patch::fromJson (R"json({"name":"Old","params":{"filter_cutoff":900}})json"))
+        {
+            for (int e = 0; e < kNumFx; ++e) CHECK ((int) old->get (fxPosParam (e)) == e && (int) old->get (fxOnParam (e)) == 1);
+        }
+        else CHECK (false);
+        Patch moved;
+        moved.set (P::fx_pos_reverb, 0.0f);
+        moved.set (P::fx_pos_dist, 6.0f);
+        moved.set (P::fx_on_eq, 0.0f);
+        const auto js = moved.toJson();
+        if (auto back = Patch::fromJson (js)) CHECK ((int) back->get (P::fx_pos_reverb) == 0 && (int) back->get (P::fx_pos_dist) == 6 && (int) back->get (P::fx_on_eq) == 0); else CHECK (false);
+        CHECK (countAudibleDifferences (Patch(), moved) == 0);   // routing is the player's, not a breeder difference
+    }
+    // Order changes the sound: distortion into reverb is not reverb into distortion.
+    {
+        const double sr2 = 48000.0; const int n2 = 8192;
+        auto src = [&] { juce::AudioBuffer<float> b (2, n2); for (int i = 0; i < n2; ++i) { const float v = (i < n2 / 4 ? 0.9f : 0.0f) * std::sin (6.2831853f * 110.0f * (float) i / (float) sr2); b.setSample (0, i, v); b.setSample (1, i, v); } return b; };
+        DistortionFx d1, d2; ReverbFx r1, r2;
+        d1.prepare (sr2, n2); d2.prepare (sr2, n2); r1.prepare (sr2, n2); r2.prepare (sr2, n2);
+        DistortionFx::Params dpr; dpr.mode = 1; dpr.driveDb = 30.0f; dpr.mix = 1.0f;
+        ReverbFx::Params rpr; rpr.type = 1; rpr.mix = 0.5f; rpr.size = 0.6f;
+        auto a = src(); d1.process (a, dpr); r1.process (a, rpr);      // distortion first
+        auto b = src(); r2.process (b, rpr); d2.process (b, dpr);      // reverb first: the tail gets distorted too
+        double diff = 0.0;
+        for (int i = n2 / 2; i < n2; ++i) diff += std::abs (a.getSample (0, i) - b.getSample (0, i));
+        CHECK (diff / (n2 / 2) > 0.005);
+    }
     CHECK (isAdvancedParam ("hyper_voices") && isAdvancedParam ("tape_hiss") && ! isAdvancedParam ("tape_wow"));
     const double sr = 48000.0;
     const int n = 4096;

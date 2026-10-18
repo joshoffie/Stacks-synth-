@@ -122,6 +122,13 @@ private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;   // a tweak landed: flash what it moved
     void refreshModulationDisplay();
     void layoutRow (Row&, int width, int height);            // places the sections and their cells
+    static int effectIndexFor (const juce::String& sectionTitle);   // 0..7 for an effect card, -1 otherwise
+    int rowGap (const Row&) const;                           // the EFFECTS row leaves room for the links
+    void sortEffectsRow();                                   // EFFECTS cards in chain order
+    void moveEffect (int fromIndex, int toIndex);            // a dragged card lands: rewrite every position
+    void toggleEffect (int effectIndex);                     // the link before a card: in or out of the chain
+    juce::String effectOrderSignature() const;
+    juce::String lastEffectOrder;
     Section* findSection (const juce::String& title);
     void showAdvanced (Section&);
     void knobClicked (int paramIndex);
