@@ -134,30 +134,74 @@ void WaveDisplay::paint (juce::Graphics& g)
     g.setColour (juce::Colours::white.withAlpha (0.06f));
     g.drawHorizontalLine ((int) r.getCentreY(), r.getX() + 3.0f, r.getRight() - 3.0f);
 
-    juce::Path path;
-    const int steps = juce::jlimit (48, 160, (int) r.getWidth() / 2);
-    for (int i = 0; i <= steps; ++i)
+    // One cycle of the table at a given morph position (warp included).
+    auto sampleAt = [&] (float m, float phase)
     {
-        const float phase = (float) i / (float) steps;
-        const float wp = warpPhase (shownWarp, phase >= 1.0f ? 0.999f : phase, shownWarpAmt);   // the display shows the warp too
+        const float wp = warpPhase (shownWarp, phase >= 1.0f ? 0.999f : phase, shownWarpAmt);
         float y = 0.0f;
-        if (user < 0)           y = processor.builtInWavetables().read (wave, 0, morph, wp);
-        else if (table != nullptr) y = table->read (0, morph, wp);
-        else                    y = std::sin (juce::MathConstants<float>::twoPi * wp);
-        y = warpSample (shownWarp, y, shownWarpAmt);
-        const float px = r.getX() + 4.0f + phase * (r.getWidth() - 8.0f);
-        const float py = r.getCentreY() - y * (r.getHeight() * 0.5f - 5.0f);
-        if (i == 0) path.startNewSubPath (px, py); else path.lineTo (px, py);
+        if (user < 0)              y = processor.builtInWavetables().read (wave, 0, m, wp);
+        else if (table != nullptr) y = table->read (0, m, wp);
+        else                       y = std::sin (juce::MathConstants<float>::twoPi * wp);
+        return warpSample (shownWarp, y, shownWarpAmt);
+    };
+    const bool missing = user >= 0 && table == nullptr;
+    const auto lineColour = missing ? colours::muted : colour;
+    const int steps = juce::jlimit (48, 160, (int) r.getWidth() / 2);
+
+    if (r.getWidth() >= 96.0f && r.getHeight() >= 44.0f && ! missing)
+    {
+        // The whole table as frames receding into the panel; the frame the morph
+        // sits on is lit, the others fade with depth.
+        constexpr int frames = 12;
+        const float dx = r.getWidth() * 0.2f / (float) (frames - 1), dy = r.getHeight() * 0.4f / (float) (frames - 1);
+        const float waveW = r.getWidth() - 10.0f - dx * (float) (frames - 1), waveH = r.getHeight() - 10.0f - dy * (float) (frames - 1);
+        const float x0 = r.getX() + 5.0f, yBase = r.getBottom() - 5.0f - waveH * 0.5f;
+        const float morphFrame = morph * (float) (frames - 1);
+        for (int f = frames - 1; f >= 0; --f)
+        {
+            const float m = (float) f / (float) (frames - 1);
+            const float ox = x0 + dx * (float) f, oy = yBase - dy * (float) f;
+            const float closeness = 1.0f - juce::jmin (1.0f, std::abs ((float) f - morphFrame));
+            juce::Path frame;
+            for (int i = 0; i <= steps; ++i)
+            {
+                const float phase = (float) i / (float) steps;
+                const float px = ox + phase * waveW, py = oy - sampleAt (m, phase) * waveH * 0.46f;
+                if (i == 0) frame.startNewSubPath (px, py); else frame.lineTo (px, py);
+            }
+            if (closeness > 0.0f)
+            {
+                juce::Path fill (frame);
+                fill.lineTo (ox + waveW, oy);
+                fill.lineTo (ox, oy);
+                fill.closeSubPath();
+                g.setColour (lineColour.withAlpha (0.1f * closeness));
+                g.fillPath (fill);
+            }
+            const float depthFade = 0.14f + 0.26f * (1.0f - (float) f / (float) (frames - 1));
+            g.setColour (lineColour.withAlpha (closeness > 0.0f ? 0.45f + 0.55f * closeness : depthFade));
+            g.strokePath (frame, juce::PathStrokeType (closeness > 0.5f ? 1.8f : 1.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        }
     }
-    const auto lineColour = user >= 0 && table == nullptr ? colours::muted : colour;
-    juce::Path fill (path);
-    fill.lineTo (r.getRight() - 4.0f, r.getCentreY());
-    fill.lineTo (r.getX() + 4.0f, r.getCentreY());
-    fill.closeSubPath();
-    g.setColour (lineColour.withAlpha (0.12f));
-    g.fillPath (fill);
-    g.setColour (lineColour);
-    g.strokePath (path, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    else
+    {
+        juce::Path path;
+        for (int i = 0; i <= steps; ++i)
+        {
+            const float phase = (float) i / (float) steps;
+            const float px = r.getX() + 4.0f + phase * (r.getWidth() - 8.0f);
+            const float py = r.getCentreY() - sampleAt (morph, phase) * (r.getHeight() * 0.5f - 5.0f);
+            if (i == 0) path.startNewSubPath (px, py); else path.lineTo (px, py);
+        }
+        juce::Path fill (path);
+        fill.lineTo (r.getRight() - 4.0f, r.getCentreY());
+        fill.lineTo (r.getX() + 4.0f, r.getCentreY());
+        fill.closeSubPath();
+        g.setColour (lineColour.withAlpha (0.12f));
+        g.fillPath (fill);
+        g.setColour (lineColour);
+        g.strokePath (path, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    }
 
     // The table's name only when it is a designed or imported one.
     if (user >= 0)

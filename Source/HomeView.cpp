@@ -39,12 +39,26 @@ HomeView::Tile::Tile (const juce::String& n, const juce::String& b, juce::Colour
 void HomeView::Tile::paint (juce::Graphics& g)
 {
     auto r = getLocalBounds().toFloat().reduced (2.0f);
-    g.setColour (hover ? colours::card.brighter (0.12f) : colours::card);
+    // A soft shadow, a graphite gradient, a tint of the kind's colour in the corner, a glow when hovered.
+    g.setColour (juce::Colours::black.withAlpha (0.35f));
+    g.fillRoundedRectangle (r.translated (0.0f, 3.0f), 12.0f);
+    juce::ColourGradient grad (colours::card.brighter (hover ? 0.16f : 0.08f), r.getX(), r.getY(), colours::card.darker (0.12f), r.getX(), r.getBottom(), false);
+    g.setGradientFill (grad);
     g.fillRoundedRectangle (r, 12.0f);
-    g.setColour (colour.withAlpha (hover ? 0.9f : 0.6f));
-    g.drawRoundedRectangle (r.reduced (0.5f), 12.0f, hover ? 2.0f : 1.0f);
+    {
+        juce::ColourGradient tint (colour.withAlpha (hover ? 0.22f : 0.12f), r.getX(), r.getY(), colour.withAlpha (0.0f), r.getX() + r.getWidth() * 0.6f, r.getY() + r.getHeight() * 0.8f, true);
+        g.setGradientFill (tint);
+        g.fillRoundedRectangle (r, 12.0f);
+    }
+    g.setColour (colour.withAlpha (hover ? 0.95f : 0.45f));
+    g.drawRoundedRectangle (r.reduced (0.5f), 12.0f, hover ? 1.6f : 1.0f);
     g.setColour (colour);
-    g.fillRoundedRectangle (r.getX() + 16.0f, r.getY() + 16.0f, 10.0f, 10.0f, 5.0f);
+    g.fillEllipse (r.getX() + 16.0f, r.getY() + 16.0f, 10.0f, 10.0f);
+    if (hover)
+    {
+        g.setColour (colour.withAlpha (0.35f));
+        g.fillEllipse (r.getX() + 11.0f, r.getY() + 11.0f, 20.0f, 20.0f);
+    }
     g.setColour (colours::text);
     g.setFont (StacksLookAndFeel::font (22.0f, true));
     g.drawText (name, r.reduced (16.0f).withTrimmedTop (28.0f), juce::Justification::topLeft);

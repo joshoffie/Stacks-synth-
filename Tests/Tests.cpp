@@ -1453,6 +1453,22 @@ static int buildFactory (int perPrompt)
         // one-shots and extras
         "stab chord for house, short and punchy", "retro video game blip", "cinematic riser that rises over four seconds",
         "dub siren with pitch wobble", "harp-like pluck with long release", "brass stab, big and detuned",
+        // second wave: eras, scenes and textures the first set missed
+        "warm analog pad, tape-worn and lush", "huge supersaw pad with slow filter sweep", "icy digital pad with slow phaser movement",
+        "cinematic choir pad, dark and wide", "lo-fi pad with wow and flutter", "nostalgic 90s house pad with chorus",
+        "boards of canada style detuned pad", "evolving granular pad, slow and glassy",
+        "bright 80s FM electric piano", "soft dreamy keys with reverb", "plucked kalimba keys", "vibraphone-like FM keys",
+        "neo-soul rhodes with chorus", "music box keys with shimmer reverb", "wurlitzer-like keys, gritty",
+        "deep 808 bass with a long tail", "aggressive reese bass for neuro", "warm moog-style bass, round and soft",
+        "plucky disco bass", "growling wobble bass for dubstep", "clean sine sub with a soft click", "techno rumble bass, dark",
+        "soaring saw lead for trance, wide", "gritty acid lead with resonance", "warm vintage synth lead, mono",
+        "psychedelic lead with tape delay", "pluck lead for future bass, bright", "theremin-like sine lead with vibrato", "80s power lead with chorus",
+        "synthwave pluck with delay", "glassy crystal pluck", "future bass chord stab, wide", "soft marimba pluck",
+        "deep house organ stab", "hard trance pluck", "plucked guitar-like synth", "metallic pluck with comb filter",
+        "deep temple bell", "shimmering fairy bell", "cold glass bell with long reverb", "soft chime bell", "detuned bell pad",
+        "dark cinematic drone", "warm tape drone", "glitchy digital texture", "evolving noise texture with filter sweep",
+        "underwater ambience", "spaceship engine hum", "rainy night texture", "haunted choir texture",
+        "organ-like drone, slow", "metallic industrial texture", "soft breathing pad with slow attack",
     };
 
     const auto repoRoot = juce::File (__FILE__).getParentDirectory().getParentDirectory();

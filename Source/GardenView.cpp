@@ -147,7 +147,9 @@ void GardenView::paintBlock (juce::Graphics& g, juce::Rectangle<float> f, const 
                 g.drawRoundedRectangle (f.translated (6.0f * (float) k, 4.0f * (float) k), s.corner, 1.2f);
             }
 
-        // Side and top faces, then the front.
+        // A shadow under the block, then the side and top faces, then the front.
+        g.setColour (juce::Colours::black.withAlpha (0.28f));
+        g.fillRoundedRectangle (f.translated (3.0f, 4.0f).expanded (1.0f), s.corner + 1.0f);
         g.setColour (colour.darker (0.5f));
         g.fillPath (sideFace (f, s.depth));
         g.setColour (auditioned ? colour.brighter (0.5f) : colour.brighter (0.25f));
