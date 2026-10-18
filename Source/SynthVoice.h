@@ -33,6 +33,7 @@ struct VoiceContext
     std::atomic<bool> mpe { false };          // MPE: channel 1 is the master, 2-16 carry one note each
     MTSClient* mts = nullptr;                 // MTS-ESP: retunes every note when a master is running
     const SampleBank* samples = nullptr;      // the sample oscillator's file
+    float seqValue = 0.0f;                    // the step sequencer lane this block, -1..1
     float masterBend = 0.0f;                  // semitones from channel 1's wheel (MPE master), audio thread only
     float masterPressure = 0.0f;              // channel 1's pressure
     float channelSlide[16] {};                // per channel, so a note that starts after the controller moved begins right

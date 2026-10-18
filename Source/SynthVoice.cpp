@@ -371,6 +371,7 @@ float SynthVoice::sourceValue (int source, const float* lfo, float filterEnvValu
         case SrcModWheel:   return ctx.modWheel.load();
         case SrcAftertouch: return juce::jmax (aftertouch, ctx.mpe.load (std::memory_order_relaxed) ? ctx.masterPressure : 0.0f);
         case SrcSlide:      return slide;
+        case SrcSeq:        return ctx.seqValue;
         case SrcRandom:     return noteRandom;
         case SrcMacro1: case SrcMacro2: case SrcMacro3: case SrcMacro4: case SrcMacro5: case SrcMacro6:
                             return ctx.params->get (macroParam (source - SrcMacro1));   // the big knobs, shared by every voice

@@ -38,6 +38,28 @@ private:
     int dragIndex = -1;
 };
 
+// The sequencer lane: up to 16 bars, drag to draw, the playing step lit.
+class StepEditor : public juce::Component,
+                   public juce::SettableTooltipClient,
+                   private juce::Timer
+{
+public:
+    StepEditor (StacksAudioProcessor&, juce::Colour);
+    ~StepEditor() override;
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent& e) override { edit (e); }
+    void mouseDrag (const juce::MouseEvent& e) override { edit (e); }
+    void mouseUp (const juce::MouseEvent&) override;
+private:
+    void timerCallback() override { repaint(); }
+    void edit (const juce::MouseEvent&);
+    int stepCount() const;
+    StacksAudioProcessor& processor;
+    juce::Colour colour;
+    std::vector<float> steps;
+    bool dirty = false;
+};
+
 // The modulators area: tabs for LFO 1-4, Mod Env and the other sources, each
 // with its controls, an Assign button and the list of its connections.
 class ModulatorsPanel : public juce::Component,
@@ -60,7 +82,7 @@ public:
     std::function<void()> onAssignCancel;
 
 private:
-    enum Tab { TabLfo1, TabLfo2, TabLfo3, TabLfo4, TabModEnv, TabSources, kNumTabs };
+    enum Tab { TabLfo1, TabLfo2, TabLfo3, TabLfo4, TabModEnv, TabSeq, TabSources, kNumTabs };
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override { refreshConnections(); }
     void showTab (int tab);
@@ -94,6 +116,7 @@ private:
     // per-tab content, rebuilt on tab change
     std::vector<std::unique_ptr<juce::Component>> content;
     std::unique_ptr<LfoDisplay> display;
+    std::unique_ptr<StepEditor> stepEditor;
     juce::ComboBox sourcePicker;                 // Sources tab
 
     juce::TextButton assignButton, virtualButton;

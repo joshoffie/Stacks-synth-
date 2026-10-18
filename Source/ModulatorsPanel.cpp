@@ -17,14 +17,15 @@ namespace
             case 2: return SrcLfo3;
             case 3: return SrcLfo4;
             case 4: return SrcModEnv;
+            case 5: return SrcSeq;
             default: return SrcVelocity;
         }
     }
 
     const char* tabName (int tab)
     {
-        static const char* names[] = { "LFO 1", "LFO 2", "LFO 3", "LFO 4", "MOD ENV", "MORE" };
-        return names[juce::jlimit (0, 5, tab)];
+        static const char* names[] = { "LFO 1", "LFO 2", "LFO 3", "LFO 4", "MOD ENV", "SEQ", "MORE" };
+        return names[juce::jlimit (0, 6, tab)];
     }
 }
 
@@ -186,6 +187,70 @@ void LfoDisplay::paint (juce::Graphics& g)
 }
 
 //==============================================================================
+//==============================================================================
+StepEditor::StepEditor (StacksAudioProcessor& p, juce::Colour c) : processor (p), colour (c)
+{
+    setTooltip ("The sequencer lane: drag to draw a value per step (up is positive). Steps and Rate set how many play and how fast; Slew glides between them.");
+    steps = processor.sequence();
+    startTimerHz (20);
+}
+
+StepEditor::~StepEditor() { stopTimer(); }
+
+int StepEditor::stepCount() const
+{
+    return juce::jlimit (2, StacksAudioProcessor::kSeqMaxSteps, (int) processor.apvts.getRawParameterValue (paramId (P::seq_steps))->load());
+}
+
+void StepEditor::paint (juce::Graphics& g)
+{
+    auto r = getLocalBounds().toFloat().reduced (2.0f);
+    g.setColour (colours::background);
+    g.fillRoundedRectangle (r, 4.0f);
+    if (! dirty) steps = processor.sequence();
+    const int count = stepCount();
+    const int playing = processor.sequencerStep();
+    const float w = r.getWidth() / (float) count;
+    const float mid = r.getCentreY();
+    g.setColour (colours::muted.withAlpha (0.3f));
+    g.drawHorizontalLine ((int) mid, r.getX(), r.getRight());
+    for (int i = 0; i < count; ++i)
+    {
+        const float v = i < (int) steps.size() ? steps[(size_t) i] : 0.0f;
+        const float x = r.getX() + (float) i * w;
+        const float h = std::abs (v) * (r.getHeight() * 0.5f - 3.0f);
+        juce::Rectangle<float> bar (x + 2.0f, v >= 0.0f ? mid - h : mid, w - 4.0f, juce::jmax (2.0f, h));
+        g.setColour (i == playing ? colour : colour.withAlpha (0.55f));
+        g.fillRoundedRectangle (bar, 2.0f);
+        if (i == playing)
+        {
+            g.setColour (colour.withAlpha (0.12f));
+            g.fillRect (x, r.getY(), w, r.getHeight());
+        }
+    }
+}
+
+void StepEditor::edit (const juce::MouseEvent& e)
+{
+    auto r = getLocalBounds().toFloat().reduced (2.0f);
+    const int count = stepCount();
+    const int i = juce::jlimit (0, count - 1, (int) ((e.position.x - r.getX()) / (r.getWidth() / (float) count)));
+    const float v = juce::jlimit (-1.0f, 1.0f, (r.getCentreY() - e.position.y) / (r.getHeight() * 0.5f - 3.0f));
+    if (steps.size() < (size_t) StacksAudioProcessor::kSeqMaxSteps) steps.resize ((size_t) StacksAudioProcessor::kSeqMaxSteps, 0.0f);
+    steps[(size_t) i] = std::abs (v) < 0.06f ? 0.0f : v;
+    dirty = true;
+    repaint();
+}
+
+void StepEditor::mouseUp (const juce::MouseEvent&)
+{
+    if (dirty)
+    {
+        processor.setSequence (steps);
+        dirty = false;
+    }
+}
+
 ModulatorsPanel::ModulatorsPanel (StacksAudioProcessor& p) : processor (p)
 {
     for (int t = 0; t < kNumTabs; ++t)
@@ -193,7 +258,7 @@ ModulatorsPanel::ModulatorsPanel (StacksAudioProcessor& p) : processor (p)
         auto& b = tabButtons[t];
         b.setButtonText (tabName (t));
         b.source = sourceForTab (t);
-        b.setTooltip (t == TabSources ? "Velocity, key, wheel, aftertouch, random" : "Click to edit. Drag onto any knob to connect it.");
+        b.setTooltip (t == TabSources ? "Velocity, key, wheel, aftertouch, random" : t == TabSeq ? "A 16-step lane in time with the host. Draw it, then drag the tab onto any knob." : "Click to edit. Drag onto any knob to connect it.");
         styleAsTab (b);
         b.setColour (juce::TextButton::buttonOnColourId, modSourceColour (sourceForTab (t)));
         b.onClick = [this, t] { showTab (t); };
@@ -270,6 +335,7 @@ void ModulatorsPanel::showTab (int tab)
 
     content.clear();
     display.reset();
+    stepEditor.reset();
     sourcePicker.setVisible (tab == TabSources);
 
     const auto colour = modSourceColour (currentSource());
@@ -295,6 +361,21 @@ void ModulatorsPanel::showTab (int tab)
         add (lfoModeParam (k), false);
         add (lfoRateParam (k), true);
         add (lfoPhaseParam (k), true);
+    }
+    else if (tab == TabSeq)
+    {
+        stepEditor = std::make_unique<StepEditor> (processor, colour);
+        addAndMakeVisible (*stepEditor);
+        auto choice = std::make_unique<ParamChoice> (apvts, stacks::spec (P::seq_rate));
+        addAndMakeVisible (*choice);
+        content.push_back (std::move (choice));
+        for (auto param : { P::seq_steps, P::seq_slew })
+        {
+            auto kn = std::make_unique<ParamKnob> (apvts, stacks::spec (param));
+            kn->setAccent (colour);
+            addAndMakeVisible (*kn);
+            content.push_back (std::move (kn));
+        }
     }
     else if (tab == TabModEnv)
     {
@@ -365,6 +446,7 @@ void ModulatorsPanel::showSource (int source)
 {
     if (source >= SrcLfo1 && source <= SrcLfo4)      showTab (TabLfo1 + (source - SrcLfo1));
     else if (source == SrcModEnv)                    showTab (TabModEnv);
+    else if (source == SrcSeq)                       showTab (TabSeq);
     else
     {
         sourcePicker.setSelectedId (source, juce::dontSendNotification);
@@ -412,6 +494,18 @@ void ModulatorsPanel::resized()
             content[(size_t) i]->setBounds (combos.removeFromTop (comboH));
         auto knobRow = knobsArea.withSizeKeepingCentre (knobsArea.getWidth(), cellH);
         for (int i = 3; i < (int) content.size(); ++i)
+            content[(size_t) i]->setBounds (knobRow.removeFromLeft (cell));
+    }
+    else if (currentTab == TabSeq)
+    {
+        auto knobsArea = body.removeFromRight (2 * cell);
+        body.removeFromRight (4);
+        auto combos = body.removeFromRight (92);
+        body.removeFromRight (6);
+        if (stepEditor) stepEditor->setBounds (body);
+        if (! content.empty()) content[0]->setBounds (combos.removeFromTop (juce::jmin (36, combos.getHeight())));
+        auto knobRow = knobsArea.withSizeKeepingCentre (knobsArea.getWidth(), cellH);
+        for (int i = 1; i < (int) content.size(); ++i)
             content[(size_t) i]->setBounds (knobRow.removeFromLeft (cell));
     }
     else if (currentTab == TabModEnv)

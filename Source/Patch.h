@@ -25,6 +25,7 @@ struct Patch
     std::array<juce::String, kNumLfos> lfoShapes; // drawn LFO shapes as point JSON, empty = none
     std::array<juce::String, 4> userWaves;        // file names of the imported wavetables in User 1-4
     juce::String sampleFile;                       // the sample oscillator's file (name in the Samples folder, or a full path)
+    juce::String seqSteps;                         // the sequencer lane: JSON array of up to 16 values -1..1 (empty = flat)
     std::array<WaveSpec, kNumOscs> waves;         // designed tables behind "Custom" for osc A, B and C
     static const char* waveKey (int osc) noexcept { return osc == 0 ? "waveA" : osc == 1 ? "waveB" : "waveC"; }   // JSON keys
     juce::StringArray tags;                // lowercase words a producer would search for
@@ -61,6 +62,8 @@ struct Patch
     static juce::Identifier customWaveProperty (int osc);
     static const juce::Identifier& sampleTreeType();        // the sample oscillator's file
     static const juce::Identifier& sampleFileProperty();
+    static const juce::Identifier& sequenceTreeType();       // the sequencer lane
+    static const juce::Identifier& sequenceStepsProperty();
 };
 
 // Keeps a patch in tune with the note that is played: oscillator A only at

@@ -53,7 +53,8 @@ bool isAdvancedParam (const char* id);
 // a few virtual ones (pitch, amp, pan) followed by every float parameter.
 enum ModSource { SrcOff = 0, SrcLfo1, SrcLfo2, SrcLfo3, SrcLfo4, SrcFilterEnv, SrcModEnv, SrcVelocity, SrcKey, SrcModWheel, SrcAftertouch, SrcRandom,
                  SrcMacro1, SrcMacro2, SrcMacro3, SrcMacro4, SrcMacro5, SrcMacro6,
-                 SrcSlide,   // MPE slide (CC74), per note; appended last so saved sources keep their numbers
+                 SrcSlide,   // MPE slide (CC74), per note; appended so saved sources keep their numbers
+                 SrcSeq,     // the step sequencer lane, tempo-synced
                  kNumModSources };
 constexpr int kNumMacros = 6;   // Brightness, Movement, Grit, Space, Width, Length: big knobs any patch can be played with
 inline bool isMacroSource (int src) noexcept { return src >= SrcMacro1 && src < SrcMacro1 + kNumMacros; }
@@ -65,7 +66,7 @@ enum LfoShape  { ShapeSine = 0, ShapeTriangle, ShapeSaw, ShapeRamp, ShapeSquare,
 
 inline bool isBipolarSource (int src) noexcept
 {
-    return src == SrcLfo1 || src == SrcLfo2 || src == SrcLfo3 || src == SrcLfo4 || src == SrcKey || src == SrcRandom;
+    return src == SrcLfo1 || src == SrcLfo2 || src == SrcLfo3 || src == SrcLfo4 || src == SrcKey || src == SrcRandom || src == SrcSeq;
 }
 
 // X(id, name, group, kind, min, max, default, skewCentre, unit, choices, aiHint)
@@ -153,64 +154,64 @@ inline bool isBipolarSource (int src) noexcept
  X(lfo4_sync,      "LFO4 Sync",    "LFO 4",      Choice,  0,     8,     0,     0,     "",   lfoSyncNames,       "Free uses Rate; otherwise LFO 4 cycles over a note length locked to the tempo") \
  X(lfo4_phase,     "LFO4 Phase",   "LFO 4",      Float,   0,     1,     0,     0,     "",   nullptr,            "start phase of LFO 4, 0-1") \
  X(lfo4_mode,      "LFO4 Mode",    "LFO 4",      Choice,  0,     1,     0,     0,     "",   lfoModeNames,       "Free: LFO 4 runs continuously and is shared by all notes; Note: restarts on every key") \
- X(mod1_source,     "Mod1 Src",     "MOD MATRIX", Choice,  0,     18,    0,     0,     "",   modSourceNames,     "connection 1 source") \
+ X(mod1_source,     "Mod1 Src",     "MOD MATRIX", Choice,  0,     19,    0,     0,     "",   modSourceNames,     "connection 1 source") \
  X(mod1_dest,       "Mod1 Target",  "MOD MATRIX", Choice,  0,     999,   0,     0,     "",   modTargetNames,     "connection 1 target: Pitch, Pitch B, Amp, Pan or the name of any knob") \
  X(mod1_amount,     "Mod1 Amt",     "MOD MATRIX", Float,  -1,     1,     0,     0,     "",   nullptr,            "connection 1 depth -1..1 (Pitch: x12 semitones; knobs: fraction of the knob's travel)") \
- X(mod2_source,     "Mod2 Src",     "MOD MATRIX", Choice,  0,     18,    0,     0,     "",   modSourceNames,     "connection 2 source") \
+ X(mod2_source,     "Mod2 Src",     "MOD MATRIX", Choice,  0,     19,    0,     0,     "",   modSourceNames,     "connection 2 source") \
  X(mod2_dest,       "Mod2 Target",  "MOD MATRIX", Choice,  0,     999,   0,     0,     "",   modTargetNames,     "connection 2 target: Pitch, Pitch B, Amp, Pan or the name of any knob") \
  X(mod2_amount,     "Mod2 Amt",     "MOD MATRIX", Float,  -1,     1,     0,     0,     "",   nullptr,            "connection 2 depth -1..1 (Pitch: x12 semitones; knobs: fraction of the knob's travel)") \
- X(mod3_source,     "Mod3 Src",     "MOD MATRIX", Choice,  0,     18,    0,     0,     "",   modSourceNames,     "connection 3 source") \
+ X(mod3_source,     "Mod3 Src",     "MOD MATRIX", Choice,  0,     19,    0,     0,     "",   modSourceNames,     "connection 3 source") \
  X(mod3_dest,       "Mod3 Target",  "MOD MATRIX", Choice,  0,     999,   0,     0,     "",   modTargetNames,     "connection 3 target: Pitch, Pitch B, Amp, Pan or the name of any knob") \
  X(mod3_amount,     "Mod3 Amt",     "MOD MATRIX", Float,  -1,     1,     0,     0,     "",   nullptr,            "connection 3 depth -1..1 (Pitch: x12 semitones; knobs: fraction of the knob's travel)") \
- X(mod4_source,     "Mod4 Src",     "MOD MATRIX", Choice,  0,     18,    0,     0,     "",   modSourceNames,     "connection 4 source") \
+ X(mod4_source,     "Mod4 Src",     "MOD MATRIX", Choice,  0,     19,    0,     0,     "",   modSourceNames,     "connection 4 source") \
  X(mod4_dest,       "Mod4 Target",  "MOD MATRIX", Choice,  0,     999,   0,     0,     "",   modTargetNames,     "connection 4 target: Pitch, Pitch B, Amp, Pan or the name of any knob") \
  X(mod4_amount,     "Mod4 Amt",     "MOD MATRIX", Float,  -1,     1,     0,     0,     "",   nullptr,            "connection 4 depth -1..1 (Pitch: x12 semitones; knobs: fraction of the knob's travel)") \
- X(mod5_source,     "Mod5 Src",     "MOD MATRIX", Choice,  0,     18,    0,     0,     "",   modSourceNames,     "connection 5 source") \
+ X(mod5_source,     "Mod5 Src",     "MOD MATRIX", Choice,  0,     19,    0,     0,     "",   modSourceNames,     "connection 5 source") \
  X(mod5_dest,       "Mod5 Target",  "MOD MATRIX", Choice,  0,     999,   0,     0,     "",   modTargetNames,     "connection 5 target: Pitch, Pitch B, Amp, Pan or the name of any knob") \
  X(mod5_amount,     "Mod5 Amt",     "MOD MATRIX", Float,  -1,     1,     0,     0,     "",   nullptr,            "connection 5 depth -1..1 (Pitch: x12 semitones; knobs: fraction of the knob's travel)") \
- X(mod6_source,     "Mod6 Src",     "MOD MATRIX", Choice,  0,     18,    0,     0,     "",   modSourceNames,     "connection 6 source") \
+ X(mod6_source,     "Mod6 Src",     "MOD MATRIX", Choice,  0,     19,    0,     0,     "",   modSourceNames,     "connection 6 source") \
  X(mod6_dest,       "Mod6 Target",  "MOD MATRIX", Choice,  0,     999,   0,     0,     "",   modTargetNames,     "connection 6 target: Pitch, Pitch B, Amp, Pan or the name of any knob") \
  X(mod6_amount,     "Mod6 Amt",     "MOD MATRIX", Float,  -1,     1,     0,     0,     "",   nullptr,            "connection 6 depth -1..1 (Pitch: x12 semitones; knobs: fraction of the knob's travel)") \
- X(mod7_source,     "Mod7 Src",     "MOD MATRIX", Choice,  0,     18,    0,     0,     "",   modSourceNames,     "connection 7 source") \
+ X(mod7_source,     "Mod7 Src",     "MOD MATRIX", Choice,  0,     19,    0,     0,     "",   modSourceNames,     "connection 7 source") \
  X(mod7_dest,       "Mod7 Target",  "MOD MATRIX", Choice,  0,     999,   0,     0,     "",   modTargetNames,     "connection 7 target: Pitch, Pitch B, Amp, Pan or the name of any knob") \
  X(mod7_amount,     "Mod7 Amt",     "MOD MATRIX", Float,  -1,     1,     0,     0,     "",   nullptr,            "connection 7 depth -1..1 (Pitch: x12 semitones; knobs: fraction of the knob's travel)") \
- X(mod8_source,     "Mod8 Src",     "MOD MATRIX", Choice,  0,     18,    0,     0,     "",   modSourceNames,     "connection 8 source") \
+ X(mod8_source,     "Mod8 Src",     "MOD MATRIX", Choice,  0,     19,    0,     0,     "",   modSourceNames,     "connection 8 source") \
  X(mod8_dest,       "Mod8 Target",  "MOD MATRIX", Choice,  0,     999,   0,     0,     "",   modTargetNames,     "connection 8 target: Pitch, Pitch B, Amp, Pan or the name of any knob") \
  X(mod8_amount,     "Mod8 Amt",     "MOD MATRIX", Float,  -1,     1,     0,     0,     "",   nullptr,            "connection 8 depth -1..1 (Pitch: x12 semitones; knobs: fraction of the knob's travel)") \
- X(mod9_source,     "Mod9 Src",     "MOD MATRIX", Choice,  0,     18,    0,     0,     "",   modSourceNames,     "connection 9 source") \
+ X(mod9_source,     "Mod9 Src",     "MOD MATRIX", Choice,  0,     19,    0,     0,     "",   modSourceNames,     "connection 9 source") \
  X(mod9_dest,       "Mod9 Target",  "MOD MATRIX", Choice,  0,     999,   0,     0,     "",   modTargetNames,     "connection 9 target: Pitch, Pitch B, Amp, Pan or the name of any knob") \
  X(mod9_amount,     "Mod9 Amt",     "MOD MATRIX", Float,  -1,     1,     0,     0,     "",   nullptr,            "connection 9 depth -1..1 (Pitch: x12 semitones; knobs: fraction of the knob's travel)") \
- X(mod10_source,     "Mod10 Src",     "MOD MATRIX", Choice,  0,     18,    0,     0,     "",   modSourceNames,     "connection 10 source") \
+ X(mod10_source,     "Mod10 Src",     "MOD MATRIX", Choice,  0,     19,    0,     0,     "",   modSourceNames,     "connection 10 source") \
  X(mod10_dest,       "Mod10 Target",  "MOD MATRIX", Choice,  0,     999,   0,     0,     "",   modTargetNames,     "connection 10 target: Pitch, Pitch B, Amp, Pan or the name of any knob") \
  X(mod10_amount,     "Mod10 Amt",     "MOD MATRIX", Float,  -1,     1,     0,     0,     "",   nullptr,            "connection 10 depth -1..1 (Pitch: x12 semitones; knobs: fraction of the knob's travel)") \
- X(mod11_source,     "Mod11 Src",     "MOD MATRIX", Choice,  0,     18,    0,     0,     "",   modSourceNames,     "connection 11 source") \
+ X(mod11_source,     "Mod11 Src",     "MOD MATRIX", Choice,  0,     19,    0,     0,     "",   modSourceNames,     "connection 11 source") \
  X(mod11_dest,       "Mod11 Target",  "MOD MATRIX", Choice,  0,     999,   0,     0,     "",   modTargetNames,     "connection 11 target: Pitch, Pitch B, Amp, Pan or the name of any knob") \
  X(mod11_amount,     "Mod11 Amt",     "MOD MATRIX", Float,  -1,     1,     0,     0,     "",   nullptr,            "connection 11 depth -1..1 (Pitch: x12 semitones; knobs: fraction of the knob's travel)") \
- X(mod12_source,     "Mod12 Src",     "MOD MATRIX", Choice,  0,     18,    0,     0,     "",   modSourceNames,     "connection 12 source") \
+ X(mod12_source,     "Mod12 Src",     "MOD MATRIX", Choice,  0,     19,    0,     0,     "",   modSourceNames,     "connection 12 source") \
  X(mod12_dest,       "Mod12 Target",  "MOD MATRIX", Choice,  0,     999,   0,     0,     "",   modTargetNames,     "connection 12 target: Pitch, Pitch B, Amp, Pan or the name of any knob") \
  X(mod12_amount,     "Mod12 Amt",     "MOD MATRIX", Float,  -1,     1,     0,     0,     "",   nullptr,            "connection 12 depth -1..1 (Pitch: x12 semitones; knobs: fraction of the knob's travel)") \
- X(mod13_source,     "Mod13 Src",     "MOD MATRIX", Choice,  0,     18,    0,     0,     "",   modSourceNames,     "connection 13 source") \
+ X(mod13_source,     "Mod13 Src",     "MOD MATRIX", Choice,  0,     19,    0,     0,     "",   modSourceNames,     "connection 13 source") \
  X(mod13_dest,       "Mod13 Target",  "MOD MATRIX", Choice,  0,     999,   0,     0,     "",   modTargetNames,     "connection 13 target: Pitch, Pitch B, Amp, Pan or the name of any knob") \
  X(mod13_amount,     "Mod13 Amt",     "MOD MATRIX", Float,  -1,     1,     0,     0,     "",   nullptr,            "connection 13 depth -1..1 (Pitch: x12 semitones; knobs: fraction of the knob's travel)") \
- X(mod14_source,     "Mod14 Src",     "MOD MATRIX", Choice,  0,     18,    0,     0,     "",   modSourceNames,     "connection 14 source") \
+ X(mod14_source,     "Mod14 Src",     "MOD MATRIX", Choice,  0,     19,    0,     0,     "",   modSourceNames,     "connection 14 source") \
  X(mod14_dest,       "Mod14 Target",  "MOD MATRIX", Choice,  0,     999,   0,     0,     "",   modTargetNames,     "connection 14 target: Pitch, Pitch B, Amp, Pan or the name of any knob") \
  X(mod14_amount,     "Mod14 Amt",     "MOD MATRIX", Float,  -1,     1,     0,     0,     "",   nullptr,            "connection 14 depth -1..1 (Pitch: x12 semitones; knobs: fraction of the knob's travel)") \
- X(mod15_source,     "Mod15 Src",     "MOD MATRIX", Choice,  0,     18,    0,     0,     "",   modSourceNames,     "connection 15 source") \
+ X(mod15_source,     "Mod15 Src",     "MOD MATRIX", Choice,  0,     19,    0,     0,     "",   modSourceNames,     "connection 15 source") \
  X(mod15_dest,       "Mod15 Target",  "MOD MATRIX", Choice,  0,     999,   0,     0,     "",   modTargetNames,     "connection 15 target: Pitch, Pitch B, Amp, Pan or the name of any knob") \
  X(mod15_amount,     "Mod15 Amt",     "MOD MATRIX", Float,  -1,     1,     0,     0,     "",   nullptr,            "connection 15 depth -1..1 (Pitch: x12 semitones; knobs: fraction of the knob's travel)") \
- X(mod16_source,     "Mod16 Src",     "MOD MATRIX", Choice,  0,     18,    0,     0,     "",   modSourceNames,     "connection 16 source") \
+ X(mod16_source,     "Mod16 Src",     "MOD MATRIX", Choice,  0,     19,    0,     0,     "",   modSourceNames,     "connection 16 source") \
  X(mod16_dest,       "Mod16 Target",  "MOD MATRIX", Choice,  0,     999,   0,     0,     "",   modTargetNames,     "connection 16 target: Pitch, Pitch B, Amp, Pan or the name of any knob") \
  X(mod16_amount,     "Mod16 Amt",     "MOD MATRIX", Float,  -1,     1,     0,     0,     "",   nullptr,            "connection 16 depth -1..1 (Pitch: x12 semitones; knobs: fraction of the knob's travel)") \
- X(mod17_source,     "Mod17 Src",     "MOD MATRIX", Choice,  0,     18,    0,     0,     "",   modSourceNames,     "connection 17 source") \
+ X(mod17_source,     "Mod17 Src",     "MOD MATRIX", Choice,  0,     19,    0,     0,     "",   modSourceNames,     "connection 17 source") \
  X(mod17_dest,       "Mod17 Target",  "MOD MATRIX", Choice,  0,     999,   0,     0,     "",   modTargetNames,     "connection 17 target: Pitch, Pitch B, Amp, Pan or the name of any knob") \
  X(mod17_amount,     "Mod17 Amt",     "MOD MATRIX", Float,  -1,     1,     0,     0,     "",   nullptr,            "connection 17 depth -1..1 (Pitch: x12 semitones; knobs: fraction of the knob's travel)") \
- X(mod18_source,     "Mod18 Src",     "MOD MATRIX", Choice,  0,     18,    0,     0,     "",   modSourceNames,     "connection 18 source") \
+ X(mod18_source,     "Mod18 Src",     "MOD MATRIX", Choice,  0,     19,    0,     0,     "",   modSourceNames,     "connection 18 source") \
  X(mod18_dest,       "Mod18 Target",  "MOD MATRIX", Choice,  0,     999,   0,     0,     "",   modTargetNames,     "connection 18 target: Pitch, Pitch B, Amp, Pan or the name of any knob") \
  X(mod18_amount,     "Mod18 Amt",     "MOD MATRIX", Float,  -1,     1,     0,     0,     "",   nullptr,            "connection 18 depth -1..1 (Pitch: x12 semitones; knobs: fraction of the knob's travel)") \
- X(mod19_source,     "Mod19 Src",     "MOD MATRIX", Choice,  0,     18,    0,     0,     "",   modSourceNames,     "connection 19 source") \
+ X(mod19_source,     "Mod19 Src",     "MOD MATRIX", Choice,  0,     19,    0,     0,     "",   modSourceNames,     "connection 19 source") \
  X(mod19_dest,       "Mod19 Target",  "MOD MATRIX", Choice,  0,     999,   0,     0,     "",   modTargetNames,     "connection 19 target: Pitch, Pitch B, Amp, Pan or the name of any knob") \
  X(mod19_amount,     "Mod19 Amt",     "MOD MATRIX", Float,  -1,     1,     0,     0,     "",   nullptr,            "connection 19 depth -1..1 (Pitch: x12 semitones; knobs: fraction of the knob's travel)") \
- X(mod20_source,     "Mod20 Src",     "MOD MATRIX", Choice,  0,     18,    0,     0,     "",   modSourceNames,     "connection 20 source") \
+ X(mod20_source,     "Mod20 Src",     "MOD MATRIX", Choice,  0,     19,    0,     0,     "",   modSourceNames,     "connection 20 source") \
  X(mod20_dest,       "Mod20 Target",  "MOD MATRIX", Choice,  0,     999,   0,     0,     "",   modTargetNames,     "connection 20 target: Pitch, Pitch B, Amp, Pan or the name of any knob") \
  X(mod20_amount,     "Mod20 Amt",     "MOD MATRIX", Float,  -1,     1,     0,     0,     "",   nullptr,            "connection 20 depth -1..1 (Pitch: x12 semitones; knobs: fraction of the knob's travel)") \
  X(unison_voices,  "Unison",       "VOICE",      Int,     1,     16,    1,     0,     "",   nullptr,            "stacked detuned copies per note, 1-16 (3 = wide, 7+ = supersaw)") \
@@ -230,6 +231,9 @@ inline bool isBipolarSource (int src) noexcept
  X(arp_octaves,    "Octaves",      "ARP",        Int,     1,     4,     1,     0,     "",   nullptr,            "how many octaves the pattern climbs through") \
  X(arp_gate,       "Gate",         "ARP",        Float,   0.1,   1,     0.6,   0,     "",   nullptr,            "how much of each step the note sounds for") \
  X(arp_swing,      "Swing",        "ARP",        Float,   0,     0.5,   0,     0,     "",   nullptr,            "delays every other step for a shuffle feel (advanced)") \
+ X(seq_rate,       "Seq Rate",     "SEQ",        Choice,  0,     5,     3,     0,     "",   arpRateNames,       "step sequencer step length, locked to the host tempo") \
+ X(seq_steps,      "Steps",        "SEQ",        Int,     2,     16,    8,     0,     "",   nullptr,            "how many steps the sequencer lane plays before it repeats") \
+ X(seq_slew,       "Slew",         "SEQ",        Float,   0,     1,     0.05,  0,     "",   nullptr,            "glide between steps: 0 = stepped, 1 = smooth") \
  X(dist_mode,      "Dist Mode",    "DISTORTION", Choice,  0,     4,     0,     0,     "",   distModeNames,      "Soft = warm saturation, Hard = clipping, Tube = asymmetric valve-like, Fold = wavefolder, Crush = bit and rate reduction") \
  X(dist_drive,     "Dist Drive",   "DISTORTION", Float,   0,     36,    12,    0,     "dB", nullptr,            "distortion input gain in dB") \
  X(dist_tone,      "Dist Tone",    "DISTORTION", Float,   500,   20000, 8000,  3000,  "Hz", nullptr,            "low-pass after the distortion (advanced)") \

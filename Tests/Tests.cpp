@@ -927,7 +927,15 @@ static void testWarpsAndSources()
     CHECK (warpRateFactor (WarpSync, 1.0f) == 8.0f && warpRateFactor (WarpFold, 1.0f) == 1.0f);
     CHECK (warpNames().size() == kNumWarpModes);
 
-    CHECK (modSourceNames().size() == kNumModSources && modSourceNames()[SrcSlide] == "Slide");
+    CHECK (modSourceNames().size() == kNumModSources && modSourceNames()[SrcSlide] == "Slide" && modSourceNames()[SrcSeq] == "Seq");
+    CHECK (isBipolarSource (SrcSeq) && ! modTargetNames().contains ("Slew"));   // the lane is bipolar and its own knobs are not targets
+    {
+        Patch q;
+        q.seqSteps = "[1,-0.5,0,0.25]";
+        const auto js = q.toJson();
+        CHECK (js.contains ("\"seq\""));
+        if (auto back = Patch::fromJson (js)) CHECK (back->seqSteps.contains ("-0.5") && back->seqSteps.contains ("0.25")); else CHECK (false);
+    }
     CHECK (! isMacroSource (SrcSlide) && ! isBipolarSource (SrcSlide));
     for (int i = 0; i < kNumModSlots; ++i)
         CHECK (spec (modSourceParam (i)).choices().size() == kNumModSources);

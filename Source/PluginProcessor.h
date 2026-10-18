@@ -248,6 +248,10 @@ public:
     // Drawn LFO shapes and the tables the UI can display
     LfoPoints lfoPoints (int k) const;
     void setLfoPoints (int k, const LfoPoints&);
+    static constexpr int kSeqMaxSteps = 16;
+    std::vector<float> sequence() const;                 // the lane, kSeqMaxSteps values -1..1
+    void setSequence (const std::vector<float>&);         // message thread; stored with the patch
+    int sequencerStep() const                              { return seqStepIndex.load (std::memory_order_relaxed); }   // for the playhead
     const LfoTable& lfoTable (int k) const                  { return lfoTables.get (k); }
     float lfoDisplayPhase (int k) const                     { return lfoPhaseForDisplay[k].load(); }
 
@@ -282,6 +286,11 @@ private:
     UserWavetables userWaves;                             // per instance, named in the state tree
     WaveSpec customSpecs[kNumOscs];
     SampleBank samples;
+    std::atomic<float> seqStepValue[kSeqMaxSteps] {};
+    std::atomic<int> seqStepIndex { 0 };
+    double seqFreePhase = 0.0;                              // steps, when the host is not running
+    float seqSmoothed = 0.0f;
+    void reloadSequence();
     juce::String loadedSampleFile;                         // what the bank holds, to skip reloads
     void reloadSample();                              // what the Custom slots were built from
     bool designWaves = true;

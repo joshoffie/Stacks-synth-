@@ -104,7 +104,7 @@ const juce::StringArray& lfoModeNames()
 const juce::StringArray& modSourceNames()
 {
     static const juce::StringArray names { "Off", "LFO 1", "LFO 2", "LFO 3", "LFO 4", "Filter Env", "Mod Env", "Velocity", "Key", "Mod Wheel", "Aftertouch", "Random",
-                                           "Brightness", "Movement", "Grit", "Space", "Width", "Length", "Slide" };
+                                           "Brightness", "Movement", "Grit", "Space", "Width", "Length", "Slide", "Seq" };
     return names;
 }
 
@@ -130,7 +130,7 @@ namespace
                 const juce::String id (sp.id);
                 const bool modSlot = id.startsWith ("mod") && (id.endsWith ("_amount") || id.endsWith ("_source") || id.endsWith ("_dest"));
                 const juce::String group (sp.group);
-                if (sp.kind != ParamKind::Float || modSlot || id == "master_gain" || group == "MACROS" || group == "ARP")
+                if (sp.kind != ParamKind::Float || modSlot || id == "master_gain" || group == "MACROS" || group == "ARP" || group == "SEQ")
                     continue;   // macros and the arp are sources and a player, not targets
                 targetForParam[(size_t) i] = names.size();
                 names.add (sp.name);

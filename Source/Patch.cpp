@@ -67,6 +67,8 @@ juce::var Patch::toVar() const
             obj->setProperty (waveKey (osc), this->waves[(size_t) osc].toVar());
     if (sampleFile.isNotEmpty())
         obj->setProperty ("sample", sampleFile);
+    if (seqSteps.isNotEmpty())
+        obj->setProperty ("seq", juce::JSON::parse (seqSteps));
 
     bool anyShape = false;
     for (const auto& sh : lfoShapes) anyShape = anyShape || sh.isNotEmpty();
@@ -167,6 +169,7 @@ std::optional<Patch> Patch::fromVar (const juce::var& v, const Patch* base)
         if (auto w = WaveSpec::fromVar (obj->getProperty (waveKey (osc))))
             p.waves[(size_t) osc] = *w;
     p.sampleFile = obj->getProperty ("sample").toString();
+    if (obj->getProperty ("seq").isArray()) p.seqSteps = juce::JSON::toString (obj->getProperty ("seq"), true);
 
     auto* params = obj->getProperty ("params").getDynamicObject();
     if (params == nullptr)
@@ -268,6 +271,18 @@ const juce::Identifier& Patch::sampleFileProperty()
     return prop;
 }
 
+const juce::Identifier& Patch::sequenceTreeType()
+{
+    static const juce::Identifier type ("Sequence");
+    return type;
+}
+
+const juce::Identifier& Patch::sequenceStepsProperty()
+{
+    static const juce::Identifier prop ("steps");
+    return prop;
+}
+
 Patch Patch::capture (const juce::AudioProcessorValueTreeState& apvts)
 {
     Patch p;
@@ -294,6 +309,9 @@ Patch Patch::capture (const juce::AudioProcessorValueTreeState& apvts)
     auto sample = apvts.state.getChildWithName (sampleTreeType());
     if (sample.isValid())
         p.sampleFile = sample.getProperty (sampleFileProperty()).toString();
+    auto seq = apvts.state.getChildWithName (sequenceTreeType());
+    if (seq.isValid())
+        p.seqSteps = seq.getProperty (sequenceStepsProperty()).toString();
     return p;
 }
 
@@ -331,6 +349,9 @@ void Patch::applyTo (juce::AudioProcessorValueTreeState& apvts) const
     auto sample = apvts.state.getOrCreateChildWithName (sampleTreeType(), nullptr);
     if (sampleFile.isNotEmpty()) sample.setProperty (sampleFileProperty(), sampleFile, nullptr);
     else                         sample.removeProperty (sampleFileProperty(), nullptr);
+    auto seq = apvts.state.getOrCreateChildWithName (sequenceTreeType(), nullptr);
+    if (seqSteps.isNotEmpty()) seq.setProperty (sequenceStepsProperty(), seqSteps, nullptr);
+    else                       seq.removeProperty (sequenceStepsProperty(), nullptr);
 }
 
 //==============================================================================
@@ -654,7 +675,7 @@ juce::String describePatch (const Patch& p)
 
     // Motion
     static const char* shortSource[] = { "", "LFO1", "LFO2", "LFO3", "LFO4", "FEnv", "MEnv", "Vel", "Key", "Wheel", "AT", "Rnd",
-                                         "Bright", "Move", "Grit", "Space", "Width", "Length", "Slide" };
+                                         "Bright", "Move", "Grit", "Space", "Width", "Length", "Slide", "Seq" };
     static_assert (sizeof (shortSource) / sizeof (shortSource[0]) == kNumModSources, "a short name per modulation source");
     for (int i = 0; i < kNumModSlots; ++i)
     {

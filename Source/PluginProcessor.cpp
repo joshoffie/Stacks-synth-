@@ -218,6 +218,29 @@ void StacksAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         }
     voiceContext.bpm = currentBpm;
 
+    // The step sequencer lane: one value per step at the chosen rate, locked to
+    // the host when it runs, free-running otherwise; slew glides between steps.
+    {
+        const double beatsPerStep = Arpeggiator::beatsPerStep (params.geti (P::seq_rate));
+        const int count = juce::jlimit (2, kSeqMaxSteps, params.geti (P::seq_steps));
+        double stepPos;
+        if (hostPlaying && ppq)
+            stepPos = *ppq / beatsPerStep;
+        else
+        {
+            seqFreePhase += (currentBpm / 60.0) * numSamples / currentSampleRate / beatsPerStep;
+            stepPos = seqFreePhase;
+        }
+        const int idx = ((int) std::floor (stepPos) % count + count) % count;
+        seqStepIndex.store (idx, std::memory_order_relaxed);
+        const float target = seqStepValue[idx].load (std::memory_order_relaxed);
+        const float slew = params.get (P::seq_slew);
+        const float blockSec = (float) numSamples / (float) currentSampleRate;
+        const float alpha = slew < 0.002f ? 1.0f : 1.0f - std::exp (-blockSec / (slew * 0.25f));
+        seqSmoothed += (target - seqSmoothed) * alpha;
+        voiceContext.seqValue = seqSmoothed;
+    }
+
     // The arpeggiator plays the held notes for you, in time with the host.
     {
         Arpeggiator::Params ap;
@@ -419,6 +442,7 @@ void StacksAudioProcessor::applyGlobalModulation()
             case SrcModWheel:   s = voiceContext.modWheel.load(); break;
             case SrcAftertouch: s = voiceContext.aftertouch.load(); break;
             case SrcSlide:      s = voiceContext.slide.load(); break;
+            case SrcSeq:        s = voiceContext.seqValue; break;
             case SrcMacro1: case SrcMacro2: case SrcMacro3: case SrcMacro4: case SrcMacro5: case SrcMacro6:
                                 s = params.get (macroParam (src - SrcMacro1)); break;
             default: continue; // per-note sources have no meaning for a global knob
@@ -626,18 +650,19 @@ void StacksAudioProcessor::attachStateListeners()
     apvts.state.getOrCreateChildWithName (Patch::userWavesTreeType(), nullptr);
     apvts.state.getOrCreateChildWithName (Patch::customWavesTreeType(), nullptr);
     apvts.state.getOrCreateChildWithName (Patch::sampleTreeType(), nullptr);
+    apvts.state.getOrCreateChildWithName (Patch::sequenceTreeType(), nullptr);
     apvts.state.addListener (this);
 }
 
 void StacksAudioProcessor::parameterChanged (const juce::String&, float)     { triggerAsyncUpdate(); }
 void StacksAudioProcessor::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&)
 {
-    if (tree.hasType (Patch::lfoShapesTreeType()) || tree.hasType (Patch::userWavesTreeType()) || tree.hasType (Patch::customWavesTreeType()) || tree.hasType (Patch::sampleTreeType()))
+    if (tree.hasType (Patch::lfoShapesTreeType()) || tree.hasType (Patch::userWavesTreeType()) || tree.hasType (Patch::customWavesTreeType()) || tree.hasType (Patch::sampleTreeType()) || tree.hasType (Patch::sequenceTreeType()))
         triggerAsyncUpdate();
 }
 void StacksAudioProcessor::valueTreeChildAdded (juce::ValueTree&, juce::ValueTree& child)
 {
-    if (child.hasType (Patch::lfoShapesTreeType()) || child.hasType (Patch::userWavesTreeType()) || child.hasType (Patch::customWavesTreeType()) || child.hasType (Patch::sampleTreeType()))
+    if (child.hasType (Patch::lfoShapesTreeType()) || child.hasType (Patch::userWavesTreeType()) || child.hasType (Patch::customWavesTreeType()) || child.hasType (Patch::sampleTreeType()) || child.hasType (Patch::sequenceTreeType()))
         triggerAsyncUpdate();
 }
 void StacksAudioProcessor::handleAsyncUpdate()
@@ -646,6 +671,7 @@ void StacksAudioProcessor::handleAsyncUpdate()
     reloadUserWaves();
     reloadCustomWaves();
     reloadSample();
+    reloadSequence();
 }
 
 void StacksAudioProcessor::rebuildLfoTables()
@@ -1001,6 +1027,34 @@ void StacksAudioProcessor::reloadCustomWaves()
             continue;
         customSpecs[osc] = spec;
         userWaves.set (slot, spec.isEmpty() ? nullptr : buildSpectralTable (spec));
+    }
+}
+
+std::vector<float> StacksAudioProcessor::sequence() const
+{
+    std::vector<float> v ((size_t) kSeqMaxSteps, 0.0f);
+    for (int i = 0; i < kSeqMaxSteps; ++i) v[(size_t) i] = seqStepValue[i].load (std::memory_order_relaxed);
+    return v;
+}
+
+void StacksAudioProcessor::setSequence (const std::vector<float>& steps)
+{
+    juce::Array<juce::var> arr;
+    for (int i = 0; i < kSeqMaxSteps; ++i)
+        arr.add ((double) juce::jlimit (-1.0f, 1.0f, i < (int) steps.size() ? steps[(size_t) i] : 0.0f));
+    apvts.state.getOrCreateChildWithName (Patch::sequenceTreeType(), nullptr).setProperty (Patch::sequenceStepsProperty(), juce::JSON::toString (juce::var (arr), true), nullptr);
+    reloadSequence();
+}
+
+void StacksAudioProcessor::reloadSequence()
+{
+    auto tree = apvts.state.getChildWithName (Patch::sequenceTreeType());
+    const auto parsed = tree.isValid() ? juce::JSON::parse (tree.getProperty (Patch::sequenceStepsProperty()).toString()) : juce::var();
+    for (int i = 0; i < kSeqMaxSteps; ++i)
+    {
+        float v = 0.0f;
+        if (parsed.isArray() && i < parsed.size()) v = juce::jlimit (-1.0f, 1.0f, (float) (double) parsed[i]);
+        seqStepValue[i].store (v, std::memory_order_relaxed);
     }
 }
 
