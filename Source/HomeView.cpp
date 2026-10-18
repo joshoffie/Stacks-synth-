@@ -24,7 +24,7 @@ namespace
             : juce::AccessibilityHandler (c, juce::AccessibilityRole::button,
                                           juce::AccessibilityActions().addAction (juce::AccessibilityActionType::press, std::move (press))),
               titleText (title) {}
-        juce::String getTitle() const override { return titleText; }
+        juce::String getTitle() const override { return getComponent().getTitle().isNotEmpty() ? getComponent().getTitle() : titleText; }
     private:
         juce::String titleText;
     };
@@ -371,7 +371,7 @@ void HomeView::placeBlocks()
         b.face = face.translated (-bounds.getX(), -bounds.getY()).translated ((float) bounds.toNearestInt().getX() - bounds.getX(), (float) bounds.toNearestInt().getY() - bounds.getY());
         b.index = f.index;
         b.style = f.style;
-        if (b.name != f.name) { b.name = f.name; b.setTitle ("Hear " + f.name); b.setTooltip (f.name); }
+        if (b.name != f.name) { b.name = f.name; b.setTitle ("Hear " + f.name); b.setTooltip (f.name); b.invalidateAccessibilityHandler(); }
         b.alpha = juce::jmin (1.0f, f.age * 4.0f);
         b.selected = f.index == selected;
         b.setVisible (stage != Stage::pick);
@@ -500,7 +500,9 @@ void HomeView::paintGrowth (juce::Graphics& g, juce::Rectangle<float> area)
 // sound, or by time while it is still thinking.
 void HomeView::paintConstruction (juce::Graphics& g, juce::Rectangle<float> slot, juce::Colour colour, float progress)
 {
-    const float p = progress < 0.0f ? 0.5f + 0.5f * std::sin (anim * 0.9f) * 0.5f : juce::jlimit (0.0f, 1.0f, progress);
+    // Real progress when the engine reports it; while it is still thinking, the
+    // build loops on its own so the screen is never still.
+    const float p = progress > 0.01f ? juce::jlimit (0.0f, 1.0f, progress) : std::fmod (anim * 0.16f, 1.0f);
     const float skew = GardenView::kBlockSkew, depth = 10.0f;
     auto stepIn = [] (float v, float a, float b) { return juce::jlimit (0.0f, 1.0f, (v - a) / (b - a)); };
 
