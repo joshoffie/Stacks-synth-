@@ -1419,7 +1419,7 @@ static void testPromptCues()
     CHECK (v.sameValuesAs (Patch()));                            // nothing asked, nothing changed
 }
 
-static int buildFactory (int perPrompt)
+static int buildFactory (int perPrompt, int firstPrompt = 0)
 {
     std::optional<ModelInfo> chosen;
     for (const auto& m : ModelManager::catalogue())
