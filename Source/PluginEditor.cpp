@@ -37,7 +37,7 @@ StacksAudioProcessorEditor::StacksAudioProcessorEditor (StacksAudioProcessor& p)
     addAndMakeVisible (tuner);
 
     settingsButton.setButtonText (juce::String::fromUTF8 ("\xe2\x9a\x99"));   // gear
-    settingsButton.setTooltip ("Settings: the engine that grows sounds, your own models, calm mode, and the guide");
+    settingsButton.setTooltip ("Settings: calm mode, MPE and microtuning");
     settingsButton.onClick = [this] { SettingsPanel::show (synthProcessor, this); };
     addAndMakeVisible (settingsButton);
 
@@ -63,6 +63,7 @@ StacksAudioProcessorEditor::StacksAudioProcessorEditor (StacksAudioProcessor& p)
     addAndMakeVisible (labPanel);
     addAndMakeVisible (homeView);
     homeView.onOpenSynth = [this] { setHome (false); };
+    homeView.onSave = [this] { labPanel.savePresetDialog(); };
     modeButton.setTooltip ("Home: pick a kind of sound and grow it. Synth: every knob.");
     modeButton.onClick = [this] { setHome (! showingHome); };
     addAndMakeVisible (modeButton);

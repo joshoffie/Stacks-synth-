@@ -78,13 +78,8 @@ HomeView::HomeView (StacksAudioProcessor& p) : processor (p)
     backButton.onClick = [this] { stage = Stage::pick; note.clear(); refresh(); };
     addChildComponent (backButton);
 
-    saveButton.setTooltip ("Saves the sound you are hearing into My Sounds in the Library");
-    saveButton.onClick = [this]
-    {
-        processor.savePreset (processor.currentPatchName(), StacksAudioProcessor::libraryRoot().getChildFile ("My Sounds"), true);
-        note = "Saved \"" + processor.currentPatchName() + "\" to My Sounds";
-        repaint();
-    };
+    saveButton.setTooltip ("Save the sound you are hearing: pick a folder and a name");
+    saveButton.onClick = [this] { if (onSave) onSave(); };
     addChildComponent (saveButton);
 
     openSynthButton.setTooltip ("The full synth, for dialling this sound in by hand");
@@ -402,7 +397,7 @@ void HomeView::resized()
         auto bottom = r.removeFromBottom (40);
         openSynthButton.setBounds (bottom.removeFromRight (150));
         bottom.removeFromRight (10);
-        saveButton.setBounds (bottom.removeFromRight (90));
+        saveButton.setBounds (bottom.removeFromRight (110));
         bottom.removeFromRight (16);
         farButton.setBounds (bottom.removeFromRight (70));
         mediumButton.setBounds (bottom.removeFromRight (80));

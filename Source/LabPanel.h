@@ -109,6 +109,7 @@ public:
     bool isInterestedInFileDrag (const juce::StringArray& files) override;
     void filesDropped (const juce::StringArray& files, int x, int y) override;
     void recreateFromAudio (const juce::File&);   // sample-to-patch: imitate, then evolve
+    void savePresetDialog();                       // folder + name, saves exactly what's playing (also used by Home)
 
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override { refresh(); }
@@ -118,7 +119,6 @@ private:
     void layoutCards();
     enum class View { garden, tree, ideas, library, explain };
     void showView (View);
-    void savePresetDialog();                               // folder + name, saves exactly what's playing
     void scrollTreeToNewest();
 
     StacksAudioProcessor& processor;

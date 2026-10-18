@@ -24,6 +24,7 @@ public:
     void resized() override;
 
     std::function<void()> onOpenSynth;   // "Open the synth": the full editor
+    std::function<void()> onSave;        // the library's save dialog (folder + name)
 
 private:
     enum class Stage { pick, growing, results };
@@ -60,7 +61,7 @@ private:
     Stage stage = Stage::pick;
     juce::String category, note;
     std::vector<std::unique_ptr<Tile>> tiles;
-    juce::TextButton growButton { "Grow from this one" }, backButton { "Start over" }, saveButton { "Save it" }, openSynthButton { "Open the synth" };
+    juce::TextButton growButton { "Grow from this one" }, backButton { "Start over" }, saveButton { "Save preset" }, openSynthButton { "Open the synth" };
     juce::TextButton closeButton { "Close" }, mediumButton { "Medium" }, farButton { "Far" };
     float variation = 0.55f;
     float anim = 0.0f;

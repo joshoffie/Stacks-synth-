@@ -28,21 +28,25 @@ SettingsPanel::SettingsPanel (StacksAudioProcessor& p) : processor (p)
     engineLabel.setText ("Engine", juce::dontSendNotification);
     engineLabel.setFont (StacksLookAndFeel::font (12.0f, true));
     engineLabel.setColour (juce::Label::textColourId, colours::muted);
-    addAndMakeVisible (engineLabel);
+    // addAndMakeVisible (engineLabel);   // engine choice parked: the model ships inside the app
+    addChildComponent (engineLabel);
 
     engineBox.setTooltip ("Who designs the patches: a model running inside Stacks, a model served by the Ollama app, or the random breeder");
     engineBox.onChange = [this] { engineChosen(); };
-    addAndMakeVisible (engineBox);
+    // addAndMakeVisible (engineBox);   // engine choice parked: the model ships inside the app
+    addChildComponent (engineBox);
 
     refreshButton.setButtonText (juce::String::fromUTF8 ("\xe2\x86\xbb"));
     refreshButton.setTooltip ("Look for models again (Ollama, downloads, your own files)");
     refreshButton.onClick = [this] { processor.refreshOllamaModels(); processor.refreshModels(); rebuildMenu(); refresh(); };
-    addAndMakeVisible (refreshButton);
+    // addAndMakeVisible (refreshButton);   // engine choice parked: the model ships inside the app
+    addChildComponent (refreshButton);
 
     statusLabel.setFont (StacksLookAndFeel::font (12.0f));
     statusLabel.setColour (juce::Label::textColourId, colours::text);
     statusLabel.setJustificationType (juce::Justification::topLeft);
-    addAndMakeVisible (statusLabel);
+    // addAndMakeVisible (statusLabel);   // engine choice parked: the model ships inside the app
+    addChildComponent (statusLabel);
 
     downloadButton.setButtonText ("Download");
     downloadButton.onClick = [this]
@@ -51,17 +55,20 @@ SettingsPanel::SettingsPanel (StacksAudioProcessor& p) : processor (p)
         else processor.startModelDownload (processor.engine().model);
         refresh();
     };
-    addAndMakeVisible (downloadButton);
+    // addAndMakeVisible (downloadButton);   // engine choice parked: the model ships inside the app
+    addChildComponent (downloadButton);
 
     addModelButton.setButtonText ("Add your own model (.gguf)...");
     addModelButton.setTooltip ("Any llama.cpp-compatible chat model in GGUF format. See the guide below.");
     addModelButton.onClick = [this] { addCustomModel(); };
-    addAndMakeVisible (addModelButton);
+    // addAndMakeVisible (addModelButton);   // engine choice parked: the model ships inside the app
+    addChildComponent (addModelButton);
 
     urlModelButton.setButtonText ("Download from a URL...");
     urlModelButton.setTooltip ("Paste a direct link to a .gguf file (a Hugging Face 'download' link, for instance). It lands in the models folder and is selected when done.");
     urlModelButton.onClick = [this] { addModelFromUrl(); };
-    addAndMakeVisible (urlModelButton);
+    // addAndMakeVisible (urlModelButton);   // engine choice parked: the model ships inside the app
+    addChildComponent (urlModelButton);
 
     removeModelButton.setButtonText ("Forget this model");
     removeModelButton.setTooltip ("Removes your own model from the list (the file stays where it is)");
@@ -73,7 +80,8 @@ SettingsPanel::SettingsPanel (StacksAudioProcessor& p) : processor (p)
         rebuildMenu();
         refresh();
     };
-    addAndMakeVisible (removeModelButton);
+    // addAndMakeVisible (removeModelButton);   // engine choice parked: the model ships inside the app
+    addChildComponent (removeModelButton);
 
     calmToggle.setColour (juce::ToggleButton::textColourId, colours::text);
     calmToggle.onClick = [this] { processor.setCalmMode (calmToggle.getToggleState()); };
@@ -92,7 +100,8 @@ SettingsPanel::SettingsPanel (StacksAudioProcessor& p) : processor (p)
     guideTitle.setText ("Model guide", juce::dontSendNotification);
     guideTitle.setFont (StacksLookAndFeel::font (12.0f, true));
     guideTitle.setColour (juce::Label::textColourId, colours::muted);
-    addAndMakeVisible (guideTitle);
+    // addAndMakeVisible (guideTitle);   // engine choice parked: the model ships inside the app
+    addChildComponent (guideTitle);
 
     guide.setMultiLine (true, true);
     guide.setReadOnly (true);
@@ -102,7 +111,8 @@ SettingsPanel::SettingsPanel (StacksAudioProcessor& p) : processor (p)
     guide.setColour (juce::TextEditor::textColourId, colours::text);
     guide.setColour (juce::TextEditor::backgroundColourId, colours::panel);
     guide.setText (guideText(), false);
-    addAndMakeVisible (guide);
+    // addAndMakeVisible (guide);   // engine choice parked: the model ships inside the app
+    addChildComponent (guide);
 
     saveGuideButton.setButtonText ("Save the guide as a file...");
     saveGuideButton.onClick = [this]
@@ -111,7 +121,8 @@ SettingsPanel::SettingsPanel (StacksAudioProcessor& p) : processor (p)
         file.replaceWithText (guideText());
         file.revealToUser();
     };
-    addAndMakeVisible (saveGuideButton);
+    // addAndMakeVisible (saveGuideButton);   // engine choice parked: the model ships inside the app
+    addChildComponent (saveGuideButton);
 
     processor.labBroadcaster.addChangeListener (this);
     rebuildMenu();
@@ -128,7 +139,7 @@ void SettingsPanel::show (StacksAudioProcessor& p, juce::Component* centreAround
 {
     juce::DialogWindow::LaunchOptions o;
     o.content.setOwned (new SettingsPanel (p));
-    o.content->setSize (640, 660);
+    o.content->setSize (640, 200);   // only calm, MPE and microtuning remain
     o.dialogTitle = "Stacks settings";
     o.dialogBackgroundColour = colours::background;
     o.escapeKeyTriggersCloseButton = true;
@@ -149,23 +160,22 @@ void SettingsPanel::resized()
     title.setBounds (r.removeFromTop (28));
     r.removeFromTop (10);
 
-    engineLabel.setBounds (r.removeFromTop (18));
-    auto row = r.removeFromTop (28);
-    refreshButton.setBounds (row.removeFromRight (30));
-    row.removeFromRight (6);
-    engineBox.setBounds (row);
-    r.removeFromTop (6);
-    statusLabel.setBounds (r.removeFromTop (34));
-    auto buttons = r.removeFromTop (26);
-    downloadButton.setBounds (buttons.removeFromLeft (110));
-    buttons.removeFromLeft (8);
-    addModelButton.setBounds (buttons.removeFromLeft (200));
-    buttons.removeFromLeft (8);
-    urlModelButton.setBounds (buttons.removeFromLeft (160));
-    buttons.removeFromLeft (8);
-    removeModelButton.setBounds (buttons.removeFromLeft (130));
-    r.removeFromTop (14);
-
+    // engineLabel.setBounds (r.removeFromTop (18));
+    // auto row = r.removeFromTop (28);
+    // refreshButton.setBounds (row.removeFromRight (30));
+    // row.removeFromRight (6);
+    // engineBox.setBounds (row);
+    // r.removeFromTop (6);
+    // statusLabel.setBounds (r.removeFromTop (34));
+    // auto buttons = r.removeFromTop (26);
+    // downloadButton.setBounds (buttons.removeFromLeft (110));
+    // buttons.removeFromLeft (8);
+    // addModelButton.setBounds (buttons.removeFromLeft (200));
+    // buttons.removeFromLeft (8);
+    // urlModelButton.setBounds (buttons.removeFromLeft (160));
+    // buttons.removeFromLeft (8);
+    // removeModelButton.setBounds (buttons.removeFromLeft (130));
+    // r.removeFromTop (14);
     calmToggle.setBounds (r.removeFromTop (22));
     r.removeFromTop (4);
     mpeToggle.setBounds (r.removeFromTop (22));
@@ -173,10 +183,10 @@ void SettingsPanel::resized()
     mtsLabel.setBounds (r.removeFromTop (20));
     r.removeFromTop (12);
 
-    guideTitle.setBounds (r.removeFromTop (18));
-    saveGuideButton.setBounds (r.removeFromBottom (26).removeFromLeft (200));
-    r.removeFromBottom (8);
-    guide.setBounds (r);
+    // guideTitle.setBounds (r.removeFromTop (18));
+    // saveGuideButton.setBounds (r.removeFromBottom (26).removeFromLeft (200));
+    // r.removeFromBottom (8);
+    // guide.setBounds (r);
 }
 
 void SettingsPanel::rebuildMenu()
