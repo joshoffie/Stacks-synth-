@@ -142,6 +142,8 @@ void StacksAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
     chorus.prepare (sampleRate, samplesPerBlock);
     delay.prepare (sampleRate, samplesPerBlock);
     reverb.prepare (sampleRate, samplesPerBlock);
+    hyper.prepare (sampleRate, samplesPerBlock);
+    tape.prepare (sampleRate, samplesPerBlock);
     fxBuffer.setSize (2, juce::jmax (1, samplesPerBlock));
 
     masterGain.reset (sampleRate, 0.02);
@@ -171,6 +173,8 @@ void StacksAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         chorus.reset();
         delay.reset();
         reverb.reset();
+        hyper.reset();
+        tape.reset();
     }
 
     // Audition preview: a queued phrase becomes real notes in this stream, cut
@@ -442,18 +446,17 @@ void StacksAudioProcessor::processEffects (juce::AudioBuffer<float>& buffer)
         target = &fxBuffer;
     }
 
+    // Every effect reads its settings; the Chain setting decides the order.
     DistortionFx::Params dist;
     dist.mode = fxParams.geti (P::dist_mode);
     dist.driveDb = fxParams.get (P::dist_drive);
     dist.toneHz = fxParams.get (P::dist_tone);
     dist.mix = fxParams.get (P::dist_mix);
-    distortion.process (*target, dist);
 
     EqFx::Params eqp;
     eqp.lowGainDb = fxParams.get (P::eq_low_gain);   eqp.lowHz = fxParams.get (P::eq_low_freq);
     eqp.midGainDb = fxParams.get (P::eq_mid_gain);   eqp.midHz = fxParams.get (P::eq_mid_freq);  eqp.midQ = fxParams.get (P::eq_mid_q);
     eqp.highGainDb = fxParams.get (P::eq_high_gain); eqp.highHz = fxParams.get (P::eq_high_freq);
-    eq.process (*target, eqp);
 
     ChorusFx::Params cp;
     cp.mode = fxParams.geti (P::chorus_mode);
@@ -464,8 +467,20 @@ void StacksAudioProcessor::processEffects (juce::AudioBuffer<float>& buffer)
     cp.feedback = fxParams.get (P::chorus_feedback);
     cp.spread = fxParams.get (P::chorus_spread);
     cp.toneHz = fxParams.get (P::chorus_tone);
-    if (cp.mix > 0.0005f)
-        chorus.process (*target, cp);
+
+    HyperFx::Params hp;
+    hp.amount = fxParams.get (P::hyper_amount);
+    hp.detune = fxParams.get (P::hyper_detune);
+    hp.rateHz = fxParams.get (P::hyper_rate);
+    hp.voices = fxParams.geti (P::hyper_voices);
+
+    TapeFx::Params tp;
+    tp.amount = fxParams.get (P::tape_amount);
+    tp.wow = fxParams.get (P::tape_wow);
+    tp.flutter = fxParams.get (P::tape_flutter);
+    tp.sat = fxParams.get (P::tape_sat);
+    tp.hiss = fxParams.get (P::tape_hiss);
+    tp.toneHz = fxParams.get (P::tape_tone);
 
     DelayFx::Params dp;
     dp.mode = fxParams.geti (P::delay_mode);
@@ -477,7 +492,6 @@ void StacksAudioProcessor::processEffects (juce::AudioBuffer<float>& buffer)
     dp.hpfHz = fxParams.get (P::delay_hpf);
     dp.wow = fxParams.get (P::delay_wow);
     dp.width = fxParams.get (P::delay_width);
-    delay.process (*target, dp, currentBpm); // always runs so repeats ring out when the mix is pulled down
 
     ReverbFx::Params rp;
     rp.type = fxParams.geti (P::reverb_type);
@@ -490,8 +504,6 @@ void StacksAudioProcessor::processEffects (juce::AudioBuffer<float>& buffer)
     rp.mod = fxParams.get (P::reverb_mod);
     rp.shimmer = fxParams.get (P::reverb_shimmer);
     rp.width = fxParams.get (P::reverb_width);
-    if (rp.mix > 0.0005f)
-        reverb.process (*target, rp);
 
     CompressorFx::Params comp;
     comp.thresholdDb = fxParams.get (P::comp_threshold);
@@ -500,7 +512,29 @@ void StacksAudioProcessor::processEffects (juce::AudioBuffer<float>& buffer)
     comp.releaseMs = fxParams.get (P::comp_release);
     comp.makeupDb = fxParams.get (P::comp_makeup);
     comp.mix = fxParams.get (P::comp_mix);
-    compressor.process (*target, comp);
+
+    enum Fx { FxDist, FxEq, FxChorus, FxHyper, FxTape, FxDelay, FxReverb, FxComp };
+    static const Fx orders[6][8] = {
+        { FxDist, FxEq, FxChorus, FxHyper, FxTape, FxDelay, FxReverb, FxComp },   // Standard
+        { FxTape, FxDist, FxEq, FxChorus, FxHyper, FxDelay, FxReverb, FxComp },   // Tape First
+        { FxDist, FxEq, FxChorus, FxHyper, FxReverb, FxDelay, FxTape, FxComp },   // Reverb Into Delay
+        { FxEq, FxChorus, FxHyper, FxDelay, FxReverb, FxTape, FxDist, FxComp },   // Distortion Last
+        { FxReverb, FxDelay, FxChorus, FxHyper, FxDist, FxEq, FxTape, FxComp },   // Space First
+        { FxComp, FxEq, FxDist, FxChorus, FxHyper, FxTape, FxDelay, FxReverb },   // Compressor First
+    };
+    const int order = juce::jlimit (0, 5, fxParams.geti (P::fx_order));
+    for (Fx fx : orders[order])
+        switch (fx)
+        {
+            case FxDist:   distortion.process (*target, dist); break;
+            case FxEq:     eq.process (*target, eqp); break;
+            case FxChorus: if (cp.mix > 0.0005f) chorus.process (*target, cp); break;
+            case FxHyper:  hyper.process (*target, hp); break;
+            case FxTape:   tape.process (*target, tp); break;
+            case FxDelay:  delay.process (*target, dp, currentBpm); break;   // always runs so repeats ring out when the mix is pulled down
+            case FxReverb: if (rp.mix > 0.0005f) reverb.process (*target, rp); break;
+            case FxComp:   compressor.process (*target, comp); break;
+        }
 
     if (mono)
     {

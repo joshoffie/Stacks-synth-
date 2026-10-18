@@ -16,6 +16,7 @@
 #include "ai/LlamaBackend.h"
 #include "ai/ModelManager.h"
 #include "Arpeggiator.h"
+#include "Effects.h"
 #include "Sampler.h"
 #include "ai/SampleAnalyser.h"
 #include "ai/SongAnalyser.h"
@@ -1202,6 +1203,47 @@ static int audioMode (const juce::String& mode, const juce::File& file, bool noM
     return 0;
 }
 
+// Character and the signature effects: Hyper widens a mono signal, Tape wobbles
+// and saturates it, the Lush reverb stays finite, the filter models exist.
+static void testCharacterAndEffects()
+{
+    std::printf ("character and effects\n");
+    CHECK (filterModelNames().size() == 4 && fxOrderNames().size() == 6 && reverbTypeNames()[4] == "Lush");
+    CHECK (isAdvancedParam ("hyper_voices") && isAdvancedParam ("tape_hiss") && ! isAdvancedParam ("tape_wow"));
+    const double sr = 48000.0;
+    const int n = 4096;
+    auto makeSine = [&] { juce::AudioBuffer<float> b (2, n); for (int i = 0; i < n; ++i) { const float v = 0.5f * std::sin (6.2831853f * 220.0f * (float) i / (float) sr); b.setSample (0, i, v); b.setSample (1, i, v); } return b; };
+    auto finite = [] (const juce::AudioBuffer<float>& b) { for (int c = 0; c < 2; ++c) for (int i = 0; i < b.getNumSamples(); ++i) if (! std::isfinite (b.getSample (c, i))) return false; return true; };
+    auto sideEnergy = [] (const juce::AudioBuffer<float>& b) { double e = 0.0; for (int i = 0; i < b.getNumSamples(); ++i) { const float s = b.getSample (0, i) - b.getSample (1, i); e += s * s; } return e / b.getNumSamples(); };
+
+    HyperFx hyper; hyper.prepare (sr, n);
+    auto h = makeSine();
+    HyperFx::Params hp; hp.amount = 0.8f; hp.detune = 0.5f; hp.voices = 6;
+    hyper.process (h, hp);
+    CHECK (finite (h) && sideEnergy (h) > 1.0e-4);                 // mono in, wide out
+    auto h0 = makeSine(); HyperFx::Params off; hyper.process (h0, off);
+    CHECK (sideEnergy (h0) == 0.0);                                // off leaves it alone
+
+    TapeFx tape; tape.prepare (sr, n);
+    auto t = makeSine(); const auto dry = makeSine();
+    TapeFx::Params tp; tp.amount = 1.0f; tp.wow = 1.0f; tp.flutter = 0.5f; tp.sat = 0.8f; tp.hiss = 0.0f;
+    tape.process (t, tp);
+    double diff = 0.0; float peak = 0.0f;
+    for (int i = n / 2; i < n; ++i) { diff += std::abs (t.getSample (0, i) - dry.getSample (0, i)); peak = juce::jmax (peak, std::abs (t.getSample (0, i))); }
+    CHECK (finite (t) && diff / (n / 2) > 0.01 && peak < 0.6f);    // changed, saturated, not louder
+
+    ReverbFx reverb; reverb.prepare (sr, n);
+    auto r = makeSine();
+    ReverbFx::Params rp; rp.type = 4; rp.mix = 0.6f; rp.size = 0.9f; rp.mod = 1.0f;
+    for (int pass = 0; pass < 20; ++pass) reverb.process (r, rp);
+    CHECK (finite (r));
+
+    Patch p;
+    applyPromptCues ("warm analog pad with tape, huge and lush", p);
+    CHECK (p.get (P::char_sat) >= 0.3f && p.get (P::tape_amount) >= 0.45f && p.get (P::hyper_amount) >= 0.4f
+           && (int) p.get (P::filter_model) == filterModelNames().indexOf ("Warm") && (int) p.get (P::reverb_type) == reverbTypeNames().indexOf ("Lush"));
+}
+
 // Re-applies the prompt cues to every preset in Factory/ (after the rules change).
 static int retouchFactory()
 {
@@ -1486,6 +1528,7 @@ int main (int argc, char** argv)
     testSampler();
     testSampleAnalyser();
     testSongAnalyser();
+    testCharacterAndEffects();
     testRandomGenerator();
     testLlmGenerator();
     std::printf ("\n%d checks, %d failures\n", checks, failures);

@@ -29,6 +29,18 @@ const juce::StringArray& sampleModeNames()
     return names;
 }
 
+const juce::StringArray& filterModelNames()
+{
+    static const juce::StringArray names { "Clean", "Warm", "Diode", "Smooth" };
+    return names;
+}
+
+const juce::StringArray& fxOrderNames()
+{
+    static const juce::StringArray names { "Standard", "Tape First", "Reverb Into Delay", "Distortion Last", "Space First", "Compressor First" };
+    return names;
+}
+
 const juce::StringArray& onOffNames()
 {
     static const juce::StringArray names { "Off", "On" };
@@ -176,7 +188,7 @@ const juce::StringArray& delaySyncNames()
 
 const juce::StringArray& reverbTypeNames()
 {
-    static const juce::StringArray names { "Room", "Plate", "Hall", "Shimmer" };
+    static const juce::StringArray names { "Room", "Plate", "Hall", "Shimmer", "Lush" };
     return names;
 }
 
@@ -186,7 +198,7 @@ bool isAdvancedParam (const char* id)
                                               "delay_tone", "delay_hpf", "delay_wow", "delay_width",
                                               "reverb_predelay", "reverb_lowcut", "reverb_highcut", "reverb_mod", "reverb_shimmer", "reverb_width",
                                               "dist_tone", "eq_low_freq", "eq_mid_freq", "eq_mid_q", "eq_high_freq", "comp_attack", "comp_release", "arp_swing", "bend_range", "filter2_drive",
-                                              "smp_fine", "grain_pitch", "grain_spread" };
+                                              "smp_fine", "grain_pitch", "grain_spread", "char_env_var", "hyper_rate", "hyper_voices", "tape_hiss", "tape_tone" };
     return advanced.contains (id);
 }
 

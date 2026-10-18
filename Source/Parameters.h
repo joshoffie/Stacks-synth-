@@ -28,6 +28,8 @@ const juce::StringArray& waveNames();
 const juce::StringArray& filterTypeNames();
 const juce::StringArray& filterRoutingNames();   // second filter: Off, Series, Parallel, Split
 const juce::StringArray& sampleModeNames();      // sample oscillator: Off, Pitched, Granular
+const juce::StringArray& filterModelNames();     // Clean, Warm, Diode, Smooth
+const juce::StringArray& fxOrderNames();         // effect chain orders
 const juce::StringArray& onOffNames();
 const juce::StringArray& distModeNames();
 const juce::StringArray& warpNames();     // oscillator warps: Off, Sync, Bend, PWM, Mirror, Fold, Quantize
@@ -115,6 +117,10 @@ inline bool isBipolarSource (int src) noexcept
  X(filter2_res,    "Res 2",        "FILTER 2",   Float,   0,     1,     0.1,   0,     "",   nullptr,            "second filter's resonance") \
  X(filter2_env,    "Env 2",        "FILTER 2",   Float,  -5,     5,     0,     0,     "oct",nullptr,            "filter envelope depth on cutoff 2, in octaves") \
  X(filter2_drive,  "Drive 2",      "FILTER 2",   Float,   1,     10,    1,     0,     "",   nullptr,            "second filter's input saturation (advanced)") \
+ X(filter_model,   "Model",        "CHARACTER",  Choice,  0,     3,     0,     0,     "",   filterModelNames,   "filter character for both filters: Clean = exact; Warm = gentle input saturation; Diode = hot, resonant and aggressive; Smooth = soft state-variable") \
+ X(char_drift,     "Drift",        "CHARACTER",  Float,   0,     1,     0.15,  0,     "",   nullptr,            "analog drift: each voice slowly wanders a few cents and the filter breathes, so chords shimmer like old hardware") \
+ X(char_sat,       "Warmth",       "CHARACTER",  Float,   0,     1,     0.1,   0,     "",   nullptr,            "oscillator saturation before the filter: 0 clean, 0.3 warm, 0.7 thick") \
+ X(char_env_var,   "Env Var",      "CHARACTER",  Float,   0,     1,     0.1,   0,     "",   nullptr,            "envelope times vary a little from note to note, like real circuits (advanced)") \
  X(fenv_attack,    "F Attack",     "FILTER ENV", Float,   0.001, 10,    0.01,  0.2,   "s",  nullptr,            "filter envelope attack in seconds") \
  X(fenv_decay,     "F Decay",      "FILTER ENV", Float,   0.001, 10,    0.3,   0.3,   "s",  nullptr,            "filter envelope decay in seconds") \
  X(fenv_sustain,   "F Sustain",    "FILTER ENV", Float,   0,     1,     0.5,   0,     "",   nullptr,            "filter envelope sustain level") \
@@ -252,7 +258,7 @@ inline bool isBipolarSource (int src) noexcept
  X(delay_hpf,      "Delay HPF",    "DELAY",      Float,   20,    2000,  120,   200,   "Hz", nullptr,            "high-pass in the feedback path, keeps repeats out of the bass (advanced)") \
  X(delay_wow,      "Wow",          "DELAY",      Float,   0,     1,     0.1,   0,     "",   nullptr,            "tape-style pitch wobble of the repeats (advanced)") \
  X(delay_width,    "Delay Width",  "DELAY",      Float,   0,     1,     0.3,   0,     "",   nullptr,            "offsets the right channel's time for stereo width (advanced)") \
- X(reverb_type,    "Reverb Type",  "REVERB",     Choice,  0,     3,     1,     0,     "",   reverbTypeNames, "Room = small, Plate = bright and dense, Hall = long, Shimmer = hall with an octave-up halo") \
+ X(reverb_type,    "Reverb Type",  "REVERB",     Choice,  0,     4,     1,     0,     "",   reverbTypeNames, "Room = small, Plate = bright and dense, Hall = long, Shimmer = hall with an octave-up halo, Lush = wide, slowly moving, for pads") \
  X(reverb_size,    "Reverb Size",  "REVERB",     Float,   0,     1,     0.5,   0,     "",   nullptr,            "decay length") \
  X(reverb_damp,    "Reverb Damp",  "REVERB",     Float,   0,     1,     0.5,   0,     "",   nullptr,            "high-frequency damping of the tail") \
  X(reverb_mix,     "Reverb Mix",   "REVERB",     Float,   0,     1,     0.15,  0,     "",   nullptr,            "reverb amount") \
@@ -268,6 +274,17 @@ inline bool isBipolarSource (int src) noexcept
  X(comp_release,   "Comp Release", "COMPRESSOR", Float,   20,    1000,  150,   0,     "ms", nullptr,            "how fast it lets go (advanced)") \
  X(comp_makeup,    "Makeup",       "COMPRESSOR", Float,   0,     24,    0,     0,     "dB", nullptr,            "gain added back after compression") \
  X(comp_mix,       "Comp Mix",     "COMPRESSOR", Float,   0,     1,     0,     0,     "",   nullptr,            "compressor amount, 0 = off, under 1 = parallel compression") \
+ X(hyper_amount,   "Hyper",        "HYPER",      Float,   0,     1,     0,     0,     "",   nullptr,            "Hyper: a cloud of detuned copies around the sound for huge stereo width, 0 = off") \
+ X(hyper_detune,   "Hyper Detune", "HYPER",      Float,   0,     1,     0.3,   0,     "",   nullptr,            "how far the Hyper copies drift apart") \
+ X(hyper_rate,     "Hyper Rate",   "HYPER",      Float,   0.05,  3,     0.4,   0.5,   "Hz", nullptr,            "how fast the copies move (advanced)") \
+ X(hyper_voices,   "Hyper Voices", "HYPER",      Int,     2,     8,     4,     0,     "",   nullptr,            "number of Hyper copies (advanced)") \
+ X(tape_amount,    "Tape",         "TAPE",       Float,   0,     1,     0,     0,     "",   nullptr,            "tape stage: wow, flutter, saturation and hiss, 0 = off") \
+ X(tape_wow,       "Tape Wow",     "TAPE",       Float,   0,     1,     0.3,   0,     "",   nullptr,            "slow pitch wobble, like a worn tape") \
+ X(tape_flutter,   "Flutter",      "TAPE",       Float,   0,     1,     0.2,   0,     "",   nullptr,            "fast fine wobble") \
+ X(tape_sat,       "Tape Sat",     "TAPE",       Float,   0,     1,     0.4,   0,     "",   nullptr,            "tape saturation, soft and warm") \
+ X(tape_hiss,      "Hiss",         "TAPE",       Float,   0,     1,     0.1,   0,     "",   nullptr,            "tape hiss level (advanced)") \
+ X(tape_tone,      "Tape Tone",    "TAPE",       Float,   2000,  20000, 12000, 6000,  "Hz", nullptr,            "high roll-off of the tape stage (advanced)") \
+ X(fx_order,       "Chain",        "CHAIN",      Choice,  0,     5,     0,     0,     "",   fxOrderNames,       "the order of the effects: Standard = distortion, EQ, chorus, hyper, tape, delay, reverb, compressor; Tape First; Reverb Into Delay; Distortion Last; Space First; Compressor First") \
  X(master_gain,    "Master",       "MASTER",     Float,  -24,    6,    -6,     0,     "dB", nullptr,            "output level in dB")
 
 enum class P : int

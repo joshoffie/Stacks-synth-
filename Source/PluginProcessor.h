@@ -304,6 +304,8 @@ private:
     ChorusFx chorus;
     DelayFx delay;
     ReverbFx reverb;
+    HyperFx hyper;
+    TapeFx tape;
     juce::AudioBuffer<float> fxBuffer;                    // stereo scratch when the host gives us mono
     static constexpr int kScopeSize = 8192;
     std::array<float, kScopeSize> scopeRing {};

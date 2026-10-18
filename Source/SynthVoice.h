@@ -109,7 +109,7 @@ private:
         FracDelay comb[2];
         void prepare (double sampleRate, int blockSize);
         void reset() noexcept;
-        void process (int type, float cutoff, float res, float drive, juce::AudioBuffer<float>& buffer, int n, float fsr) noexcept;
+        void process (int type, int model, float cutoff, float res, float drive, juce::AudioBuffer<float>& buffer, int n, float fsr) noexcept;
         void processExtra (int type, float cutoff, float res, juce::AudioBuffer<float>& buffer, int n, float fsr) noexcept;
     };
     FilterUnit filters[2];
@@ -122,6 +122,8 @@ private:
     float bendNorm = 0.0f;         // wheel position -1..1; the range is applied per block
     float aftertouch = 0.0f;       // 0..1
     float slide = 0.0f;            // CC74, 0..1
+    float driftPitch = 0.0f, driftFilter = 0.0f;   // analog drift, slow random walks (-1..1)
+    float envScale = 1.0f;         // per-note envelope time variation
     int channel = 1;               // MIDI channel of this note
     float noteRandom = 0.0f;       // -1..1, drawn per note
     float currentNote = 60.0f, targetNote = 60.0f, glideInc = 0.0f;

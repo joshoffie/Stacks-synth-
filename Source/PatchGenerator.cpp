@@ -701,7 +701,18 @@ void applyPromptCues (const juce::String& hint, Patch& p)
         choose (P::delay_mode, delayModeNames(), "Tape");
         raise (P::delay_wow, 0.3f);
         raise (P::delay_mix, 0.2f);
+        raise (P::tape_amount, 0.45f);
     }
+    if (has ("warm") || has ("analog") || has ("analogue") || has ("vintage") || has ("retro"))
+    {
+        raise (P::char_sat, 0.3f);
+        raise (P::char_drift, 0.35f);
+        if (p.get (P::filter_model) == 0.0f) choose (P::filter_model, filterModelNames(), "Warm");
+    }
+    if (has ("huge") || has ("massive") || has ("supersaw") || has ("wide"))
+        raise (P::hyper_amount, 0.4f);
+    if (has ("lush"))
+        choose (P::reverb_type, reverbTypeNames(), "Lush");
     if (has ("reverb") || has ("ambient") || has ("cinematic") || has ("hall") || has ("wash") || phrase ("long tail")
         || has ("shimmer") || has ("spacious") || has ("ethereal"))
         raise (P::reverb_mix, 0.35f);

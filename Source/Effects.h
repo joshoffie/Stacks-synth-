@@ -171,6 +171,39 @@ namespace stacks
 //==============================================================================
 // Oversampled waveshaper: Soft / Hard / Tube / Fold / Crush, with a tone
 // control after it and a dry/wet mix.
+// Hyper: a cloud of detuned, slowly moving copies spread across the stereo
+// field. The classic "make it huge" widener.
+class HyperFx
+{
+public:
+    struct Params { float amount = 0.0f, detune = 0.3f, rateHz = 0.4f; int voices = 4; };
+    void prepare (double sampleRate, int maxBlock);
+    void reset();
+    void process (juce::AudioBuffer<float>&, const Params&);
+private:
+    static constexpr int kMaxVoices = 8;
+    double sr = 48000.0;
+    FracDelay line[2];
+    float phase[kMaxVoices] {};
+};
+
+// Tape: wow and flutter on a short modulated delay, soft saturation, a gentle
+// high roll-off and a whisper of hiss.
+class TapeFx
+{
+public:
+    struct Params { float amount = 0.0f, wow = 0.3f, flutter = 0.2f, sat = 0.4f, hiss = 0.1f, toneHz = 12000.0f; };
+    void prepare (double sampleRate, int maxBlock);
+    void reset();
+    void process (juce::AudioBuffer<float>&, const Params&);
+private:
+    double sr = 48000.0;
+    FracDelay line[2];
+    OnePole tone[2], hissTone[2];
+    float wowPhase = 0.0f, flutterPhase = 0.0f, flutterNoise = 0.0f;
+    juce::Random rng;
+};
+
 class DistortionFx
 {
 public:

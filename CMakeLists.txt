@@ -185,6 +185,7 @@ target_sources(StacksTests PRIVATE
     Source/PatchGenerator.cpp
     Source/QuickTweak.cpp
     Source/Arpeggiator.cpp
+    Source/Effects.cpp
     Source/Sampler.cpp
     ThirdParty/MTS-ESP/libMTSClient.cpp
     Source/ai/LlmPatchGenerator.cpp

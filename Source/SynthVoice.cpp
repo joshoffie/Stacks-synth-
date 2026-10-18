@@ -53,12 +53,13 @@ void SynthVoice::setCurrentPlaybackSampleRate (double newRate)
 
 void SynthVoice::updateEnvelopes (const SynthParams& p)
 {
-    ampEnv.setParameters ({ p.get (P::aenv_attack), p.get (P::aenv_decay),
-                            p.get (P::aenv_sustain), p.get (P::aenv_release) });
-    filterEnv.setParameters ({ p.get (P::fenv_attack), p.get (P::fenv_decay),
-                               p.get (P::fenv_sustain), p.get (P::fenv_release) });
-    modEnv.setParameters ({ p.get (P::menv_attack), p.get (P::menv_decay),
-                            p.get (P::menv_sustain), p.get (P::menv_release) });
+    const float e = envScale;
+    ampEnv.setParameters ({ p.get (P::aenv_attack) * e, p.get (P::aenv_decay) * e,
+                            p.get (P::aenv_sustain), p.get (P::aenv_release) * e });
+    filterEnv.setParameters ({ p.get (P::fenv_attack) * e, p.get (P::fenv_decay) * e,
+                               p.get (P::fenv_sustain), p.get (P::fenv_release) * e });
+    modEnv.setParameters ({ p.get (P::menv_attack) * e, p.get (P::menv_decay) * e,
+                            p.get (P::menv_sustain), p.get (P::menv_release) * e });
 }
 
 void SynthVoice::startNote (int midiNoteNumber, float vel, juce::SynthesiserSound*, int currentPitchWheelPosition)
@@ -119,6 +120,9 @@ void SynthVoice::startNote (int midiNoteNumber, float vel, juce::SynthesiserSoun
         lfoHeld[k] = rng.nextFloat() * 2.0f - 1.0f;
     }
 
+    envScale = 1.0f + 0.2f * p.get (P::char_env_var) * (rng.nextFloat() * 2.0f - 1.0f);   // circuits never time twice alike
+    driftPitch = rng.nextFloat() * 2.0f - 1.0f;
+    driftFilter = rng.nextFloat() * 2.0f - 1.0f;
     updateEnvelopes (p);
     for (auto& f : filters) f.reset();
     sampler.start (ctx.samples != nullptr ? ctx.samples->current() : nullptr, getSampleRate(), midiNoteNumber);
@@ -242,8 +246,43 @@ void SynthVoice::FilterUnit::reset() noexcept
     for (auto& c : comb) c.clear();
 }
 
-void SynthVoice::FilterUnit::process (int type, float cutoff, float res, float drive, juce::AudioBuffer<float>& buffer, int n, float fsr) noexcept
+void SynthVoice::FilterUnit::process (int type, int model, float cutoff, float res, float drive, juce::AudioBuffer<float>& buffer, int n, float fsr) noexcept
 {
+    // Character: Warm and Diode saturate the input and push the ladder; Smooth
+    // swaps the ladder for a soft state-variable filter.
+    if (model == 1 || model == 2)
+    {
+        const float k = model == 1 ? 1.5f : 2.6f, comp = model == 1 ? 1.25f : 1.7f;
+        for (int c = 0; c < 2; ++c)
+        {
+            float* x = buffer.getWritePointer (c);
+            for (int i = 0; i < n; ++i) x[i] = std::tanh (x[i] * k) / comp;
+        }
+        if (model == 2) { drive = juce::jmax (drive, 2.5f); res = juce::jmin (1.0f, res * 1.15f); }
+        else            { drive = juce::jmax (drive, 1.2f); }
+    }
+    if (model == 3 && type <= 5)
+    {
+        const float g = std::tan (juce::MathConstants<float>::pi * juce::jmin (cutoff, fsr * 0.45f) / fsr);
+        const float kd = 2.0f - 1.85f * juce::jlimit (0.0f, 1.0f, res);
+        const bool twoPole24 = (type % 2) == 1;
+        for (int c = 0; c < 2; ++c)
+        {
+            float* x = buffer.getWritePointer (c);
+            for (int i = 0; i < n; ++i)
+            {
+                svfA[c].process (x[i], g, kd);
+                float y = type < 2 ? svfA[c].lp : type < 4 ? svfA[c].hp : svfA[c].bp;
+                if (twoPole24)
+                {
+                    svfB[c].process (y, g, kd);
+                    y = type < 2 ? svfB[c].lp : type < 4 ? svfB[c].hp : svfB[c].bp;
+                }
+                x[i] = y;
+            }
+        }
+        return;
+    }
     if (type <= 5)
     {
         const auto wanted = filterModeFor (type);
@@ -482,7 +521,14 @@ void SynthVoice::renderNextBlock (juce::AudioBuffer<float>& out, int startSample
         const float retune = ctx.mts != nullptr && MTS_HasMaster (ctx.mts)
                            ? (float) MTS_RetuningInSemitones (ctx.mts, (char) juce::jlimit (0, 127, (int) std::lround (currentNote)), (signed char) (channel - 1))
                            : 0.0f;
-        const float note   = currentNote + retune + pitchBendSemis + pitchMod;
+        // Analog drift: a slow random walk per voice, a few cents and a breath of filter.
+        {
+            const float amt = p.get (P::char_drift);
+            driftPitch += 0.03f * ((rng.nextFloat() * 2.0f - 1.0f) - driftPitch);
+            driftFilter += 0.02f * ((rng.nextFloat() * 2.0f - 1.0f) - driftFilter);
+            juce::ignoreUnused (amt);
+        }
+        const float note   = currentNote + retune + pitchBendSemis + pitchMod + driftPitch * 0.08f * p.get (P::char_drift);
         const float baseHz = midiToHz (note);
         const float hzA    = baseHz * std::exp2 (semisA / 12.0f);
         const float hzB    = baseHz * std::exp2 (semisB / 12.0f);
@@ -560,8 +606,21 @@ void SynthVoice::renderNextBlock (juce::AudioBuffer<float>& out, int startSample
             sampler.render (scratchL, scratchR, n, sp, note - (float) sampler.startedNote(), rng);
         }
 
+        // ---- character: warmth (saturation before the filter) ----------------
+        const float warmth = p.get (P::char_sat);
+        if (warmth > 0.001f)
+        {
+            const float k = 1.0f + 3.0f * warmth, comp = 1.0f / (1.0f + 1.2f * warmth);
+            for (auto* buf : { &scratch, &scratch2 })
+                for (int c = 0; c < 2; ++c)
+                {
+                    float* x = buf->getWritePointer (c);
+                    for (int i = 0; i < n; ++i) x[i] = std::tanh (x[i] * k) * comp;
+                }
+        }
+
         // ---- filters -------------------------------------------------------
-        const float keyTrack = p.get (P::filter_keytrack) * (currentNote - 60.0f) / 12.0f;
+        const float keyTrack = p.get (P::filter_keytrack) * (currentNote - 60.0f) / 12.0f + driftFilter * 0.3f * p.get (P::char_drift);
         const float maxHz    = juce::jmin (20000.0f, fsr * 0.45f);
         const float cutoff   = juce::jlimit (20.0f, maxHz, p.get (P::filter_cutoff)  * std::exp2 (envF * p.get (P::filter_env)  + keyTrack));
         const float cutoff2  = juce::jlimit (20.0f, maxHz, p.get (P::filter2_cutoff) * std::exp2 (envF * p.get (P::filter2_env) + keyTrack));
@@ -573,12 +632,13 @@ void SynthVoice::renderNextBlock (juce::AudioBuffer<float>& out, int startSample
             for (int c = 0; c < 2; ++c)
                 scratch2.copyFrom (c, 0, scratch, c, 0, n);
 
-        filters[0].process (type1, cutoff, res1, drive1, scratch, n, fsr);
+        const int model = p.geti (P::filter_model);
+        filters[0].process (type1, model, cutoff, res1, drive1, scratch, n, fsr);
         if (routing == 1)
-            filters[1].process (type2, cutoff2, res2, drive2, scratch, n, fsr);        // Series
+            filters[1].process (type2, model, cutoff2, res2, drive2, scratch, n, fsr);        // Series
         else if (routing >= 2)
         {
-            filters[1].process (type2, cutoff2, res2, drive2, scratch2, n, fsr);       // Parallel / Split
+            filters[1].process (type2, model, cutoff2, res2, drive2, scratch2, n, fsr);       // Parallel / Split
             const float g = routing == 2 ? 0.7f : 1.0f;
             for (int c = 0; c < 2; ++c)
             {

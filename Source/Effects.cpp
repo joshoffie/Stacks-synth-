@@ -273,6 +273,7 @@ void ReverbFx::process (juce::AudioBuffer<float>& buffer, const Params& prm)
         case 0: sizeF = 0.55f; decayMin = 0.2f; decayMax = 0.72f; break;                        // Room
         case 2: sizeF = 1.6f;  decayMin = 0.45f; decayMax = 0.96f; dampBoost = 0.15f; break;    // Hall
         case 3: sizeF = 1.6f;  decayMin = 0.5f;  decayMax = 0.95f; shimmer = juce::jmax (0.5f, shimmer); break; // Shimmer
+        case 4: sizeF = 1.35f; decayMin = 0.55f; decayMax = 0.97f; dampBoost = 0.1f; break;                      // Lush: long, wide, moving
         default: break;                                                                          // Plate
     }
     sizeF = juce::jlimit (0.4f, 1.8f, sizeF);
@@ -284,7 +285,7 @@ void ReverbFx::process (juce::AudioBuffer<float>& buffer, const Params& prm)
     const float cHigh = onePoleCoef (prm.highCutHz, sr);
     const float cBand = 0.9995f;
     const float preSamples = juce::jmax (1.0f, prm.predelayMs * (float) sr / 1000.0f);
-    const float excursion = prm.mod * 16.0f * scale;
+    const float excursion = prm.mod * (prm.type == 4 ? 44.0f : 16.0f) * scale;   // Lush moves a lot more
     const float width = juce::jlimit (0.0f, 1.0f, prm.width);
     const float shimmerGain = juce::jlimit (0.0f, 1.0f, shimmer) * 0.45f;
 
@@ -525,6 +526,102 @@ void CompressorFx::process (juce::AudioBuffer<float>& buffer, const Params& p)
         const float* in = dry.getReadPointer (ch);
         for (int i = 0; i < n; ++i)
             out[i] = in[i] + (out[i] * makeup - in[i]) * p.mix;
+    }
+}
+
+//==============================================================================
+void HyperFx::prepare (double sampleRate, int)
+{
+    sr = sampleRate;
+    for (auto& l : line) l.prepare ((int) (0.05 * sr) + 8);
+    reset();
+}
+
+void HyperFx::reset()
+{
+    for (auto& l : line) l.clear();
+    for (int v = 0; v < kMaxVoices; ++v) phase[v] = (float) v / (float) kMaxVoices;
+}
+
+void HyperFx::process (juce::AudioBuffer<float>& buffer, const Params& prm)
+{
+    const int n = buffer.getNumSamples();
+    if (buffer.getNumChannels() < 2 || n == 0 || prm.amount <= 0.0005f)
+        return;
+    const int voices = juce::jlimit (2, kMaxVoices, prm.voices);
+    const float msToSamples = (float) sr / 1000.0f;
+    const float depthMs = 0.4f + 4.0f * prm.detune;          // excursion sets the detune
+    const float voiceGain = 0.9f / std::sqrt ((float) voices);
+    const float wet = prm.amount, dry = 1.0f - 0.45f * prm.amount;
+    auto* L = buffer.getWritePointer (0);
+    auto* R = buffer.getWritePointer (1);
+    for (int i = 0; i < n; ++i)
+    {
+        line[0].write (L[i]);
+        line[1].write (R[i]);
+        float outL = 0.0f, outR = 0.0f;
+        for (int v = 0; v < voices; ++v)
+        {
+            const float rate = prm.rateHz * (0.7f + 0.6f * (float) v / (float) (voices - 1));
+            phase[v] += rate / (float) sr;
+            if (phase[v] >= 1.0f) phase[v] -= 1.0f;
+            const float centreMs = 6.0f + 14.0f * (float) v / (float) (voices - 1);
+            const float delayMs = centreMs + depthMs * std::sin (twoPi * phase[v]);
+            const float pan = -1.0f + 2.0f * (float) v / (float) (voices - 1);   // spread left to right
+            const float gl = std::sqrt (0.5f * (1.0f - pan)), gr = std::sqrt (0.5f * (1.0f + pan));
+            const float tap = line[v & 1].read (delayMs * msToSamples);
+            outL += tap * gl;
+            outR += tap * gr;
+        }
+        L[i] = L[i] * dry + outL * voiceGain * wet;
+        R[i] = R[i] * dry + outR * voiceGain * wet;
+    }
+}
+
+//==============================================================================
+void TapeFx::prepare (double sampleRate, int)
+{
+    sr = sampleRate;
+    for (auto& l : line) l.prepare ((int) (0.02 * sr) + 8);
+    reset();
+}
+
+void TapeFx::reset()
+{
+    for (auto& l : line) l.clear();
+    for (auto& t : tone) t.reset();
+    for (auto& t : hissTone) t.reset();
+    wowPhase = flutterPhase = flutterNoise = 0.0f;
+}
+
+void TapeFx::process (juce::AudioBuffer<float>& buffer, const Params& prm)
+{
+    const int n = buffer.getNumSamples();
+    if (buffer.getNumChannels() < 2 || n == 0 || prm.amount <= 0.0005f)
+        return;
+    const float msToSamples = (float) sr / 1000.0f;
+    const float cTone = onePoleCoef (prm.toneHz, sr), cHiss = onePoleCoef (6000.0f, sr);
+    const float drive = 1.0f + 4.0f * prm.sat, makeup = 1.0f / (1.0f + 1.6f * prm.sat);
+    const float hissGain = 0.004f * prm.hiss;
+    const float wowDepth = 1.6f * prm.wow, flutterDepth = 0.12f * prm.flutter;   // ms
+    auto* L = buffer.getWritePointer (0);
+    auto* R = buffer.getWritePointer (1);
+    for (int i = 0; i < n; ++i)
+    {
+        wowPhase += 0.45f / (float) sr;      if (wowPhase >= 1.0f) wowPhase -= 1.0f;
+        flutterPhase += 6.3f / (float) sr;   if (flutterPhase >= 1.0f) flutterPhase -= 1.0f;
+        flutterNoise += 0.002f * ((rng.nextFloat() * 2.0f - 1.0f) - flutterNoise);
+        const float delayMs = 8.0f + wowDepth * std::sin (twoPi * wowPhase) + flutterDepth * (std::sin (twoPi * flutterPhase) + 3.0f * flutterNoise);
+        for (int ch = 0; ch < 2; ++ch)
+        {
+            float* x = ch == 0 ? L : R;
+            line[ch].write (x[i]);
+            float y = line[ch].read (juce::jmax (0.5f, delayMs) * msToSamples);
+            y = std::tanh (y * drive) * makeup;
+            y = tone[ch].lp (y, cTone);
+            y += hissTone[ch].lp ((rng.nextFloat() * 2.0f - 1.0f), cHiss) * hissGain;
+            x[i] = x[i] + (y - x[i]) * prm.amount;
+        }
     }
 }
 
