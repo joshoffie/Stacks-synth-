@@ -63,13 +63,19 @@ enlarged to fill the panel:
 3. **FILTER** — ladder filter (LP/HP/BP, 12 or 24 dB) plus Notch, Comb and
    Formant modes, a **second filter** with Routing (Series, Parallel, or Split:
    A, sub and noise through 1, B and C through 2), its envelope, the amp
-   envelope. The response display draws the combined curve.
+   envelope. The response display draws the combined curve. **Character**: a
+   filter Model (Clean, Warm, Diode, Smooth), analog Drift (per-voice pitch and
+   filter wander), Warmth (saturation before the filter) and per-note envelope
+   variation.
 4. **MODULATORS** — LFO 1-4 with drawable shapes, the Mod Env, Assign, Voice
    (unison up to 16 voices with **Uni Morph** spreading the copies across the
    table, glide, Bend Range under *more*) and the **Arp** (up/down/up-down/random/as-played, synced
    rates, octaves, gate, swing). See *Modulators* below.
-5. **SHAPE** — oversampled distortion (soft, hard, tube, fold, crush), a
-   three-band EQ, and a compressor at the end of the chain (parallel mix).
+5. **EFFECTS** — oversampled distortion (soft, hard, tube, fold, crush), a
+   three-band EQ, a compressor, chorus/ensemble/flanger/dimension, **Hyper** (a
+   cloud of detuned moving copies for width), **Tape** (wow, flutter,
+   saturation, hiss), delay and a reverb with Room, Plate, Hall, Shimmer and
+   **Lush** types; **Chain** picks one of six effect orders.
 6. **SPACE** — effects. Core knobs on the panel, the rest behind each
    section's **more** button:
    - *Chorus*: Chorus / Ensemble (string machine) / Flanger / Dimension modes;
@@ -115,6 +121,10 @@ change that connection's depth.
 card, the seed) plays a short phrase that suits it: a low note for a bass, a
 chord for a pad, a triad for keys and bells. Browsing needs no keyboard. The
 **Play** button in the Library header turns it off.
+
+**Sequencer.** The SEQ tab in MODULATORS is a 16-step lane you draw, synced to
+the host at a chosen rate with Steps and Slew; drag its tab onto any knob (or
+use Pitch / Amp / Pan) and the sound moves in time. It travels with the patch.
 
 **MPE.** Settings (the gear) > MPE turns on per-note expression for Seaboard,
 Osmose, Linnstrument and friends: channels 2-16 carry one note each with a
