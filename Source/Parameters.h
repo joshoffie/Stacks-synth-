@@ -30,6 +30,7 @@ const juce::StringArray& filterRoutingNames();   // second filter: Off, Series, 
 const juce::StringArray& sampleModeNames();      // sample oscillator: Off, Pitched, Granular
 const juce::StringArray& filterModelNames();     // Clean, Warm, Diode, Smooth
 const juce::StringArray& fxOrderNames();         // effect chain orders
+const juce::StringArray& arpChordNames();        // chord mode: Off, Minor, Major, Minor 7, Major 7, Sus4, Power, Octaves
 const juce::StringArray& onOffNames();
 const juce::StringArray& distModeNames();
 const juce::StringArray& warpNames();     // oscillator warps: Off, Sync, Bend, PWM, Mirror, Fold, Quantize
@@ -231,6 +232,9 @@ inline bool isBipolarSource (int src) noexcept
  X(arp_octaves,    "Octaves",      "ARP",        Int,     1,     4,     1,     0,     "",   nullptr,            "how many octaves the pattern climbs through") \
  X(arp_gate,       "Gate",         "ARP",        Float,   0.1,   1,     0.6,   0,     "",   nullptr,            "how much of each step the note sounds for") \
  X(arp_swing,      "Swing",        "ARP",        Float,   0,     0.5,   0,     0,     "",   nullptr,            "delays every other step for a shuffle feel (advanced)") \
+ X(arp_hold,       "Hold",         "ARP",        Choice,  0,     1,     0,     0,     "",   onOffNames,         "hold: the pattern keeps running after you let go; the next fresh chord replaces it") \
+ X(arp_chord,      "Chord",        "ARP",        Choice,  0,     7,     0,     0,     "",   arpChordNames,      "chord mode: each key you hold becomes a chord for the arp to play through") \
+ X(arp_pattern,    "Pattern",      "ARP",        Choice,  0,     1,     0,     0,     "",   onOffNames,         "pattern: the SEQ lane shapes the arp - step height is the accent, a step at the bottom is a rest") \
  X(seq_rate,       "Seq Rate",     "SEQ",        Choice,  0,     5,     3,     0,     "",   arpRateNames,       "step sequencer step length, locked to the host tempo") \
  X(seq_steps,      "Steps",        "SEQ",        Int,     2,     16,    8,     0,     "",   nullptr,            "how many steps the sequencer lane plays before it repeats") \
  X(seq_slew,       "Slew",         "SEQ",        Float,   0,     1,     0.05,  0,     "",   nullptr,            "glide between steps: 0 = stepped, 1 = smooth") \

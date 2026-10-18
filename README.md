@@ -126,6 +126,12 @@ chord for a pad, a triad for keys and bells. Browsing needs no keyboard. The
 the host at a chosen rate with Steps and Slew; drag its tab onto any knob (or
 use Pitch / Amp / Pan) and the sound moves in time. It travels with the patch.
 
+**Arpeggiator.** Up, Down, Up-Down, Random or As Played at synced rates over
+up to four octaves, with gate and swing. **Hold** keeps the pattern running
+after you let go (a fresh chord replaces it), **Chord** turns each key into a
+minor, major, 7th, sus4, power or octave chord, and **Pattern** lets the SEQ
+lane shape it: step height is the accent, a step at the floor is a rest.
+
 **MPE.** Settings (the gear) > MPE turns on per-note expression for Seaboard,
 Osmose, Linnstrument and friends: channels 2-16 carry one note each with a
 48-semitone bend, per-note pressure (the Aftertouch source) and slide (the

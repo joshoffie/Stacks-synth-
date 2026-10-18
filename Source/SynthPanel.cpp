@@ -23,7 +23,7 @@ namespace
             { "EFFECTS",    &colours::rowSpace,    { { "DISTORTION", { "DISTORTION" }, 2, nullptr }, { "EQ", { "EQ" }, 2, nullptr }, { "COMPRESSOR", { "COMPRESSOR" }, 2, nullptr },
                                                      { "CHORUS", { "CHORUS" }, 2, nullptr }, { "HYPER", { "HYPER" }, 1, nullptr }, { "TAPE", { "TAPE" }, 2, nullptr },
                                                      { "DELAY", { "DELAY" }, 3, nullptr }, { "REVERB", { "REVERB" }, 2, nullptr }, { "CHAIN", { "CHAIN" }, 1, nullptr } } },
-            { "MODULATORS", &colours::rowMovement, { { kModulatorsSection, {}, 0, nullptr }, { "VOICE", { "VOICE" }, 3, nullptr }, { "ARP", { "ARP" }, 2, nullptr } } },
+            { "MODULATORS", &colours::rowMovement, { { kModulatorsSection, {}, 0, nullptr }, { "VOICE", { "VOICE" }, 3, nullptr }, { "ARP", { "ARP" }, 3, nullptr } } },
         };
         return specs;
     }

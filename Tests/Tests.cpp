@@ -397,6 +397,79 @@ static void testArpeggiator()
     }
     CHECK (lateOns == 0);
 
+    // Hold: the pattern keeps running after the keys are released.
+    {
+        Arpeggiator held;
+        held.prepare (48000.0);
+        Arpeggiator::Params hp = p;
+        hp.hold = true;
+        juce::MidiBuffer buf;
+        buf.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+        buf.addEvent (juce::MidiMessage::noteOn (1, 64, (juce::uint8) 100), 0);
+        held.process (buf, 512, hp, 120.0, std::nullopt, false);
+        buf.clear();
+        buf.addEvent (juce::MidiMessage::noteOff (1, 60), 0);
+        buf.addEvent (juce::MidiMessage::noteOff (1, 64), 0);
+        held.process (buf, 512, hp, 120.0, std::nullopt, false);
+        int onsAfterRelease = 0;
+        for (int b = 0; b < 188; ++b)
+        {
+            buf.clear();
+            held.process (buf, 512, hp, 120.0, std::nullopt, false);
+            for (const auto meta : buf) if (meta.getMessage().isNoteOn()) ++onsAfterRelease;
+        }
+        CHECK (onsAfterRelease >= 7);
+        // A fresh key replaces the held chord.
+        buf.clear();
+        buf.addEvent (juce::MidiMessage::noteOn (1, 67, (juce::uint8) 100), 0);
+        held.process (buf, 512, hp, 120.0, std::nullopt, false);
+        std::set<int> seen;
+        for (int b = 0; b < 188; ++b)
+        {
+            buf.clear();
+            held.process (buf, 512, hp, 120.0, std::nullopt, false);
+            for (const auto meta : buf) if (meta.getMessage().isNoteOn()) seen.insert (meta.getMessage().getNoteNumber());
+        }
+        CHECK (seen.count (67) == 1 && seen.count (60) == 0);
+    }
+    // Chord mode: one key, three notes through the arp.
+    {
+        Arpeggiator chordArp;
+        chordArp.prepare (48000.0);
+        Arpeggiator::Params cp = p;
+        cp.chord = 2;   // Major
+        juce::MidiBuffer buf;
+        buf.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+        std::set<int> seen;
+        for (int b = 0; b < 188; ++b)
+        {
+            chordArp.process (buf, 512, cp, 120.0, std::nullopt, false);
+            for (const auto meta : buf) if (meta.getMessage().isNoteOn()) seen.insert (meta.getMessage().getNoteNumber());
+            buf.clear();
+        }
+        CHECK (seen.count (60) && seen.count (64) && seen.count (67) && seen.size() == 3);
+    }
+    // Pattern: a lane with a rest on step 2 skips every second note; a quiet step is an accent down.
+    {
+        Arpeggiator patArp;
+        patArp.prepare (48000.0);
+        float lane[4] = { 1.0f, -1.0f, 0.0f, -1.0f };
+        Arpeggiator::Params pp = p;
+        pp.pattern = lane; pp.patternSteps = 4;
+        juce::MidiBuffer buf;
+        buf.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+        int ons = 0; std::set<int> velocities;
+        for (int b = 0; b < 188; ++b)
+        {
+            patArp.process (buf, 512, pp, 120.0, std::nullopt, false);
+            for (const auto meta : buf) if (meta.getMessage().isNoteOn()) { ++ons; velocities.insert (meta.getMessage().getVelocity()); }
+            buf.clear();
+        }
+        CHECK (ons >= 3 && ons <= 5);                  // half of ~8 steps rest
+        CHECK (velocities.size() == 2);                 // the full step and the mid step hit differently
+        CHECK (arpChordNames().size() == 8);
+    }
+
     // Off: everything passes straight through.
     Arpeggiator::Params off;
     Arpeggiator plain;

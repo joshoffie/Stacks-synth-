@@ -249,6 +249,15 @@ void StacksAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         ap.octaves = params.geti (P::arp_octaves);
         ap.gate = params.get (P::arp_gate);
         ap.swing = params.get (P::arp_swing);
+        ap.hold = params.geti (P::arp_hold) == 1;
+        ap.chord = params.geti (P::arp_chord);
+        float lane[kSeqMaxSteps];
+        if (params.geti (P::arp_pattern) == 1)
+        {
+            for (int i = 0; i < kSeqMaxSteps; ++i) lane[i] = seqStepValue[i].load (std::memory_order_relaxed);
+            ap.pattern = lane;
+            ap.patternSteps = juce::jlimit (2, kSeqMaxSteps, params.geti (P::seq_steps));
+        }
         arp.process (midi, numSamples, ap, currentBpm, ppq, hostPlaying);
     }
 

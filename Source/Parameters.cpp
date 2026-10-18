@@ -41,6 +41,12 @@ const juce::StringArray& fxOrderNames()
     return names;
 }
 
+const juce::StringArray& arpChordNames()
+{
+    static const juce::StringArray names { "Off", "Minor", "Major", "Minor 7", "Major 7", "Sus4", "Power", "Octaves" };
+    return names;
+}
+
 const juce::StringArray& onOffNames()
 {
     static const juce::StringArray names { "Off", "On" };

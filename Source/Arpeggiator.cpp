@@ -41,7 +41,7 @@ void Arpeggiator::allNotesOff (juce::MidiBuffer& out, int sample)
     }
 }
 
-int Arpeggiator::nextNote (const Params& p)
+int Arpeggiator::nextNote (const Params& p, int& stepUsed)
 {
     if (held.empty())
         return -1;
@@ -52,13 +52,21 @@ int Arpeggiator::nextNote (const Params& p)
     else
         std::sort (order.begin(), order.end(), [] (const Held& a, const Held& b) { return a.order < b.order; });
 
+    // Chord mode: every held key becomes a chord.
+    static const std::vector<int> chords[] = { { 0 }, { 0, 3, 7 }, { 0, 4, 7 }, { 0, 3, 7, 10 }, { 0, 4, 7, 11 }, { 0, 5, 7 }, { 0, 7 }, { 0, 12 } };
+    const auto& intervals = chords[juce::jlimit (0, 7, p.chord)];
+
     // The pattern over all octaves
     std::vector<int> pattern;
     const int octaves = juce::jlimit (1, 4, p.octaves);
     for (int o = 0; o < octaves; ++o)
         for (const auto& h : order)
-            pattern.push_back (h.note + 12 * o);
+            for (int iv : intervals)
+                pattern.push_back (h.note + 12 * o + iv);
+    if (p.mode != 5 && p.chord > 0)
+        std::sort (pattern.begin(), pattern.end());
     const int n = (int) pattern.size();
+    stepUsed = stepIndex;
 
     int pick = 0;
     switch (p.mode)
@@ -103,14 +111,27 @@ void Arpeggiator::process (juce::MidiBuffer& midi, int numSamples, const Params&
         const auto m = meta.getMessage();
         if (m.isNoteOn())
         {
+            if (p.hold)
+            {
+                bool allReleased = ! held.empty();
+                for (const auto& h : held) allReleased = allReleased && h.released;
+                if (allReleased) held.clear();          // a fresh chord replaces the held one
+            }
             bool known = false;
-            for (auto& h : held) if (h.note == m.getNoteNumber()) { known = true; h.velocity = m.getVelocity(); }
-            if (! known) held.push_back ({ m.getNoteNumber(), (int) m.getVelocity(), orderCounter++ });
+            for (auto& h : held) if (h.note == m.getNoteNumber()) { known = true; h.velocity = m.getVelocity(); h.released = false; }
+            if (! known) held.push_back ({ m.getNoteNumber(), (int) m.getVelocity(), orderCounter++, false });
             playingChannel = juce::jlimit (1, 16, m.getChannel());
         }
         else if (m.isNoteOff())
         {
             const auto before = held.size();
+            if (p.hold)
+            {
+                bool ours = false;
+                for (auto& h : held) if (h.note == m.getNoteNumber()) { h.released = true; ours = true; }
+                if (! ours) out.addEvent (m, meta.samplePosition);
+                continue;
+            }
             held.erase (std::remove_if (held.begin(), held.end(), [&] (const Held& h) { return h.note == m.getNoteNumber(); }), held.end());
             // Not one of ours: the note went straight to the synth while the arp was
             // off (a preview, a held key) and the arp came on since. Let the release
@@ -170,14 +191,26 @@ void Arpeggiator::process (juce::MidiBuffer& midi, int numSamples, const Params&
             else
             {
                 allNotesOff (out, i);
-                const int note = nextNote (p);
+                int stepUsed = 0;
+                const int note = nextNote (p, stepUsed);
                 if (note >= 0)
                 {
                     int velocity = 100;
                     for (const auto& h : held) if (h.note == note % 128 || (note - h.note) % 12 == 0) velocity = h.velocity;
-                    out.addEvent (juce::MidiMessage::noteOn (playingChannel, note, (juce::uint8) juce::jlimit (1, 127, velocity)), i);
-                    playingNote = note;
-                    noteOffIn = juce::jmax (1.0, stepSamples * juce::jlimit (0.1f, 1.0f, p.gate));
+                    // The SEQ lane as a pattern: height is the accent, the floor is a rest.
+                    bool rest = false;
+                    if (p.pattern != nullptr && p.patternSteps > 0)
+                    {
+                        const float v = p.pattern[stepUsed % p.patternSteps];
+                        if (v <= -0.95f) rest = true;
+                        else velocity = juce::jlimit (1, 127, (int) std::lround ((float) velocity * (0.35f + 0.65f * (v + 1.0f) * 0.5f)));
+                    }
+                    if (! rest)
+                    {
+                        out.addEvent (juce::MidiMessage::noteOn (playingChannel, note, (juce::uint8) juce::jlimit (1, 127, velocity)), i);
+                        playingNote = note;
+                        noteOffIn = juce::jmax (1.0, stepSamples * juce::jlimit (0.1f, 1.0f, p.gate));
+                    }
                 }
             }
         }

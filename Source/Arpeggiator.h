@@ -19,6 +19,10 @@ public:
         int octaves = 1;
         float gate = 0.6f;
         float swing = 0.0f;
+        bool hold = false;            // latch: released keys stay in the pattern until a fresh chord
+        int chord = 0;                // 0 Off, 1 Minor, 2 Major, 3 Minor 7, 4 Major 7, 5 Sus4, 6 Power, 7 Octaves
+        const float* pattern = nullptr;   // the SEQ lane (-1..1 per step) shaping accents and rests, or null
+        int patternSteps = 0;
     };
 
     void prepare (double sampleRate);
@@ -28,9 +32,9 @@ public:
     static double beatsPerStep (int rate) noexcept;
 
 private:
-    struct Held { int note, velocity, order; };
+    struct Held { int note, velocity, order; bool released = false; };
     void allNotesOff (juce::MidiBuffer& out, int sample);
-    int nextNote (const Params&);
+    int nextNote (const Params&, int& stepUsed);
 
     std::vector<Held> held;
     double sr = 48000.0;
