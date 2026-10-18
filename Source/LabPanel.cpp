@@ -226,9 +226,9 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
     hint.setReturnKeyStartsNewLine (false);
     hint.setFont (StacksLookAndFeel::font (12.0f));
     hint.onReturnKey = [this] { newBatchButton.triggerClick(); };   // a prompt stands on its own: no preset needed
-    hint.setVisible (false);          // the home screen asks by kind of sound instead; the prompt bar is kept for later
     hint.onEscapeKey = [this] { hint.giveAwayKeyboardFocus(); };    // back to the host's keyboard
-    addAndMakeVisible (hint);
+    // addAndMakeVisible (hint);   // the prompt bar is parked: the home screen asks by kind of sound instead
+    addChildComponent (hint);
 
     tweak.setTextToShowWhenEmpty (juce::String::fromUTF8 ("Quick tweak the playing sound: brighter, more reverb, shorter\xe2\x80\xa6"), colours::muted);
     tweak.setMultiLine (false);
@@ -246,8 +246,8 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
         tweak.giveAwayKeyboardFocus();   // the result reads in the empty box, and the host gets its keyboard back
     };
     tweak.onEscapeKey = [this] { tweak.giveAwayKeyboardFocus(); };
-    addAndMakeVisible (tweak);
-    tweak.setVisible (false);   // the quick-tweak bar is parked with the prompt bar
+    // addAndMakeVisible (tweak);  // the quick-tweak bar is parked with the prompt bar
+    addChildComponent (tweak);
 
     variationLabel.setText ("Variation", juce::dontSendNotification);
     variationLabel.setFont (StacksLookAndFeel::font (10.5f));
@@ -438,9 +438,9 @@ void LabPanel::resized()
     header.setBounds (top);
     r.removeFromTop (6);
 
-    hint.setBounds (r.removeFromTop (26));
+    // hint.setBounds (r.removeFromTop (26));    // parked
     r.removeFromTop (5);
-    tweak.setBounds (r.removeFromTop (26));
+    // tweak.setBounds (r.removeFromTop (26));   // parked
     r.removeFromTop (6);
 
     auto varRow = r.removeFromTop (18);

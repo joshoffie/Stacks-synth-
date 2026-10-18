@@ -162,6 +162,17 @@ void StacksAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     const int numSamples = buffer.getNumSamples();
     keyboardState.processNextMidiBuffer (midi, 0, numSamples, true);
 
+    // A new sound was picked: the old one stops dead (voices, preview, tails).
+    if (hardCutPending.exchange (false, std::memory_order_acq_rel))
+    {
+        synth.allNotesOff (0, false);
+        for (int& n : previewNotes) n = -1;
+        previewRemaining = 0;
+        chorus.reset();
+        delay.reset();
+        reverb.reset();
+    }
+
     // Audition preview: a queued phrase becomes real notes in this stream, cut
     // off after its length (or at once when the next preview arrives).
     if (previewPending.load (std::memory_order_acquire))
@@ -1498,6 +1509,7 @@ void StacksAudioProcessor::audition (int index)
 
     applyPatch (labState.candidates[(size_t) index]);
     labState.auditioned = index;
+    hardCut();
     playPreview (labState.candidates[(size_t) index]);
     labBroadcaster.sendChangeMessage();
 }
@@ -1514,6 +1526,7 @@ void StacksAudioProcessor::auditionFromTree (int generation, int candidate)
         if (! seedIsPatch) return;
         applyPatch (seed);
         labState.auditioned = -1;
+        hardCut();
         playPreview (seed);
     }
     else
@@ -1521,6 +1534,7 @@ void StacksAudioProcessor::auditionFromTree (int generation, int candidate)
         if (candidate >= (int) candidates.size()) return;
         applyPatch (candidates[(size_t) candidate]);
         labState.auditioned = current ? candidate : -1;
+        hardCut();
         playPreview (candidates[(size_t) candidate]);
     }
     labBroadcaster.sendChangeMessage();
@@ -1749,6 +1763,7 @@ void StacksAudioProcessor::auditionSeed()
         return;
     applyPatch (labState.seed);
     labState.auditioned = -1;
+    hardCut();
     playPreview (labState.seed);
     labBroadcaster.sendChangeMessage();
 }
@@ -1905,6 +1920,7 @@ bool StacksAudioProcessor::loadLibraryPatch (const juce::File& file)
     if (p->name.isEmpty()) p->name = file.getFileNameWithoutExtension();
     applyPatch (*p);
     labState.auditioned = -1;
+    hardCut();
     playPreview (*p);
     labBroadcaster.sendChangeMessage();
     return true;

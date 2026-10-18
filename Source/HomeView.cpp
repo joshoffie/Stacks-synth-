@@ -59,58 +59,15 @@ std::unique_ptr<juce::AccessibilityHandler> HomeView::Tile::createAccessibilityH
 }
 
 //==============================================================================
-void HomeView::Card::set (const Patch& p, bool isSelected)
-{
-    name = p.name; category = p.category; selected = isSelected;
-    description = p.description.upToFirstOccurrenceOf (" (", false, false);   // plain words only; the knob list stays in the synth
-    setMouseCursor (juce::MouseCursor::PointingHandCursor);
-    repaint();
-}
-
-void HomeView::Card::paint (juce::Graphics& g)
-{
-    auto r = getLocalBounds().toFloat().reduced (2.0f);
-    g.setColour (selected ? colours::accent.withAlpha (0.18f) : hover ? colours::card.brighter (0.1f) : colours::card);
-    g.fillRoundedRectangle (r, 10.0f);
-    g.setColour (selected ? colours::accent : juce::Colours::white.withAlpha (0.07f));
-    g.drawRoundedRectangle (r.reduced (0.5f), 10.0f, selected ? 2.0f : 1.0f);
-    // play mark
-    juce::Path tri;
-    const float cx = r.getX() + 26.0f, cy = r.getCentreY();
-    tri.addTriangle (cx - 6.0f, cy - 8.0f, cx - 6.0f, cy + 8.0f, cx + 8.0f, cy);
-    g.setColour (selected ? colours::accent : colours::muted);
-    g.fillPath (tri);
-    g.setColour (colours::text);
-    g.setFont (StacksLookAndFeel::font (15.0f, true));
-    g.drawText (name, r.withTrimmedLeft (50.0f).withTrimmedRight (12.0f).withHeight (r.getHeight() * 0.5f).withTrimmedTop (8.0f), juce::Justification::topLeft);
-    g.setColour (colours::muted);
-    g.setFont (StacksLookAndFeel::font (12.0f));
-    g.drawFittedText (description, r.withTrimmedLeft (50.0f).withTrimmedRight (12.0f).withTrimmedTop (r.getHeight() * 0.5f).withTrimmedBottom (6.0f).toNearestInt(), juce::Justification::topLeft, 2);
-}
-
-std::unique_ptr<juce::AccessibilityHandler> HomeView::Card::createAccessibilityHandler()
-{
-    return std::make_unique<PressHandler> (*this, "Hear " + name, [this] { if (onClick) onClick(); });
-}
-
-//==============================================================================
 HomeView::HomeView (StacksAudioProcessor& p) : processor (p)
 {
     for (const auto& k : kKinds)
     {
         auto tile = std::make_unique<Tile> (k.name, k.blurb, juce::Colour (k.colour));
-        tile->onClick = [this, name = juce::String (k.name)] { pick (name); };
+        tile->onClick = [this, name = juce::String (k.name), t = tile.get()] { showKindMenu (name, *t); };
         addAndMakeVisible (*tile);
         tiles.push_back (std::move (tile));
     }
-    for (int i = 0; i < StacksAudioProcessor::kAiPatchesPerBatch; ++i)
-    {
-        auto card = std::make_unique<Card>();
-        card->onClick = [this, i] { processor.audition (i); };
-        addChildComponent (*card);
-        cards.push_back (std::move (card));
-    }
-
     growButton.setTooltip ("Five new sounds that grow out of the one you picked");
     growButton.setColour (juce::TextButton::buttonColourId, colours::accent.withAlpha (0.85f));
     growButton.setColour (juce::TextButton::textColourOffId, colours::background);
@@ -164,6 +121,61 @@ void HomeView::setVariation (float v)
     variation = v;
 }
 
+juce::Colour HomeView::kindColour (const juce::String& kind) const
+{
+    for (const auto& k : kKinds) if (kind == k.name) return juce::Colour (k.colour);
+    return colours::accent;
+}
+
+// Start fresh, or start from a preset of this kind and grow from it.
+void HomeView::showKindMenu (const juce::String& kind, Tile& tile)
+{
+    if (processor.isBusy())
+        return;
+    juce::PopupMenu menu;
+    menu.addItem (1, "Start fresh: five new " + kind.toLowerCase() + " sounds");
+    juce::PopupMenu presets;
+    juce::Array<juce::File> files;
+    const auto root = StacksAudioProcessor::libraryRoot();
+    juce::StringArray folders { kind };
+    if (kind == "Texture") folders.add ("Drone");
+    for (const auto& folder : folders)
+    {
+        files.addArray (root.getChildFile ("Factory").getChildFile (folder).findChildFiles (juce::File::findFiles, false, "*.json"));
+        files.addArray (root.getChildFile ("My Sounds").findChildFiles (juce::File::findFiles, false, "*.json"));
+    }
+    files.sort();
+    int id = 100;
+    for (const auto& f : files)
+    {
+        if (id >= 100 + 40) break;
+        presets.addItem (id++, f.getFileNameWithoutExtension());
+    }
+    if (files.isEmpty()) presets.addItem (99, "(no " + kind.toLowerCase() + " presets in the library yet)", false);
+    menu.addSubMenu ("Start from a preset and grow it", presets);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&tile).withMinimumWidth (260),
+                        [this, kind, files] (int result)
+                        {
+                            if (result == 1) pick (kind);
+                            else if (result >= 100 && result - 100 < files.size()) growFromPreset (files[result - 100]);
+                        });
+}
+
+void HomeView::growFromPreset (const juce::File& file)
+{
+    if (! processor.loadLibraryPatch (file))
+        return;
+    note.clear();
+    growthSeed = (int) (juce::Time::getMillisecondCounter() & 0x7fff) + 1;
+    anim = 0.0f;
+    falling.clear();
+    seedName = processor.currentPatchName();
+    seedStyle = GardenView::styleFor (processor.currentPatch(), processor.builtInWavetables(), true);
+    stage = Stage::growing;
+    processor.requestEvolve ("", variation);
+    refresh();
+}
+
 void HomeView::pick (const juce::String& kind)
 {
     if (processor.isBusy())
@@ -213,12 +225,8 @@ void HomeView::refresh()
         stage = Stage::pick;
 
     for (auto& t : tiles) t->setVisible (stage == Stage::pick);
-    for (int i = 0; i < (int) cards.size(); ++i)
-    {
-        const bool show = stage == Stage::results && i < (int) lab.candidates.size();
-        cards[(size_t) i]->setVisible (show);
-        if (show) cards[(size_t) i]->set (lab.candidates[(size_t) i], lab.auditioned == i);
-    }
+    if (stage == Stage::pick) falling.clear();
+    else syncBlocks (stage == Stage::results && falling.empty());   // a restored batch sits; a live one falls in
     const bool results = stage == Stage::results;
     growButton.setVisible (results);
     growButton.setEnabled (results && lab.auditioned >= 0);
@@ -229,20 +237,35 @@ void HomeView::refresh()
     openSynthButton.setVisible (results);
     for (auto* b : { &closeButton, &mediumButton, &farButton }) b->setVisible (results);
 
-    if (stage == Stage::growing) { if (! isTimerRunning()) startTimerHz (30); }
+    placeBlocks();
+    bool moving = stage == Stage::growing;
+    for (const auto& f : falling) moving = moving || ! f.landed || f.scale < 0.995f;
+    if (moving) { if (! isTimerRunning()) startTimerHz (30); }
     else stopTimer();
     resized();
     repaint();
 }
 
-void HomeView::timerCallback()
+juce::Rectangle<float> HomeView::stackArea() const
 {
-    constexpr float dt = 1.0f / 30.0f;
-    anim += dt;
-    const auto& lab = processor.lab();
+    auto r = getLocalBounds().reduced (24).toFloat();
+    r.removeFromTop (54.0f + 30.0f + 26.0f);
+    r.removeFromBottom (54.0f);
+    return r;
+}
 
-    // New sounds become blocks that fall onto the pile.
-    auto area = getLocalBounds().reduced (24).toFloat().withTrimmedTop (54.0f + 30.0f + 40.0f);
+juce::Rectangle<float> HomeView::faceOf (const Falling& f, juce::Rectangle<float> area) const
+{
+    const float bw = blockWidth (area), bh = blockHeight (area);
+    const float w = bw * f.scale, hgt = bh * f.scale * f.squash;
+    return { f.x + (bw - w) * 0.5f, f.y + bh - hgt, w, hgt };
+}
+
+void HomeView::syncBlocks (bool settled)
+{
+    const auto& lab = processor.lab();
+    const auto area = stackArea();
+    while (falling.size() > lab.candidates.size()) falling.pop_back();
     while (falling.size() < lab.candidates.size() && falling.size() < (size_t) StacksAudioProcessor::kAiPatchesPerBatch)
     {
         Falling f;
@@ -252,14 +275,25 @@ void HomeView::timerCallback()
         f.style = GardenView::styleFor (patch, processor.builtInWavetables(), true);
         const auto slot = slotFor (f.index, area);
         f.x = slot.getX();
-        f.y = area.getY() - 140.0f;
-        f.vy = 0.0f;
+        if (settled) { f.y = slot.getY(); f.landed = true; f.scale = 1.0f; f.age = 10.0f; }
+        else         { f.y = area.getY() - 160.0f; }
         falling.push_back (f);
     }
+    for (int i = 0; i < (int) falling.size(); ++i)   // names and looks follow the batch (a tweak renames, a morph recolours)
+    {
+        const auto& patch = lab.candidates[(size_t) i];
+        if (falling[(size_t) i].name != patch.name) { falling[(size_t) i].name = patch.name; falling[(size_t) i].style = GardenView::styleFor (patch, processor.builtInWavetables(), true); }
+    }
+}
+
+void HomeView::stepPhysics (float dt)
+{
+    const auto area = stackArea();
     for (auto& f : falling)
     {
         f.age += dt;
         const auto slot = slotFor (f.index, area);
+        f.x = slot.getX();
         const float target = slot.getY();
         if (! f.landed)
         {
@@ -274,14 +308,75 @@ void HomeView::timerCallback()
             }
         }
         else
+        {
+            f.y = target;
             f.scale += (1.0f - f.scale) * juce::jmin (1.0f, 6.0f * dt);
+        }
         f.squash += (1.0f - f.squash) * juce::jmin (1.0f, 10.0f * dt);
     }
+}
+
+void HomeView::timerCallback()
+{
+    constexpr float dt = 1.0f / 30.0f;
+    anim += dt;
+    const auto& lab = processor.lab();
+    syncBlocks (false);
+    stepPhysics (dt);
+    placeBlocks();
     const float p = lab.progress;
     const int done = (int) lab.candidates.size();
     const char* words = p < 0.0f ? "listening" : p < 0.3f ? "listening" : p < 0.6f ? "sketching" : p < 0.85f ? "shaping" : "tuning";
-    stageText = juce::String (words) + "   " + juce::String (done) + " of " + juce::String (StacksAudioProcessor::kAiPatchesPerBatch);
+    stageText = lab.generating ? juce::String (words) + "   " + juce::String (done) + " of " + juce::String (StacksAudioProcessor::kAiPatchesPerBatch) : juce::String();
+    if (! lab.generating)
+    {
+        bool moving = false;
+        for (const auto& f : falling) moving = moving || ! f.landed || f.scale < 0.995f;
+        if (! moving) stopTimer();
+    }
     repaint();
+}
+
+void HomeView::BlockComp::paint (juce::Graphics& g)
+{
+    g.setOpacity (alpha);
+    GardenView::paintBlock (g, face, style, name, selected, hovered, index);
+}
+
+std::unique_ptr<juce::AccessibilityHandler> HomeView::BlockComp::createAccessibilityHandler()
+{
+    return std::make_unique<PressHandler> (*this, "Hear " + name, [this] { owner.processor.audition (index); });
+}
+
+// Each block component sits where its physics says, with room for the top and side faces.
+void HomeView::placeBlocks()
+{
+    const auto area = stackArea();
+    while (blockComps.size() < falling.size())
+    {
+        auto b = std::make_unique<BlockComp> (*this);
+        addAndMakeVisible (*b);
+        blockComps.push_back (std::move (b));
+    }
+    while (blockComps.size() > falling.size()) blockComps.pop_back();
+    const int selected = processor.lab().auditioned;
+    for (size_t i = 0; i < falling.size(); ++i)
+    {
+        const auto& f = falling[i];
+        auto& b = *blockComps[i];
+        const auto face = faceOf (f, area);
+        const float depth = f.style.depth + 2.0f;
+        juce::Rectangle<float> bounds (face.getX() - 2.0f, face.getY() - depth, face.getWidth() + GardenView::kBlockSkew + 4.0f, face.getHeight() + depth + 2.0f);
+        b.setBounds (bounds.toNearestInt());
+        b.face = face.translated (-bounds.getX(), -bounds.getY()).translated ((float) bounds.toNearestInt().getX() - bounds.getX(), (float) bounds.toNearestInt().getY() - bounds.getY());
+        b.index = f.index;
+        b.style = f.style;
+        if (b.name != f.name) { b.name = f.name; b.setTitle ("Hear " + f.name); b.setTooltip (f.name); }
+        b.alpha = juce::jmin (1.0f, f.age * 4.0f);
+        b.selected = f.index == selected;
+        b.setVisible (stage != Stage::pick);
+        b.repaint();
+    }
 }
 
 void HomeView::resized()
@@ -314,17 +409,8 @@ void HomeView::resized()
         closeButton.setBounds (bottom.removeFromRight (70));
         bottom.removeFromRight (16);
         growButton.setBounds (bottom.removeFromRight (190));
-        r.removeFromBottom (14);
-        const int n = (int) cards.size();
-        const int gap = 10;
-        const int cardH = juce::jlimit (56, 96, (r.getHeight() - gap * (n - 1)) / n);
-        int y = r.getY();
-        for (auto& c : cards)
-        {
-            c->setBounds (r.getX(), y, r.getWidth(), cardH);
-            y += cardH + gap;
-        }
     }
+    placeBlocks();
 }
 
 void HomeView::paint (juce::Graphics& g)
@@ -352,24 +438,26 @@ void HomeView::paint (juce::Graphics& g)
         g.setFont (StacksLookAndFeel::font (12.5f));
         g.drawText (note, r.removeFromTop (18), juce::Justification::centredLeft);
     }
-    else if (stage == Stage::results)
+    else
     {
         g.setColour (colours::muted);
         g.setFont (StacksLookAndFeel::font (12.5f));
-        g.drawText ("Click one to hear it. Play the keyboard. Then grow from it, save it, or open the synth to shape it.", r.removeFromTop (18), juce::Justification::centredLeft);
+        const juce::String line = lab.auditioned >= 0 && lab.auditioned < (int) lab.candidates.size()
+            ? lab.candidates[(size_t) lab.auditioned].name + ":  " + lab.candidates[(size_t) lab.auditioned].description.upToFirstOccurrenceOf (" (", false, false)
+            : juce::String ("Click a block to hear it, even while the rest are still growing. Play the keyboard. Then grow from it, save it, or open the synth.");
+        g.drawText (line, r.removeFromTop (18), juce::Justification::centredLeft);
     }
-    if (stage == Stage::growing)
-        paintGrowth (g, r.withTrimmedTop (40).toFloat());
+    paintGrowth (g, stackArea());
 }
 
 // The slab is the seed; the five sounds fall onto it as they land, growing in
 // on the way down and settling with a bounce. Empty slots wait as faint frames.
 juce::Rectangle<float> HomeView::slotFor (int index, juce::Rectangle<float> area) const
 {
-    const float bw = blockWidth (area), bh = blockHeight (area), gap = 14.0f;
+    const float bw = blockWidth (area), bh = blockHeight (area), gap = 16.0f;
     const float rowW = 4.0f * bw + 3.0f * gap;
     const float x0 = area.getCentreX() - rowW * 0.5f;
-    const float slabTop = area.getBottom() - 46.0f;
+    const float slabTop = area.getBottom() - 40.0f;
     if (index < 4)
         return { x0 + (float) index * (bw + gap), slabTop - bh - 6.0f, bw, bh };
     return { area.getCentreX() - bw * 0.5f, slabTop - 2.0f * bh - 12.0f, bw, bh };   // the fifth sits on top
@@ -380,32 +468,126 @@ void HomeView::paintGrowth (juce::Graphics& g, juce::Rectangle<float> area)
     const int total = StacksAudioProcessor::kAiPatchesPerBatch;
     const float bw = blockWidth (area), bh = blockHeight (area);
     // The slab: the kind or the sound this batch grows from.
-    const float rowW = 4.0f * bw + 3.0f * 14.0f;
-    juce::Rectangle<float> slab (area.getCentreX() - rowW * 0.5f - 8.0f, area.getBottom() - 46.0f, rowW + 16.0f, 34.0f);
+    const float rowW = 4.0f * bw + 3.0f * 16.0f;
+    juce::Rectangle<float> slab (area.getCentreX() - rowW * 0.5f - 8.0f, area.getBottom() - 40.0f, rowW + 16.0f, 34.0f);
     auto slabStyle = seedStyle;
     slabStyle.depth = 10.0f;
     slabStyle.wave.clear();
     GardenView::paintBlock (g, slab, slabStyle, seedName, false, false, 0);
 
-    // Waiting slots: faint frames that breathe.
+    // Waiting slots: faint frames that breathe; the one being written builds itself up.
+    const auto& lab = processor.lab();
     for (int i = (int) falling.size(); i < total; ++i)
     {
         const auto slot = slotFor (i, area);
+        if (i == (int) falling.size() && lab.generating)
+        {
+            paintConstruction (g, slot, seedStyle.colour, lab.progress);
+            continue;
+        }
         g.setColour (colours::muted.withAlpha (0.18f + 0.1f * std::sin (anim * 2.5f + (float) i)));
         g.drawRoundedRectangle (slot, 4.0f, 1.0f);
     }
     // The blocks, in flight or settled.
-    for (const auto& f : falling)
-    {
-        const float w = bw * f.scale, hgt = bh * f.scale * f.squash;
-        juce::Rectangle<float> face (f.x + (bw - w) * 0.5f, f.y + bh - hgt, w, hgt);
-        g.setOpacity (juce::jmin (1.0f, f.age * 4.0f));
-        GardenView::paintBlock (g, face, f.style, f.name, f.landed, false, f.index);
-        g.setOpacity (1.0f);
-    }
     g.setColour (colours::muted);
     g.setFont (StacksLookAndFeel::font (13.0f));
-    g.drawText (stageText, area.removeFromTop (22), juce::Justification::centred);
+    if (stageText.isNotEmpty()) g.drawText (stageText, area.removeFromTop (22), juce::Justification::centred);
+}
+
+// The block being written assembles piece by piece: its edges trace in, the
+// side and top faces slot on, the front fills, the wave draws itself, with
+// sparks around the work. Driven by the engine's progress toward the next
+// sound, or by time while it is still thinking.
+void HomeView::paintConstruction (juce::Graphics& g, juce::Rectangle<float> slot, juce::Colour colour, float progress)
+{
+    const float p = progress < 0.0f ? 0.5f + 0.5f * std::sin (anim * 0.9f) * 0.5f : juce::jlimit (0.0f, 1.0f, progress);
+    const float skew = GardenView::kBlockSkew, depth = 10.0f;
+    auto stepIn = [] (float v, float a, float b) { return juce::jlimit (0.0f, 1.0f, (v - a) / (b - a)); };
+
+    // 1. the front edges trace around (0 .. 0.35)
+    {
+        juce::Path outline;
+        outline.addRoundedRectangle (slot, 4.0f);
+        const float len = outline.getLength() * stepIn (p, 0.0f, 0.35f);
+        juce::Path partial;
+        for (float d = 0.0f; d < len; d += 6.0f)
+        {
+            const auto pt = outline.getPointAlongPath (d);
+            if (d == 0.0f) partial.startNewSubPath (pt); else partial.lineTo (pt);
+        }
+        g.setColour (colour.withAlpha (0.9f));
+        g.strokePath (partial, juce::PathStrokeType (1.6f));
+        if (len > 0.0f && len < outline.getLength())
+        {
+            const auto tip = outline.getPointAlongPath (len);
+            g.setColour (colours::text);
+            g.fillEllipse (tip.x - 3.0f, tip.y - 3.0f, 6.0f, 6.0f);
+        }
+    }
+    // 2. side face slides in from the right, top face drops in (0.3 .. 0.6)
+    {
+        const float t = stepIn (p, 0.3f, 0.6f);
+        if (t > 0.0f)
+        {
+            juce::Path side;
+            const float sx = slot.getRight() + skew * (2.0f - t);
+            side.startNewSubPath (slot.getRight(), slot.getY());
+            side.lineTo (sx, slot.getY() - depth);
+            side.lineTo (sx, slot.getBottom() - depth);
+            side.lineTo (slot.getRight(), slot.getBottom());
+            side.closeSubPath();
+            g.setColour (colour.darker (0.5f).withAlpha (t));
+            g.fillPath (side);
+            juce::Path top;
+            const float ty = slot.getY() - depth * (2.0f - t);
+            top.startNewSubPath (slot.getX(), slot.getY());
+            top.lineTo (slot.getX() + skew, ty);
+            top.lineTo (slot.getRight() + skew, ty);
+            top.lineTo (slot.getRight(), slot.getY());
+            top.closeSubPath();
+            g.setColour (colour.brighter (0.25f).withAlpha (t));
+            g.fillPath (top);
+        }
+    }
+    // 3. the front fills bottom-up (0.5 .. 0.85)
+    {
+        const float t = stepIn (p, 0.5f, 0.85f);
+        if (t > 0.0f)
+        {
+            auto fill = slot.withTrimmedTop (slot.getHeight() * (1.0f - t));
+            g.setColour (colour.withAlpha (0.85f));
+            g.fillRoundedRectangle (fill, 4.0f);
+        }
+    }
+    // 4. the wave draws itself (0.7 .. 1.0)
+    {
+        const float t = stepIn (p, 0.7f, 1.0f);
+        if (t > 0.0f)
+        {
+            juce::Path wave;
+            const float x0 = slot.getX() + 5.0f, x1 = slot.getRight() - 5.0f, cy = slot.getY() + slot.getHeight() * 0.36f, amp = slot.getHeight() * 0.22f;
+            const int steps = 48;
+            for (int i = 0; i <= (int) (steps * t); ++i)
+            {
+                const float u = (float) i / (float) steps;
+                const float x = x0 + (x1 - x0) * u;
+                const float y = cy - amp * (0.7f * std::sin (u * 6.2831853f) + 0.3f * std::sin (u * 18.85f + anim));
+                if (i == 0) wave.startNewSubPath (x, y); else wave.lineTo (x, y);
+            }
+            g.setColour (juce::Colours::white.withAlpha (0.75f));
+            g.strokePath (wave, juce::PathStrokeType (1.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        }
+    }
+    // 5. sparks around the work
+    juce::Random rng (growthSeed + (int) (anim * 6.0f));
+    for (int i = 0; i < 6; ++i)
+    {
+        const float x = slot.getX() - 10.0f + rng.nextFloat() * (slot.getWidth() + 20.0f);
+        const float y = slot.getY() - 16.0f + rng.nextFloat() * (slot.getHeight() + 24.0f);
+        const float sz = 1.5f + rng.nextFloat() * 2.5f;
+        g.setColour (colours::text.withAlpha (0.25f + 0.5f * rng.nextFloat()));
+        g.fillEllipse (x, y, sz, sz);
+    }
 }
 
 } // namespace stacks

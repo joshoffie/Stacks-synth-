@@ -44,21 +44,6 @@ private:
         bool hover = false;
     };
 
-    // One of the five results.
-    class Card : public juce::Component
-    {
-    public:
-        void set (const Patch&, bool selected);
-        void paint (juce::Graphics&) override;
-        void mouseEnter (const juce::MouseEvent&) override { hover = true; repaint(); }
-        void mouseExit (const juce::MouseEvent&) override  { hover = false; repaint(); }
-        void mouseDown (const juce::MouseEvent&) override  { if (onClick) onClick(); }
-        std::unique_ptr<juce::AccessibilityHandler> createAccessibilityHandler() override;
-        std::function<void()> onClick;
-        juce::String name, category, description;
-        bool selected = false, hover = false;
-    };
-
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void timerCallback() override;
     void refresh();
@@ -66,12 +51,15 @@ private:
     void grow();
     void setVariation (float);
     void paintGrowth (juce::Graphics&, juce::Rectangle<float>);
+    void paintConstruction (juce::Graphics&, juce::Rectangle<float> slot, juce::Colour, float progress);   // the block being written
+    void showKindMenu (const juce::String& kind, Tile&);
+    void growFromPreset (const juce::File&);
+    juce::Colour kindColour (const juce::String& kind) const;
 
     StacksAudioProcessor& processor;
     Stage stage = Stage::pick;
     juce::String category, note;
     std::vector<std::unique_ptr<Tile>> tiles;
-    std::vector<std::unique_ptr<Card>> cards;
     juce::TextButton growButton { "Grow from this one" }, backButton { "Start over" }, saveButton { "Save it" }, openSynthButton { "Open the synth" };
     juce::TextButton closeButton { "Close" }, mediumButton { "Medium" }, farButton { "Far" };
     float variation = 0.55f;
@@ -90,11 +78,37 @@ private:
         juce::String name;
     };
     std::vector<Falling> falling;
+    int hoveredBlock = -1;
+
+    // One component per block, so a click (or an accessibility press) lands on exactly one sound.
+    class BlockComp : public juce::Component, public juce::SettableTooltipClient
+    {
+    public:
+        explicit BlockComp (HomeView& o) : owner (o) { setMouseCursor (juce::MouseCursor::PointingHandCursor); }
+        void paint (juce::Graphics&) override;
+        void mouseDown (const juce::MouseEvent&) override { owner.processor.audition (index); }
+        void mouseEnter (const juce::MouseEvent&) override { hovered = true; repaint(); }
+        void mouseExit (const juce::MouseEvent&) override  { hovered = false; repaint(); }
+        std::unique_ptr<juce::AccessibilityHandler> createAccessibilityHandler() override;
+        HomeView& owner;
+        int index = 0;
+        juce::Rectangle<float> face;   // in this component's space
+        GardenView::Style style;
+        juce::String name;
+        float alpha = 1.0f;
+        bool selected = false, hovered = false;
+    };
+    std::vector<std::unique_ptr<BlockComp>> blockComps;
+    void placeBlocks();
+    juce::Rectangle<float> stackArea() const;
+    juce::Rectangle<float> faceOf (const Falling&, juce::Rectangle<float> area) const;
+    void syncBlocks (bool settled);   // one block per sound; new ones fall in, or sit when `settled`
+    void stepPhysics (float dt);
     GardenView::Style seedStyle;
     juce::String seedName;
     juce::Rectangle<float> slotFor (int index, juce::Rectangle<float> area) const;
-    float blockWidth (juce::Rectangle<float> area) const  { return juce::jmin (180.0f, (area.getWidth() - 3.0f * 14.0f) / 4.0f); }
-    float blockHeight (juce::Rectangle<float> area) const { return juce::jmin (90.0f, blockWidth (area) * 0.6f); }
+    float blockWidth (juce::Rectangle<float> area) const  { return juce::jmin (230.0f, (area.getWidth() - 3.0f * 16.0f) / 4.0f); }
+    float blockHeight (juce::Rectangle<float> area) const { return juce::jlimit (60.0f, 130.0f, juce::jmin (blockWidth (area) * 0.6f, (area.getHeight() - 60.0f) / 2.4f)); }
 };
 
 } // namespace stacks

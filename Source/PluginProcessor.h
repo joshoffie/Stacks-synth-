@@ -190,6 +190,7 @@ public:
     bool previewOnClick() const                            { return previewClicks; }
     void setPreviewOnClick (bool);
     void playPreview (const Patch&);                       // queues the phrase for the audio thread
+    void hardCut()                                         { hardCutPending.store (true, std::memory_order_release); }   // kill voices and tails now
 
     // The sample oscillator's file: copied into ~/Music/Stacks Patches/Samples, stored with the patch.
     const SampleBank& sampleBank() const                   { return samples; }
@@ -328,6 +329,7 @@ private:
     struct PreviewPhrase { int notes[3] { -1, -1, -1 }; int lengthSamples = 0; };
     PreviewPhrase previewRequest;                          // message thread writes, then sets previewPending
     std::atomic<bool> previewPending { false };
+    std::atomic<bool> hardCutPending { false };            // a new sound was picked: silence the old one at the next block
     int previewNotes[3] { -1, -1, -1 };                    // audio thread: what is sounding now
     int previewRootNote = 60;                               // C by default; a song's key after song mode
     int previewRemaining = 0;
