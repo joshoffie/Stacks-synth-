@@ -1479,8 +1479,10 @@ static int buildFactory (int perPrompt, int firstPrompt = 0)
     std::set<juce::String> names;
     int written = 0;
     const double t0 = juce::Time::getMillisecondCounterHiRes();
+    int promptIndex = -1;
     for (auto* prompt : prompts)
     {
+        if (++promptIndex < firstPrompt) continue;   // a later run can pick up where the briefs grew
         GenerationRequest r;
         r.count = juce::jmax (1, perPrompt + 1);   // one spare for the curation to drop
         r.hint = prompt;
@@ -1532,7 +1534,7 @@ int main (int argc, char** argv)
     if (argc > 1 && juce::String (argv[1]) == "--retouch")
         return retouchFactory();
     if (argc > 1 && juce::String (argv[1]) == "--factory")
-        return buildFactory (argc > 2 ? juce::jlimit (1, 4, juce::String (argv[2]).getIntValue()) : 2);
+        return buildFactory (argc > 2 ? juce::jlimit (1, 4, juce::String (argv[2]).getIntValue()) : 2, argc > 3 ? juce::String (argv[3]).getIntValue() : 0);
     if (argc > 1 && juce::String (argv[1]) == "--bench")
         return benchmark (argc > 2 ? juce::String::fromUTF8 (argv[2]) : juce::String ("unlabelled"));
     if (argc > 1 && juce::String (argv[1]) == "--live")
