@@ -14,16 +14,32 @@ juce::File ModelManager::modelsDirectory()
     return appDataDirectory().getChildFile ("models");
 }
 
+// The installer puts the engine data where every account can read it; a copy
+// the user downloaded themselves (or dropped in) wins.
+juce::File ModelManager::sharedModelsDirectory()
+{
+    return juce::File::getSpecialLocation (juce::File::commonApplicationDataDirectory)
+               .getChildFile ("Application Support").getChildFile ("Stacks").getChildFile ("models");
+}
+
+juce::File ModelManager::locateModelFile (const juce::String& fileName)
+{
+    const auto mine = modelsDirectory().getChildFile (fileName);
+    if (mine.existsAsFile()) return mine;
+    const auto shared = sharedModelsDirectory().getChildFile (fileName);
+    if (shared.existsAsFile()) return shared;
+    return mine;   // where a download would land
+}
+
 std::vector<ModelInfo> ModelManager::builtInCatalogue()
 {
-    const auto dir = modelsDirectory();
     std::vector<ModelInfo> list;
 
     auto add = [&] (const char* id, const char* label, const char* note, const char* url, juce::int64 bytes, const char* fileName)
     {
         ModelInfo m;
         m.id = id; m.label = label; m.note = note; m.url = url; m.bytes = bytes;
-        m.file = dir.getChildFile (fileName);
+        m.file = locateModelFile (fileName);
         list.push_back (m);
     };
 

@@ -1264,19 +1264,18 @@ bool StacksAudioProcessor::startModelDownload (const ModelInfo& chosen)
 
     downloader = std::make_unique<ModelDownloader>();
     lastDownloadPercent = -1;
-    const auto label = info->label;
 
-    downloader->onProgress = [this, label] (juce::int64 done, juce::int64 total)
+    downloader->onProgress = [this] (juce::int64 done, juce::int64 total)
     {
         const int percent = total > 0 ? (int) (done * 100 / total) : 0;
         if (percent == lastDownloadPercent)
             return;
         lastDownloadPercent = percent;
-        labState.status = "Downloading " + label + "... " + juce::String (percent) + "%  ("
+        labState.status = "Downloading the sound engine... " + juce::String (percent) + "%  ("
                         + juce::String (done / 1000000) + " of " + juce::String (total / 1000000) + " MB)";
         labBroadcaster.sendChangeMessage();
     };
-    downloader->onFinished = [this, label, modelId] (bool ok, const juce::String& error)
+    downloader->onFinished = [this, modelId] (bool ok, const juce::String& error)
     {
         if (ok && modelId.startsWith ("file:"))
             ModelManager::addCustomModel (juce::File (modelId.fromFirstOccurrenceOf ("file:", false, false)));
@@ -1284,7 +1283,7 @@ bool StacksAudioProcessor::startModelDownload (const ModelInfo& chosen)
         if (ok)
         {
             setEngine ({ EngineKind::Builtin, modelId });
-            labState.status = label + " installed and selected";
+            labState.status = "Sound engine installed";
             if (pendingRequest)
             {
                 auto request = *pendingRequest;
@@ -1296,7 +1295,7 @@ bool StacksAudioProcessor::startModelDownload (const ModelInfo& chosen)
         }
         else
         {
-            labState.status = "Download of " + label + " failed: " + error;
+            labState.status = "Download failed: " + error;
         }
         labBroadcaster.sendChangeMessage();
     };
@@ -1304,13 +1303,13 @@ bool StacksAudioProcessor::startModelDownload (const ModelInfo& chosen)
     juce::String error;
     if (! downloader->start (*info, error))
     {
-        labState.status = "Could not download " + label + ": " + error;
+        labState.status = "Could not download the sound engine: " + error;
         downloader.reset();
         labBroadcaster.sendChangeMessage();
         return false;
     }
 
-    labState.status = "Downloading " + label + "...";
+    labState.status = "Downloading the sound engine...";
     labBroadcaster.sendChangeMessage();
     return true;
 }
@@ -1319,9 +1318,8 @@ void StacksAudioProcessor::cancelDownload()
 {
     if (! isDownloading())
         return;
-    const auto label = downloader->model().label;
     downloader.reset();
-    labState.status = "Download of " + label + " cancelled";
+    labState.status = "Download cancelled";
     labBroadcaster.sendChangeMessage();
 }
 
@@ -1421,9 +1419,9 @@ void StacksAudioProcessor::startGeneration (GenerationRequest req)
         {
             pendingRequest = req;
             if (isDownloading())
-                labState.status = "Still downloading " + info->label + " - your request runs when it lands";
+                labState.status = "Still downloading the sound engine - your request runs when it lands";
             else if (startModelDownload (engineChoice.model))
-                labState.status = "Downloading " + info->label + " first (" + juce::String (info->bytes / 1000000) + " MB) - your request runs when it lands";
+                labState.status = "Downloading the sound engine first (" + juce::String (info->bytes / 1000000) + " MB) - your request runs when it lands";
             labBroadcaster.sendChangeMessage();
             return;
         }
@@ -1686,7 +1684,7 @@ void StacksAudioProcessor::quickTweak (const juce::String& request)
     auto backend = activeBackend;
     if (backend == nullptr || labState.generating)
     {
-        labState.status = backend == nullptr ? "Try words like brighter, darker, wider, shorter, punchier, more reverb (or pick an AI model in Settings for anything else)"
+        labState.status = backend == nullptr ? "Try words like brighter, darker, wider, shorter, punchier, more reverb"
                                              : "Wait for the batch to finish, then tweak";
         labState.tweakedParams.clear();
         ++labState.tweakSerial;
@@ -1696,7 +1694,7 @@ void StacksAudioProcessor::quickTweak (const juce::String& request)
 
     const int token = ++tweakToken;
     labState.tweaking = true;
-    labState.status = "Tweaking with " + backend->modelName() + "...";
+    labState.status = "Tweaking...";
     labBroadcaster.sendChangeMessage();
 
     juce::WeakReference<StacksAudioProcessor> weak (this);
@@ -1721,7 +1719,7 @@ void StacksAudioProcessor::quickTweak (const juce::String& request)
                 self->applyTweak (modelChanges, "\"" + request.trim() + "\": " + modelSummary);
             else
             {
-                self->labState.status = error.isNotEmpty() ? "Tweak failed: " + error : "The model had no change for that - try other words";
+                self->labState.status = error.isNotEmpty() ? "Tweak failed: " + error : "No change for that - try other words";
                 self->labState.tweakedParams.clear();
                 ++self->labState.tweakSerial;
                 self->labBroadcaster.sendChangeMessage();

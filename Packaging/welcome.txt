@@ -1,0 +1,9 @@
+Stacks is a wavetable synth that designs its own sounds.
+
+Pick a kind of sound on the Home screen (Pad, Keys, Bass, Lead, Pluck, Bell, Texture) and Stacks grows five new ones for you. Grow the one you like, save it, or open the full synth to shape it yourself.
+
+This installer puts the Audio Unit and VST3 plug-ins in your system plug-in folders, the Stacks app in Applications, and the sound engine data (about 2.5 GB) in Library/Application Support/Stacks.
+
+After installing, open your DAW and look for Stacks under Hoffman Audio. Logic Pro and GarageBand may need a rescan: Logic Pro > Settings > Plug-in Manager, then Reset & Rescan Selection, or simply restart the DAW.
+
+Requirements: macOS 12 or later, Apple silicon or Intel, 8 GB of memory (16 GB recommended).

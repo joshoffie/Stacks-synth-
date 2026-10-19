@@ -6,3 +6,4 @@ compile_commands.json
 .cache/
 # Downloaded AI model weights (large) — fetched on first run, never committed.
 models/
+dist/

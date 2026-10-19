@@ -29,6 +29,8 @@ class ModelManager
 public:
     static juce::File appDataDirectory();   // ~/Library/Application Support/Stacks
     static juce::File modelsDirectory();    // .../Stacks/models
+    static juce::File sharedModelsDirectory();   // /Library/Application Support/Stacks/models (the installer's copy)
+    static juce::File locateModelFile (const juce::String& fileName);   // the user's copy, else the shared one
 
     // Download catalogue plus detected Ollama copies, `installed` refreshed.
     static std::vector<ModelInfo> catalogue();

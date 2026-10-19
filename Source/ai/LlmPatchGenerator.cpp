@@ -331,7 +331,7 @@ LlmPatchGenerator::LlmPatchGenerator (std::shared_ptr<LlmBackend> b, std::shared
 
 juce::String LlmPatchGenerator::name() const
 {
-    return backend->name() + " " + backend->modelName();
+    return "Designer";   // the player never sees what runs underneath
 }
 
 juce::String LlmPatchGenerator::systemPrompt (bool designWaves)

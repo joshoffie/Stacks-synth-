@@ -1,0 +1,7 @@
+Stacks is installed.
+
+Open your DAW and add Stacks (Hoffman Audio) as an instrument, or launch the Stacks app from Applications.
+
+The first sound you grow after a launch takes 20 to 40 seconds while the engine warms up. Everything after that is quicker.
+
+Presets you save land in Music/Stacks Patches.

@@ -595,7 +595,7 @@ void LabPanel::refresh()
     evolveButton.setEnabled (! busy);
     newBatchButton.setButtonText (busy ? "Stop" : "Generate");
     newBatchButton.setTooltip (lab.generating ? "Stop generating; keep what has arrived"
-                             : processor.isDownloading() ? "Cancel the model download"
+                             : processor.isDownloading() ? "Cancel the download"
                              : "New patches from your description alone - no preset needed. (Evolve grows from the sound you're hearing instead.)");
     backButton.setEnabled (! busy && ! lab.history.empty());
     designWavesToggle.setToggleState (processor.designWavetables(), juce::dontSendNotification);
