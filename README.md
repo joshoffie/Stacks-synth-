@@ -284,6 +284,8 @@ UI. Any subset of these keys, hex `rrggbb` or `aarrggbb`:
 
 ## Giving it to friends
 
+The step-by-step release checklist is in `Packaging/RELEASING.md`.
+
 `Packaging/build-installer.sh` builds `dist/Stacks-<version>.pkg`: one
 installer with the Audio Unit, the VST3, the standalone app and the sound
 engine data (the 2.5 GB GGUF, installed to
