@@ -1,4 +1,5 @@
 #include "PluginEditor.h"
+#include "Skin.h"
 
 namespace stacks
 {
@@ -22,6 +23,7 @@ StacksAudioProcessorEditor::StacksAudioProcessorEditor (StacksAudioProcessor& p)
       homeView (p),
       keyboard (p.keyboardState)
 {
+    skin::load();   // PNG pieces replace the drawn look wherever a file exists (see Design/Skin spec.md)
     setLookAndFeel (&lookAndFeel);
 
     patchName.setFont (StacksLookAndFeel::font (15.0f, true));
@@ -123,6 +125,8 @@ bool StacksAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
 void StacksAudioProcessorEditor::paint (juce::Graphics& g)
 {
     g.fillAll (colours::background);
+    if (skin::has ("background")) skin::drawStretched (g, "background", getLocalBounds().toFloat());
+    if (skin::has ("header"))     skin::drawStretched (g, "header", headerBounds.toFloat());
 
     // Header: the wordmark, and a hairline under the whole strip.
     auto h = headerBounds;
@@ -132,8 +136,11 @@ void StacksAudioProcessorEditor::paint (juce::Graphics& g)
     g.drawText ("STACKS", logo, juce::Justification::centredLeft);
     g.setColour (colours::accent);
     g.fillEllipse ((float) logo.getX() + 88.0f, (float) logo.getCentreY() - 1.5f + 4.0f, 4.0f, 4.0f);   // the dot after the name
-    g.setColour (juce::Colours::white.withAlpha (0.06f));
-    g.fillRect (headerBounds.getX(), headerBounds.getBottom(), headerBounds.getWidth(), 1);
+    if (! skin::has ("header"))
+    {
+        g.setColour (juce::Colours::white.withAlpha (0.06f));
+        g.fillRect (headerBounds.getX(), headerBounds.getBottom(), headerBounds.getWidth(), 1);
+    }
 }
 
 void StacksAudioProcessorEditor::resized()

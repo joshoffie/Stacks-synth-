@@ -92,10 +92,14 @@ target_include_directories(Stacks PRIVATE ThirdParty/MTS-ESP)   # ODDSound MTS-E
 # The factory presets travel inside every bundle and are installed into the
 # library on first run. Resources must go on the format targets (the bundles);
 # on the shared-code library they are silently dropped.
-if(APPLE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Factory")
-    foreach(fmt IN ITEMS Standalone AU VST3)
-        if(TARGET Stacks_${fmt})
-            juce_add_bundle_resources_directory(Stacks_${fmt} Factory)
+if(APPLE)
+    foreach(resdir IN ITEMS Factory Skin)
+        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${resdir}")
+            foreach(fmt IN ITEMS Standalone AU VST3)
+                if(TARGET Stacks_${fmt})
+                    juce_add_bundle_resources_directory(Stacks_${fmt} ${resdir})
+                endif()
+            endforeach()
         endif()
     endforeach()
 endif()
@@ -145,6 +149,7 @@ set(STACKS_SOURCES
     Source/PluginEditor.cpp
     Source/Controls.cpp
     Source/StacksLookAndFeel.cpp
+    Source/Skin.cpp
     Source/Displays.cpp
     Source/SettingsPanel.cpp
     Source/TreeView.cpp

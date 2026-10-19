@@ -1,4 +1,5 @@
 #include "SynthPanel.h"
+#include "Skin.h"
 #include <algorithm>
 #include "Displays.h"
 #include "StacksLookAndFeel.h"
@@ -412,6 +413,11 @@ public:
             const int e = SynthPanel::effectIndexFor (row.sections[(size_t) i + 1]->title);
             const bool on = e < 0 || panel.apvts.getRawParameterValue (paramId (fxOnParam (e)))->load() > 0.5f;
             const float y = gapRect.getCentreY();
+            if (skin::has ("link-on"))
+            {
+                skin::drawTinted (g, on || ! skin::has ("link-off") ? "link-on" : "link-off", juce::Rectangle<float> (gapRect.getWidth(), 14.0f).withCentre ({ gapRect.getCentreX(), y }), on ? row.colour : colours::muted);
+                continue;
+            }
             const float x0 = gapRect.getX() + 1.0f, x1 = gapRect.getRight() - 1.0f;
             g.setColour (on ? row.colour.withAlpha (0.9f) : colours::muted.withAlpha (0.6f));
             if (on)

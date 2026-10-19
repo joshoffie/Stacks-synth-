@@ -1,4 +1,5 @@
 #include "HomeView.h"
+#include "Skin.h"
 #include "StacksLookAndFeel.h"
 
 namespace stacks
@@ -39,6 +40,30 @@ HomeView::Tile::Tile (const juce::String& n, const juce::String& b, juce::Colour
 void HomeView::Tile::paint (juce::Graphics& g)
 {
     auto r = getLocalBounds().toFloat().reduced (2.0f);
+    paintTileFace (g, r, colour, hover, name);
+    g.setColour (colours::text);
+    g.setFont (StacksLookAndFeel::font (22.0f, true));
+    g.drawText (name, r.reduced (16.0f).withTrimmedTop (28.0f), juce::Justification::topLeft);
+    g.setColour (colours::muted);
+    g.setFont (StacksLookAndFeel::font (12.5f));
+    g.drawFittedText (blurb, r.reduced (16.0f).withTrimmedTop (58.0f).toNearestInt(), juce::Justification::topLeft, 2);
+}
+
+// The tile without its words: a skin paints it in white and the kind's colour tints it.
+void HomeView::paintTileFace (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour colour, bool hover, const juce::String& kind)
+{
+    // "tile-pad" (exact, per kind) wins over "tile" (painted white, tinted with the kind's colour).
+    const auto exact = "tile-" + kind.toLowerCase();
+    if (kind.isNotEmpty() && skin::has (exact))
+    {
+        skin::drawStretched (g, hover && skin::has (exact + "-hover") ? exact + "-hover" : exact, r);
+        return;
+    }
+    if (skin::has ("tile"))
+    {
+        skin::drawTinted (g, hover && skin::has ("tile-hover") ? "tile-hover" : "tile", r, colour);
+        return;
+    }
     // A soft shadow, a graphite gradient, a tint of the kind's colour in the corner, a glow when hovered.
     g.setColour (juce::Colours::black.withAlpha (0.35f));
     g.fillRoundedRectangle (r.translated (0.0f, 3.0f), 12.0f);
@@ -59,12 +84,6 @@ void HomeView::Tile::paint (juce::Graphics& g)
         g.setColour (colour.withAlpha (0.35f));
         g.fillEllipse (r.getX() + 11.0f, r.getY() + 11.0f, 20.0f, 20.0f);
     }
-    g.setColour (colours::text);
-    g.setFont (StacksLookAndFeel::font (22.0f, true));
-    g.drawText (name, r.reduced (16.0f).withTrimmedTop (28.0f), juce::Justification::topLeft);
-    g.setColour (colours::muted);
-    g.setFont (StacksLookAndFeel::font (12.5f));
-    g.drawFittedText (blurb, r.reduced (16.0f).withTrimmedTop (58.0f).toNearestInt(), juce::Justification::topLeft, 2);
 }
 
 std::unique_ptr<juce::AccessibilityHandler> HomeView::Tile::createAccessibilityHandler()

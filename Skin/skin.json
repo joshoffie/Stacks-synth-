@@ -1,0 +1,10 @@
+{
+  "scale": 2,
+  "knobArc": true,
+  "slices": {
+    "card": [10, 10, 10, 10], "inset": [8, 8, 8, 8], "lab": [12, 12, 12, 12], "popup": [10, 10, 10, 10],
+    "button": [8, 8, 8, 8], "button-hover": [8, 8, 8, 8], "button-down": [8, 8, 8, 8], "button-on": [8, 8, 8, 8], "button-bright": [8, 8, 8, 8],
+    "tab-on": [8, 8, 8, 8], "tab-hover": [8, 8, 8, 8], "combo": [8, 8, 20, 8], "texteditor": [8, 8, 8, 8],
+    "slider-track": [6, 0, 6, 0], "slider-fill": [6, 0, 6, 0], "scrollbar-thumb": [4, 4, 4, 4]
+  }
+}

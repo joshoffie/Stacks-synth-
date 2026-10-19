@@ -23,6 +23,16 @@ public:
     static void drawCard (juce::Graphics&, juce::Rectangle<float>, float corner = 6.0f);
     static void drawInset (juce::Graphics&, juce::Rectangle<float>, float corner = 4.0f);
 
+    // The knob in two layers, so a skin can replace the body (cap + pointer)
+    // and keep the coloured arc, or the other way round. `bounds` is the whole
+    // slider area; the margin is taken inside. Angles as JUCE's rotary slider.
+    static void drawKnobBody (juce::Graphics&, juce::Rectangle<float> bounds, float angle, bool enabled, juce::Colour fill);
+    static void drawKnobArc (juce::Graphics&, juce::Rectangle<float> bounds, float startAngle, float endAngle, float angle, float zeroAngle, bool enabled, juce::Colour fill);
+    // Background pieces drawn by code when the skin has no image for them.
+    static void drawButtonFace (juce::Graphics&, juce::Rectangle<float>, juce::Colour base, bool on, bool highlighted, bool down);
+    static void drawToggleBox (juce::Graphics&, juce::Rectangle<float> box, bool on, bool highlighted, juce::Colour tick);
+    static void drawComboFace (juce::Graphics&, juce::Rectangle<float>, juce::Colour background, bool enabled, juce::Colour arrow);
+
     juce::Typeface::Ptr getTypefaceForFont (const juce::Font&) override;
     juce::Font getLabelFont (juce::Label&) override;
     juce::Font getTextButtonFont (juce::TextButton&, int buttonHeight) override;

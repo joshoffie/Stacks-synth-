@@ -1,4 +1,5 @@
 #include "Controls.h"
+#include "Skin.h"
 #include "StacksLookAndFeel.h"
 
 namespace stacks
@@ -527,9 +528,13 @@ void StacksKeyboard::resized()
     juce::MidiKeyboardComponent::resized();
 }
 
-void StacksKeyboard::drawWhiteNote (int midiNoteNumber, juce::Graphics& g, juce::Rectangle<float> area, bool isDown, bool isOver,
-                                    juce::Colour, juce::Colour)
+void StacksKeyboard::paintWhiteKey (juce::Graphics& g, juce::Rectangle<float> area, bool isDown, bool isOver)
 {
+    if (skin::has ("key-white"))
+    {
+        skin::drawStretched (g, isDown && skin::has ("key-white-down") ? "key-white-down" : isOver && skin::has ("key-white-hover") ? "key-white-hover" : "key-white", area);
+        return;
+    }
     auto key = area.reduced (0.5f, 0.0f).withTrimmedBottom (1.0f);
     juce::Colour top (0xffe4e6ea), bottom (0xffc9ccd2);
     if (isDown)      { top = colours::accent.brighter (0.2f); bottom = colours::accent; }
@@ -539,7 +544,31 @@ void StacksKeyboard::drawWhiteNote (int midiNoteNumber, juce::Graphics& g, juce:
     g.fillRoundedRectangle (key, 2.0f);
     g.setColour (juce::Colours::black.withAlpha (0.35f));
     g.drawLine (key.getRight(), key.getY(), key.getRight(), key.getBottom(), 1.0f);
+}
 
+void StacksKeyboard::paintBlackKey (juce::Graphics& g, juce::Rectangle<float> area, bool isDown, bool isOver)
+{
+    if (skin::has ("key-black"))
+    {
+        skin::drawStretched (g, isDown && skin::has ("key-black-down") ? "key-black-down" : isOver && skin::has ("key-black-hover") ? "key-black-hover" : "key-black", area);
+        return;
+    }
+    auto key = area.reduced (0.5f, 0.0f);
+    juce::Colour top (0xff33373d), bottom (0xff15171a);
+    if (isDown)      { top = colours::accent; bottom = colours::accent.darker (0.4f); }
+    else if (isOver) { top = juce::Colour (0xff454a52); bottom = juce::Colour (0xff22252a); }
+    g.setColour (juce::Colour (0xff0b0c0e));
+    g.fillRoundedRectangle (key, 2.0f);
+    juce::ColourGradient grad (top, 0.0f, key.getY(), bottom, 0.0f, key.getBottom(), false);
+    g.setGradientFill (grad);
+    g.fillRoundedRectangle (key.reduced (1.0f, 0.0f).withTrimmedBottom (2.0f), 1.5f);
+}
+
+void StacksKeyboard::drawWhiteNote (int midiNoteNumber, juce::Graphics& g, juce::Rectangle<float> area, bool isDown, bool isOver,
+                                    juce::Colour, juce::Colour)
+{
+    paintWhiteKey (g, area, isDown, isOver);
+    const auto key = area.reduced (0.5f, 0.0f).withTrimmedBottom (1.0f);
     const auto text = getWhiteNoteText (midiNoteNumber);
     if (text.isNotEmpty())
     {
@@ -551,15 +580,7 @@ void StacksKeyboard::drawWhiteNote (int midiNoteNumber, juce::Graphics& g, juce:
 
 void StacksKeyboard::drawBlackNote (int, juce::Graphics& g, juce::Rectangle<float> area, bool isDown, bool isOver, juce::Colour)
 {
-    auto key = area.reduced (0.5f, 0.0f);
-    juce::Colour top (0xff33373d), bottom (0xff15171a);
-    if (isDown)      { top = colours::accent; bottom = colours::accent.darker (0.4f); }
-    else if (isOver) { top = juce::Colour (0xff454a52); bottom = juce::Colour (0xff22252a); }
-    g.setColour (juce::Colour (0xff0b0c0e));
-    g.fillRoundedRectangle (key, 2.0f);
-    juce::ColourGradient grad (top, 0.0f, key.getY(), bottom, 0.0f, key.getBottom(), false);
-    g.setGradientFill (grad);
-    g.fillRoundedRectangle (key.reduced (1.0f, 0.0f).withTrimmedBottom (2.0f), 1.5f);
+    paintBlackKey (g, area, isDown, isOver);
 }
 
 juce::String StacksKeyboard::getWhiteNoteText (int midiNoteNumber)

@@ -1,4 +1,5 @@
 #include "LabPanel.h"
+#include "Skin.h"
 #include "PatchGenerator.h"
 #include "Controls.h" // colours
 #include "StacksLookAndFeel.h"
@@ -405,6 +406,7 @@ void LabPanel::recreateFromAudio (const juce::File& file)
 
 void LabPanel::paint (juce::Graphics& g)
 {
+    if (skin::has ("lab")) { skin::drawNine (g, "lab", getLocalBounds().toFloat(), 12.0f); return; }
     g.setColour (colours::panel);
     g.fillRoundedRectangle (getLocalBounds().toFloat(), 7.0f);
     g.setColour (juce::Colours::white.withAlpha (0.04f));

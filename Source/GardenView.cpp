@@ -1,4 +1,5 @@
 #include "GardenView.h"
+#include "Skin.h"
 #include "PatchGenerator.h"
 #include "Controls.h"
 #include "StacksLookAndFeel.h"
@@ -147,6 +148,15 @@ void GardenView::paintBlock (juce::Graphics& g, juce::Rectangle<float> f, const 
                 g.drawRoundedRectangle (f.translated (6.0f * (float) k, 4.0f * (float) k), s.corner, 1.2f);
             }
 
+        // A skinned block: one image covering the front, top and side faces, painted
+        // white and tinted with the sound's colour. The sound's markings go on top.
+        if (skin::has ("block"))
+        {
+            skin::drawTinted (g, auditioned && skin::has ("block-selected") ? "block-selected" : "block",
+                              f.withTop (f.getY() - s.depth).withRight (f.getRight() + s.depth), colour);
+        }
+        else
+        {
         // A shadow under the block, then the side and top faces, then the front.
         g.setColour (juce::Colours::black.withAlpha (0.28f));
         g.fillRoundedRectangle (f.translated (3.0f, 4.0f).expanded (1.0f), s.corner + 1.0f);
@@ -157,6 +167,7 @@ void GardenView::paintBlock (juce::Graphics& g, juce::Rectangle<float> f, const 
         juce::ColourGradient front (colour.brighter (0.08f), f.getX(), f.getY(), colour.darker (0.12f), f.getX(), f.getBottom(), false);
         g.setGradientFill (front);
         g.fillRoundedRectangle (f, s.corner);
+        }
 
         // Distortion: a serrated top edge.
         if (s.serrated)
@@ -548,14 +559,19 @@ void GardenView::paint (juce::Graphics& g)
             g.setGradientFill (grad);
             g.fillEllipse (halo);
         }
-        g.setColour (colour.darker (0.5f));
-        g.fillPath (sideFace (slab, kSlabDepth));
-        g.setColour (colour.brighter (0.25f));
-        g.fillPath (topFace (slab, kSlabDepth));
-        g.setColour (colour);
-        g.fillRoundedRectangle (slab, 3.0f);
-        g.setColour (seedStyled ? colours::text.withAlpha (0.35f) : colours::accent.withAlpha (0.7f));
-        g.drawRoundedRectangle (slab.expanded (0.5f), 3.0f, 1.0f);
+        if (skin::has ("slab"))
+            skin::drawTinted (g, "slab", slab.withTop (slab.getY() - kSlabDepth).withRight (slab.getRight() + kSlabDepth), colour);
+        else
+        {
+            g.setColour (colour.darker (0.5f));
+            g.fillPath (sideFace (slab, kSlabDepth));
+            g.setColour (colour.brighter (0.25f));
+            g.fillPath (topFace (slab, kSlabDepth));
+            g.setColour (colour);
+            g.fillRoundedRectangle (slab, 3.0f);
+            g.setColour (seedStyled ? colours::text.withAlpha (0.35f) : colours::accent.withAlpha (0.7f));
+            g.drawRoundedRectangle (slab.expanded (0.5f), 3.0f, 1.0f);
+        }
 
         const bool lightFace = colour.getPerceivedBrightness() > 0.62f;
         g.setColour (lightFace ? juce::Colours::black.withAlpha (0.85f) : colours::text);

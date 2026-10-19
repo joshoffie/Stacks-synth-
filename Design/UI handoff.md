@@ -20,31 +20,24 @@ and can be handed over:
 
 ## What to send back
 
-Any of these go straight in, in order of how little work they need:
+Stacks now loads its look from PNG files. The folder `skin/` in this kit is
+the current look exported as those files: every knob, button, card, tile and
+key, at 2x. **Open them in Photoshop, repaint, export with the same names and
+sizes, send the folder back.** It drops straight in; anything you don't change
+keeps the current look. `Skin spec.md` lists every file with its size, frame
+count and stretch margins.
 
-1. **`theme.json`** — new colours for the tokens below. Drop-in; nothing else
-   changes. Hex `rrggbb` or `aarrggbb`, any subset of keys.
-2. **Mockups per screen**, PNG or Figma, at **1500 x 860** (or 3000 x 1720 for
-   2x). Keep the same screen set and names as `screens/` so each mockup maps
-   to a screen. The drawing code is then rewritten to match: knob shape,
-   card shape, strokes, shadows, spacing, type sizes. Measurements are taken
-   from the mockup, so build it to pixel sizes, not loosely.
-3. **SVG for shapes** (optional, if you prefer to draw rather than describe):
-   one SVG per control state, artboard the size of the control, named like
-   `knob-idle.svg`, `knob-hover.svg`, `knob-modulated.svg`,
-   `switch-on.svg`, `switch-off.svg`, `combo.svg`, `tab-active.svg`,
-   `button.svg`, `button-bright.svg`, `card.svg`, `link-on.svg`,
-   `link-off.svg`, `tile.svg`, `block.svg`. These are used as the exact
-   reference for the code (and an SVG loader can be added so they are read at
-   runtime if iterating as files is preferred).
+Also useful, but optional:
 
-What cannot be delivered as files: layout logic, animation (the blocks falling
-onto the slab, the construction animation while a sound grows), and anything
-that reacts to the sound. Describe those in words or a short video and they are
-built to match.
+- A `theme.json` with new colours for the tokens below (text, arcs, accents
+  and anything still drawn by code follow it).
+- Full-screen mockups at 3000 x 1720 so the spacing and type can be matched.
 
-Keep the window at **1500 x 860** unless there is a reason to change it; the
-plug-in is fixed-size.
+What stays code-drawn and is matched from mockups: text, the live displays
+(wavetable, filter curve, envelopes, LFO, scope, spectrum, tuner), the coloured
+value arcs on knobs, layout spacing and the animations.
+
+Keep the window at **1500 x 860**; the plug-in is fixed-size.
 
 ## Colour tokens
 

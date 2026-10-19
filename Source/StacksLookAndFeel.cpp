@@ -1,5 +1,6 @@
 #include "StacksLookAndFeel.h"
 #include "Controls.h"
+#include "Skin.h"
 
 namespace stacks
 {
@@ -88,6 +89,7 @@ juce::Font StacksLookAndFeel::font (float height, bool isBold)
 
 void StacksLookAndFeel::drawCard (juce::Graphics& g, juce::Rectangle<float> r, float corner)
 {
+    if (skin::has ("card")) { skin::drawNine (g, "card", r, 10.0f); return; }
     g.setColour (colours::card);
     g.fillRoundedRectangle (r, corner);
     g.setColour (juce::Colours::white.withAlpha (0.045f));
@@ -96,6 +98,7 @@ void StacksLookAndFeel::drawCard (juce::Graphics& g, juce::Rectangle<float> r, f
 
 void StacksLookAndFeel::drawInset (juce::Graphics& g, juce::Rectangle<float> r, float corner)
 {
+    if (skin::has ("inset")) { skin::drawNine (g, "inset", r, 8.0f); return; }
     g.setColour (colours::background);
     g.fillRoundedRectangle (r, corner);
     g.setColour (juce::Colours::black.withAlpha (0.35f));
@@ -122,22 +125,15 @@ juce::Font StacksLookAndFeel::getAlertWindowMessageFont()                 { retu
 juce::Font StacksLookAndFeel::getAlertWindowTitleFont()                   { return font (16.0f, true); }
 
 //==============================================================================
-void StacksLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int width, int height, float sliderPos,
-                                          float startAngle, float endAngle, juce::Slider& slider)
+void StacksLookAndFeel::drawKnobArc (juce::Graphics& g, juce::Rectangle<float> sliderBounds, float startAngle, float endAngle, float angle, float zeroAngle, bool enabled, juce::Colour fill)
 {
-    const auto bounds = juce::Rectangle<int> (x, y, width, height).toFloat().reduced (kKnobMargin);
+    const auto bounds = sliderBounds.reduced (kKnobMargin);
     const float radius = juce::jmin (bounds.getWidth(), bounds.getHeight()) * 0.5f;
     if (radius < 4.0f)
         return;
     const auto centre = bounds.getCentre();
     const float arcW = juce::jlimit (2.0f, 5.0f, radius * 0.13f);
     const float arcRadius = radius - arcW * 0.5f;
-    const float angle = startAngle + sliderPos * (endAngle - startAngle);
-    const auto fill = slider.findColour (juce::Slider::rotarySliderFillColourId);
-    const bool enabled = slider.isEnabled();
-    const bool bipolar = slider.getMinimum() < 0.0 && slider.getMaximum() > 0.0;
-    const float zeroPos = bipolar ? (float) slider.valueToProportionOfLength (0.0) : 0.0f;
-    const float zeroAngle = startAngle + zeroPos * (endAngle - startAngle);
 
     // Track
     juce::Path track;
@@ -155,6 +151,17 @@ void StacksLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int w
         g.setColour (enabled ? fill : fill.withAlpha (0.4f));
         g.strokePath (value, juce::PathStrokeType (arcW, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     }
+}
+
+void StacksLookAndFeel::drawKnobBody (juce::Graphics& g, juce::Rectangle<float> sliderBounds, float angle, bool enabled, juce::Colour fill)
+{
+    const auto bounds = sliderBounds.reduced (kKnobMargin);
+    const float radius = juce::jmin (bounds.getWidth(), bounds.getHeight()) * 0.5f;
+    if (radius < 4.0f)
+        return;
+    const auto centre = bounds.getCentre();
+    const float arcW = juce::jlimit (2.0f, 5.0f, radius * 0.13f);
+    const float arcRadius = radius - arcW * 0.5f;
 
     // Cap: a flat disc with a faint top light and a dark rim
     const float capRadius = juce::jmax (3.0f, arcRadius - arcW * 0.5f - 3.0f);
@@ -177,6 +184,30 @@ void StacksLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int w
     g.fillPath (pointer);
 }
 
+void StacksLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int width, int height, float sliderPos,
+                                          float startAngle, float endAngle, juce::Slider& slider)
+{
+    const auto sliderBounds = juce::Rectangle<int> (x, y, width, height).toFloat();
+    const float angle = startAngle + sliderPos * (endAngle - startAngle);
+    const auto fill = slider.findColour (juce::Slider::rotarySliderFillColourId);
+    const bool enabled = slider.isEnabled();
+    const bool bipolar = slider.getMinimum() < 0.0 && slider.getMaximum() > 0.0;
+    const float zeroPos = bipolar ? (float) slider.valueToProportionOfLength (0.0) : 0.0f;
+    const float zeroAngle = startAngle + zeroPos * (endAngle - startAngle);
+
+    // A skinned knob: the filmstrip is the body; the coloured arc stays unless the skin says otherwise.
+    const juce::String strip = juce::jmin (width, height) >= 40 && skin::has ("knob-master") ? "knob-master" : "knob";
+    if (skin::has (strip))
+    {
+        if (skin::knobArc())
+            drawKnobArc (g, sliderBounds, startAngle, endAngle, angle, zeroAngle, enabled, fill);
+        skin::drawFilmstrip (g, strip, sliderBounds, sliderPos, enabled ? 1.0f : 0.5f);
+        return;
+    }
+    drawKnobArc (g, sliderBounds, startAngle, endAngle, angle, zeroAngle, enabled, fill);
+    drawKnobBody (g, sliderBounds, angle, enabled, fill);
+}
+
 void StacksLookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, int width, int height, float sliderPos,
                                           float, float, juce::Slider::SliderStyle style, juce::Slider& slider)
 {
@@ -184,8 +215,13 @@ void StacksLookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, int w
     const float trackW = 3.0f;
     juce::Rectangle<float> track = horizontal ? juce::Rectangle<float> ((float) x, (float) y + (float) height * 0.5f - trackW * 0.5f, (float) width, trackW)
                                               : juce::Rectangle<float> ((float) x + (float) width * 0.5f - trackW * 0.5f, (float) y, trackW, (float) height);
-    g.setColour (kTrack);
-    g.fillRoundedRectangle (track, trackW * 0.5f);
+    const bool skinned = skin::has ("slider-track");
+    if (skinned) skin::drawNine (g, "slider-track", horizontal ? track.expanded (0.0f, 4.0f) : track.expanded (4.0f, 0.0f), 6.0f);
+    else
+    {
+        g.setColour (kTrack);
+        g.fillRoundedRectangle (track, trackW * 0.5f);
+    }
 
     // Bipolar sliders fill from the middle.
     const bool bipolar = slider.getMinimum() < 0.0 && slider.getMaximum() > 0.0;
@@ -193,11 +229,20 @@ void StacksLookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, int w
                                   : (bipolar ? (float) y + (float) height * (1.0f - (float) slider.valueToProportionOfLength (0.0)) : (float) (y + height));
     juce::Rectangle<float> filled = horizontal ? juce::Rectangle<float> (juce::jmin (zero, sliderPos), track.getY(), std::abs (sliderPos - zero), trackW)
                                                : juce::Rectangle<float> (track.getX(), juce::jmin (zero, sliderPos), trackW, std::abs (sliderPos - zero));
-    g.setColour (slider.findColour (juce::Slider::trackColourId));
-    g.fillRoundedRectangle (filled, trackW * 0.5f);
+    if (skinned && skin::has ("slider-fill")) skin::drawNine (g, "slider-fill", horizontal ? filled.expanded (0.0f, 4.0f) : filled.expanded (4.0f, 0.0f), 6.0f);
+    else
+    {
+        g.setColour (slider.findColour (juce::Slider::trackColourId));
+        g.fillRoundedRectangle (filled, trackW * 0.5f);
+    }
 
     const float thumbR = 5.0f;
     const auto thumb = horizontal ? juce::Point<float> (sliderPos, track.getCentreY()) : juce::Point<float> (track.getCentreX(), sliderPos);
+    if (skin::has ("slider-thumb"))
+    {
+        skin::drawCentred (g, "slider-thumb", juce::Rectangle<float> (1.0f, 1.0f).withCentre (thumb));
+        return;
+    }
     g.setColour (juce::Colours::black.withAlpha (0.4f));
     g.fillEllipse (thumb.x - thumbR, thumb.y - thumbR + 1.0f, thumbR * 2.0f, thumbR * 2.0f);
     g.setColour (slider.findColour (juce::Slider::thumbColourId));
@@ -210,6 +255,12 @@ void StacksLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& b
     auto r = button.getLocalBounds().toFloat();
     if (isTab (button))
     {
+        if (skin::has ("tab-on") || skin::has ("tab-hover"))
+        {
+            if (button.getToggleState())            skin::drawNine (g, "tab-on", r, 8.0f);
+            else if ((highlighted || down) && skin::has ("tab-hover")) skin::drawNine (g, "tab-hover", r, 8.0f);
+            return;
+        }
         // A tab: no box, an underline in its colour when selected.
         if (button.getToggleState())
         {
@@ -225,14 +276,25 @@ void StacksLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& b
         return;
     }
 
-    r = r.reduced (0.5f);
-    const float corner = juce::jmin (5.0f, r.getHeight() * 0.3f);
-    auto base = backgroundColour;
     const bool on = button.getToggleState();
-    if (on)              base = button.findColour (juce::TextButton::buttonOnColourId);
+    if (skin::has ("button"))
+    {
+        const bool bright = backgroundColour.getPerceivedBrightness() > 0.45f;   // an accent-filled call to action (Evolve, Grow, Save)
+        const juce::String name = bright && skin::has ("button-bright") ? "button-bright"
+                                : on && skin::has ("button-on") ? "button-on"
+                                : down && skin::has ("button-down") ? "button-down"
+                                : highlighted && skin::has ("button-hover") ? "button-hover" : "button";
+        skin::drawNine (g, name, r, 8.0f, button.isEnabled() ? 1.0f : 0.5f);
+        return;
+    }
+    drawButtonFace (g, r.reduced (0.5f), on ? button.findColour (juce::TextButton::buttonOnColourId) : backgroundColour, on, highlighted, down);
+}
+
+void StacksLookAndFeel::drawButtonFace (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour base, bool on, bool highlighted, bool down)
+{
+    const float corner = juce::jmin (5.0f, r.getHeight() * 0.3f);
     if (down)            base = base.brighter (0.12f);
     else if (highlighted) base = base.brighter (0.06f);
-
     g.setColour (base);
     g.fillRoundedRectangle (r, corner);
     g.setColour (on ? colours::accent.withAlpha (0.55f) : juce::Colours::white.withAlpha (0.06f));
@@ -260,35 +322,56 @@ void StacksLookAndFeel::drawToggleButton (juce::Graphics& g, juce::ToggleButton&
 {
     const float boxSize = 13.0f;
     auto box = juce::Rectangle<float> (2.0f, ((float) button.getHeight() - boxSize) * 0.5f, boxSize, boxSize);
-    g.setColour (kTrack.brighter (highlighted ? 0.1f : 0.0f));
-    g.fillRoundedRectangle (box, 3.0f);
-    g.setColour (colours::outline.brighter (0.2f));
-    g.drawRoundedRectangle (box, 3.0f, 1.0f);
-    if (button.getToggleState())
-    {
-        g.setColour (button.findColour (juce::ToggleButton::tickColourId));
-        g.fillRoundedRectangle (box.reduced (3.5f), 1.5f);
-    }
+    drawToggleBox (g, box, button.getToggleState(), highlighted, button.findColour (juce::ToggleButton::tickColourId));
     g.setColour (button.findColour (juce::ToggleButton::textColourId));
     g.setFont (font (11.0f));
     g.drawFittedText (button.getButtonText(), button.getLocalBounds().withTrimmedLeft ((int) boxSize + 7), juce::Justification::centredLeft, 1);
 }
 
+void StacksLookAndFeel::drawToggleBox (juce::Graphics& g, juce::Rectangle<float> box, bool on, bool highlighted, juce::Colour tick)
+{
+    if (skin::has ("toggle-off"))
+    {
+        skin::drawStretched (g, on && skin::has ("toggle-on") ? "toggle-on" : "toggle-off", box.expanded (2.0f));
+        return;
+    }
+    g.setColour (kTrack.brighter (highlighted ? 0.1f : 0.0f));
+    g.fillRoundedRectangle (box, 3.0f);
+    g.setColour (colours::outline.brighter (0.2f));
+    g.drawRoundedRectangle (box, 3.0f, 1.0f);
+    if (on)
+    {
+        g.setColour (tick);
+        g.fillRoundedRectangle (box.reduced (3.5f), 1.5f);
+    }
+}
+
 void StacksLookAndFeel::drawComboBox (juce::Graphics& g, int width, int height, bool, int, int, int, int, juce::ComboBox& box)
 {
-    auto r = juce::Rectangle<float> (0.0f, 0.0f, (float) width, (float) height).reduced (0.5f);
-    g.setColour (box.findColour (juce::ComboBox::backgroundColourId));
+    drawComboFace (g, juce::Rectangle<float> (0.0f, 0.0f, (float) width, (float) height),
+                   box.findColour (juce::ComboBox::backgroundColourId), box.isEnabled(), box.findColour (juce::ComboBox::arrowColourId));
+}
+
+void StacksLookAndFeel::drawComboFace (juce::Graphics& g, juce::Rectangle<float> full, juce::Colour background, bool enabled, juce::Colour arrow)
+{
+    if (skin::has ("combo"))   // the image carries its own chevron at the right edge
+    {
+        skin::drawNine (g, "combo", full, 8.0f, enabled ? 1.0f : 0.5f);
+        return;
+    }
+    auto r = full.reduced (0.5f);
+    g.setColour (background);
     g.fillRoundedRectangle (r, 4.0f);
     g.setColour (juce::Colours::white.withAlpha (0.06f));
     g.drawRoundedRectangle (r, 4.0f, 1.0f);
 
     // chevron
-    const float cx = (float) width - 9.0f, cy = (float) height * 0.5f;
+    const float cx = full.getRight() - 9.0f, cy = full.getCentreY();
     juce::Path chevron;
     chevron.startNewSubPath (cx - 3.0f, cy - 1.5f);
     chevron.lineTo (cx, cy + 1.5f);
     chevron.lineTo (cx + 3.0f, cy - 1.5f);
-    g.setColour (box.findColour (juce::ComboBox::arrowColourId).withAlpha (box.isEnabled() ? 0.9f : 0.3f));
+    g.setColour (arrow.withAlpha (enabled ? 0.9f : 0.3f));
     g.strokePath (chevron, juce::PathStrokeType (1.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 }
 
@@ -300,12 +383,14 @@ void StacksLookAndFeel::positionComboBoxText (juce::ComboBox& box, juce::Label& 
 
 void StacksLookAndFeel::fillTextEditorBackground (juce::Graphics& g, int width, int height, juce::TextEditor& editor)
 {
+    if (skin::has ("texteditor")) { skin::drawNine (g, "texteditor", { 0.0f, 0.0f, (float) width, (float) height }, 8.0f); return; }
     g.setColour (editor.findColour (juce::TextEditor::backgroundColourId));
     g.fillRoundedRectangle (0.5f, 0.5f, (float) width - 1.0f, (float) height - 1.0f, 5.0f);
 }
 
 void StacksLookAndFeel::drawTextEditorOutline (juce::Graphics& g, int width, int height, juce::TextEditor& editor)
 {
+    if (skin::has ("texteditor")) return;
     g.setColour (editor.hasKeyboardFocus (true) ? editor.findColour (juce::TextEditor::focusedOutlineColourId)
                                                 : editor.findColour (juce::TextEditor::outlineColourId));
     g.drawRoundedRectangle (0.5f, 0.5f, (float) width - 1.0f, (float) height - 1.0f, 5.0f, 1.0f);
@@ -313,6 +398,7 @@ void StacksLookAndFeel::drawTextEditorOutline (juce::Graphics& g, int width, int
 
 void StacksLookAndFeel::drawPopupMenuBackground (juce::Graphics& g, int width, int height)
 {
+    if (skin::has ("popup")) { skin::drawNine (g, "popup", { 0.0f, 0.0f, (float) width, (float) height }, 10.0f); return; }
     g.setColour (findColour (juce::PopupMenu::backgroundColourId));
     g.fillRoundedRectangle (0.0f, 0.0f, (float) width, (float) height, 6.0f);
     g.setColour (colours::outline);
@@ -324,6 +410,7 @@ void StacksLookAndFeel::drawScrollbar (juce::Graphics& g, juce::ScrollBar& bar, 
 {
     juce::Rectangle<float> thumb = vertical ? juce::Rectangle<float> ((float) x + 2.0f, (float) thumbStart, (float) width - 4.0f, (float) thumbSize)
                                             : juce::Rectangle<float> ((float) thumbStart, (float) y + 2.0f, (float) thumbSize, (float) height - 4.0f);
+    if (skin::has ("scrollbar-thumb")) { skin::drawNine (g, "scrollbar-thumb", thumb, 4.0f, over || down ? 1.0f : 0.7f); return; }
     g.setColour (bar.findColour (juce::ScrollBar::thumbColourId).withAlpha (over || down ? 1.0f : 0.7f));
     g.fillRoundedRectangle (thumb, juce::jmin (thumb.getWidth(), thumb.getHeight()) * 0.5f);
 }

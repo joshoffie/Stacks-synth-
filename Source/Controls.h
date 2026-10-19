@@ -146,6 +146,8 @@ class StacksKeyboard : public juce::MidiKeyboardComponent
 public:
     explicit StacksKeyboard (juce::MidiKeyboardState&);
     void resized() override;
+    static void paintWhiteKey (juce::Graphics&, juce::Rectangle<float>, bool down, bool over);   // one key, no label
+    static void paintBlackKey (juce::Graphics&, juce::Rectangle<float>, bool down, bool over);
 
 protected:
     void drawWhiteNote (int midiNoteNumber, juce::Graphics&, juce::Rectangle<float> area, bool isDown, bool isOver,

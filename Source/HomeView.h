@@ -57,6 +57,10 @@ private:
     void growFromPreset (const juce::File&);
     juce::Colour kindColour (const juce::String& kind) const;
 
+public:
+    static void paintTileFace (juce::Graphics&, juce::Rectangle<float>, juce::Colour, bool hover, const juce::String& kind = {});   // the tile's background, no words
+private:
+
     StacksAudioProcessor& processor;
     Stage stage = Stage::pick;
     juce::String category, note, pickNote;   // pickNote: why the last attempt came back empty
