@@ -10,6 +10,7 @@
 
 namespace stacks
 {
+class StacksAudioProcessorEditor;
 
 // One patch in the list. Click to audition, ♥ to keep.
 class PatchCard : public juce::Component,
@@ -118,6 +119,7 @@ private:
     void refreshNowPlaying();
     void layoutCards();
     enum class View { garden, tree, ideas, library, explain };
+    friend class StacksAudioProcessorEditor;   // renderScreens walks the views
     void showView (View);
     void scrollTreeToNewest();
 

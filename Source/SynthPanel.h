@@ -87,6 +87,8 @@ public:
     void beginAssign (int source);
     void endAssign();
     void setView (int rowIndex);                              // -1 = all rows, -2 = the macros page
+    ModulatorsPanel* modulatorsPanel() const                  { return modulators.get(); }
+    int numRows() const                                       { return (int) rows.size(); }
 
 private:
     class RowContainer;

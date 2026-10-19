@@ -124,7 +124,7 @@ if(APPLE)
     endforeach()
 endif()
 
-target_sources(Stacks PRIVATE
+set(STACKS_SOURCES
     Source/Parameters.cpp
     Source/Wavetable.cpp
     Source/SynthVoice.cpp
@@ -157,6 +157,7 @@ target_sources(Stacks PRIVATE
     Source/HomeView.cpp
     Source/LibraryPanel.cpp
     Source/GardenView.cpp)
+target_sources(Stacks PRIVATE ${STACKS_SOURCES})
 
 target_compile_definitions(Stacks PUBLIC
     JUCE_WEB_BROWSER=0
@@ -173,6 +174,29 @@ target_link_libraries(Stacks
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
+
+# ---- UI kit: paints every screen of the editor to PNG, for designers ----
+# build.nosync/StacksUiKit_artefacts/Release/StacksUiKit <output dir> [scale]
+if(APPLE)
+    juce_add_console_app(StacksUiKit PRODUCT_NAME "StacksUiKit")
+    target_sources(StacksUiKit PRIVATE Tools/UiKit.cpp ${STACKS_SOURCES})
+    juce_generate_juce_header(StacksUiKit)
+    target_include_directories(StacksUiKit PRIVATE Source ThirdParty/MTS-ESP)
+    target_compile_definitions(StacksUiKit PRIVATE
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+        JUCE_STRICT_REFCOUNTEDPOINTER=1
+        "JucePlugin_Name=\"Stacks\"")
+    target_link_libraries(StacksUiKit
+        PRIVATE
+            juce::juce_audio_utils
+            juce::juce_gui_extra
+            juce::juce_dsp
+            llama
+        PUBLIC
+            juce::juce_recommended_config_flags
+            juce::juce_recommended_warning_flags)
+endif()
 
 # ---- Tests: a console app over the engine-side code (no plug-in wrapper) ----
 # Run build.nosync/StacksTests_artefacts/Release/StacksTests after a build.

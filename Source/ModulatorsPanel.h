@@ -7,6 +7,7 @@
 
 namespace stacks
 {
+class StacksAudioProcessorEditor;
 
 // Shows one LFO's shape, animates its position, and lets the user draw a
 // custom shape: click to add a point, drag to move, double-click to remove.
@@ -83,6 +84,7 @@ public:
 
 private:
     enum Tab { TabLfo1, TabLfo2, TabLfo3, TabLfo4, TabModEnv, TabSeq, TabSources, kNumTabs };
+    friend class StacksAudioProcessorEditor;   // renderScreens walks the tabs
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override { refreshConnections(); }
     void showTab (int tab);

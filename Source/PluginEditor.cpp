@@ -169,6 +169,52 @@ void StacksAudioProcessorEditor::resized()
     synthPanel.setBounds (r);
 }
 
+void StacksAudioProcessorEditor::renderScreens (const juce::File& directory, float scale)
+{
+    directory.createDirectory();
+    int shot = 0;
+    auto shoot = [&] (const juce::String& name)
+    {
+        resized();
+        const auto image = createComponentSnapshot (getLocalBounds(), true, scale);
+        const auto file = directory.getChildFile (juce::String (++shot).paddedLeft ('0', 2) + " " + name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream out (file);
+        if (out.openedOk())
+            juce::PNGImageFormat().writeImageToStream (image, out);
+    };
+
+    setHome (true);
+    shoot ("home");
+    setHome (false);
+    synthPanel.setView (-2); shoot ("synth - macros");
+    synthPanel.setView (-1); shoot ("synth - all");
+    static const char* rowNames[] = { "sound", "filter", "effects", "modulators" };
+    for (int r = 0; r < synthPanel.numRows(); ++r)
+    {
+        synthPanel.setView (r);
+        shoot ("synth - " + juce::String (r < 4 ? rowNames[r] : "row " + juce::String (r)));
+    }
+    if (auto* mods = synthPanel.modulatorsPanel())
+    {
+        static const char* tabNames[] = { "lfo 1", "lfo 2", "lfo 3", "lfo 4", "mod env", "seq", "sources" };
+        synthPanel.setView (synthPanel.numRows() - 1);
+        for (int t = 0; t < ModulatorsPanel::kNumTabs; ++t)
+        {
+            mods->showTab (t);
+            shoot ("modulators - " + juce::String (tabNames[t]));
+        }
+        mods->showTab (0);
+    }
+    synthPanel.setView (-1);
+    labPanel.showView (LabPanel::View::garden);  shoot ("lab - stacks");
+    labPanel.showView (LabPanel::View::tree);    shoot ("lab - history");
+    labPanel.showView (LabPanel::View::ideas);   shoot ("lab - list");
+    labPanel.showView (LabPanel::View::library); shoot ("lab - library");
+    labPanel.showView (LabPanel::View::garden);
+    setHome (true);
+}
+
 void StacksAudioProcessorEditor::setHome (bool home)
 {
     showingHome = home;

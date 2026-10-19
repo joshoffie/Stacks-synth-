@@ -28,6 +28,11 @@ public:
     bool keyPressed (const juce::KeyPress&) override;
     std::unique_ptr<juce::ComponentTraverser> createKeyboardFocusTraverser() override;   // no automatic focus target
 
+    // Paints every screen (home, each synth page, each modulator tab, each lab
+    // view) to numbered PNG files at `scale` times the window size. Used by the
+    // StacksUiKit tool to hand the UI to a designer; the editor ends up back on Home.
+    void renderScreens (const juce::File& directory, float scale);
+
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
 
