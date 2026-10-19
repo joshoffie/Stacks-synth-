@@ -622,7 +622,7 @@ static void testLlmGenerator()
         CHECK (out[0].waves[1].isEmpty());
         CHECK ((int) out[0].get (P::oscB_wave) == waveNames().indexOf ("Saw"));
         CHECK ((int) out[0].get (modDestParam (0)) == modTargetForParam ((int) P::filter_cutoff)); // square LFO off pitch
-        CHECK (out[0].origin == "AI");
+        CHECK (out[0].isGrown() && out[0].origin == "grown");
         CHECK (out[0].prompt == "in the style of MGMT" && out[0].parentName.isEmpty() && ! out[0].tags.isEmpty());
         CHECK_NEAR (out[0].get (P::unison_detune), 22.0, 1.0e-4);
         CHECK ((int) out[1].get (P::oscA_wave) == waveNames().indexOf ("Glass"));

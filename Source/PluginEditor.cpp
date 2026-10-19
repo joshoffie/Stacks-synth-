@@ -38,7 +38,11 @@ StacksAudioProcessorEditor::StacksAudioProcessorEditor (StacksAudioProcessor& p)
 
     settingsButton.setButtonText (juce::String::fromUTF8 ("\xe2\x9a\x99"));   // gear
     settingsButton.setTooltip ("Settings: calm mode, MPE and microtuning");
-    settingsButton.onClick = [this] { SettingsPanel::show (synthProcessor, this); };
+    settingsButton.onClick = [this]
+    {
+        if (settingsWindow != nullptr) { settingsWindow->toFront (true); return; }
+        settingsWindow = SettingsPanel::show (synthProcessor, this);
+    };
     addAndMakeVisible (settingsButton);
 
     undoButton.setButtonText (juce::String::fromUTF8 ("\xe2\x86\xb6"));   // undo arrow
@@ -80,6 +84,7 @@ StacksAudioProcessorEditor::StacksAudioProcessorEditor (StacksAudioProcessor& p)
 
 StacksAudioProcessorEditor::~StacksAudioProcessorEditor()
 {
+    settingsWindow.deleteAndZero();   // it talks to the processor; it must not outlive the editor
     synthProcessor.labBroadcaster.removeChangeListener (this);
     setLookAndFeel (nullptr);
 }

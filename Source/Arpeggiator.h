@@ -36,7 +36,10 @@ private:
     void allNotesOff (juce::MidiBuffer& out, int sample);
     int nextNote (const Params&, int& stepUsed);
 
-    std::vector<Held> held;
+    std::vector<Held> held, orderScratch;     // reserved in prepare(): no allocation on the audio thread
+    std::vector<int> patternScratch;
+    juce::MidiBuffer scratch;
+    static constexpr int kMaxHeld = 64;
     double sr = 48000.0;
     double samplesIntoStep = 0.0;
     int stepIndex = 0, orderCounter = 0;

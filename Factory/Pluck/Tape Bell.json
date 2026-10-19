@@ -2,7 +2,7 @@
   "name": "Tape Bell",
   "description": "A sharp, tape-wobbly bell pluck with metallic resonance (Metallic Ring + Sine(+12), heavy FM, 3-voice unison, LP12 @ 1.0 kHz, resonant, sweeping, plucky, glide, Key > Cutoff, LFO1 > Delay Mix, delay)",
   "category": "Pluck",
-  "origin": "AI",
+  "origin": "grown",
   "tags": [
     "analog",
     "metallic",

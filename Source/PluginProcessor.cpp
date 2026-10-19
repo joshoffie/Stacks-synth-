@@ -133,7 +133,9 @@ StacksAudioProcessor::~StacksAudioProcessor()
 //==============================================================================
 void StacksAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    currentSampleRate = sampleRate;
+    currentSampleRate = sampleRate > 0.0 ? sampleRate : 48000.0;
+    sampleRate = currentSampleRate;
+    preparedBlockSize = juce::jmax (1, samplesPerBlock);
     synth.setCurrentPlaybackSampleRate (sampleRate);
 
     arp.prepare (sampleRate);
@@ -372,6 +374,7 @@ int StacksAudioProcessor::lastPlayedNote() const
 
 juce::String StacksAudioProcessor::autoTune (float measuredCents)
 {
+    pushUndoSnapshot();
     auto p = currentPatch();
     const Patch before = p;
 
@@ -553,21 +556,37 @@ void StacksAudioProcessor::processEffects (juce::AudioBuffer<float>& buffer)
     int order[kNumFx];
     for (int e = 0; e < kNumFx; ++e) order[e] = e;
     std::stable_sort (order, order + kNumFx, [&] (int a, int b) { return fxParams.geti (fxPosParam (a)) < fxParams.geti (fxPosParam (b)); });
-    for (int e : order)
+    // A host may hand over more samples than it announced in prepareToPlay; the
+    // effects are sized for that number, so bigger blocks go through in pieces.
+    for (int offset = 0; offset < n; offset += preparedBlockSize)
     {
-        if (fxParams.geti (fxOnParam (e)) == 0)
-            continue;
-        switch (e)
+        const int len = juce::jmin (preparedBlockSize, n - offset);
+        juce::AudioBuffer<float> part (target->getArrayOfWritePointers(), 2, offset, len);
+        for (int e : order)
         {
-            case 0: distortion.process (*target, dist); break;
-            case 1: eq.process (*target, eqp); break;
-            case 2: if (cp.mix > 0.0005f) chorus.process (*target, cp); break;
-            case 3: hyper.process (*target, hp); break;
-            case 4: tape.process (*target, tp); break;
-            case 5: delay.process (*target, dp, currentBpm); break;   // always runs so repeats ring out when the mix is pulled down
-            case 6: if (rp.mix > 0.0005f) reverb.process (*target, rp); break;
-            default: compressor.process (*target, comp); break;
+            if (fxParams.geti (fxOnParam (e)) == 0)
+                continue;
+            switch (e)
+            {
+                case 0: distortion.process (part, dist); break;
+                case 1: eq.process (part, eqp); break;
+                case 2: if (cp.mix > 0.0005f) chorus.process (part, cp); break;
+                case 3: hyper.process (part, hp); break;
+                case 4: tape.process (part, tp); break;
+                case 5: delay.process (part, dp, currentBpm); break;   // always runs so repeats ring out when the mix is pulled down
+                case 6: if (rp.mix > 0.0005f) reverb.process (part, rp); break;
+                default: compressor.process (part, comp); break;
+            }
         }
+    }
+
+    // A bad value anywhere would otherwise circle in the delay and reverb lines
+    // for good: drop the block and start the effects clean.
+    if (! std::isfinite (target->getSample (0, n - 1)) || ! std::isfinite (target->getSample (1, n - 1))
+        || ! std::isfinite (target->getSample (0, 0)) || ! std::isfinite (target->getSample (1, 0)))
+    {
+        target->clear();
+        chorus.reset(); delay.reset(); reverb.reset(); hyper.reset(); tape.reset(); distortion.reset(); compressor.reset();
     }
 
     if (mono)
@@ -618,6 +637,7 @@ void StacksAudioProcessor::setStateInformation (const void* data, int sizeInByte
     if (! root.isValid())
         return;
 
+    ++generationToken;   // a batch still running belongs to the state being replaced
     if (root.hasType ("StacksState"))
     {
         auto state = root.getChildWithName (apvts.state.getType());
@@ -628,6 +648,8 @@ void StacksAudioProcessor::setStateInformation (const void* data, int sizeInByte
             rebuildLfoTables();
             reloadUserWaves();
             reloadCustomWaves();
+            reloadSample();      // replaceState fires no change for values that happen to match, so load these directly
+            reloadSequence();
         }
 
         auto lab = root.getChildWithName ("Lab");
@@ -647,6 +669,8 @@ void StacksAudioProcessor::setStateInformation (const void* data, int sizeInByte
         rebuildLfoTables();
         reloadUserWaves();
         reloadCustomWaves();
+        reloadSample();
+        reloadSequence();
     }
 
     labBroadcaster.sendChangeMessage();
@@ -960,6 +984,7 @@ void StacksAudioProcessor::timerCallback()
     if (builtInBackend != nullptr && ! labState.generating)
         builtInBackend->unloadIfIdle (600.0); // ten minutes idle -> give the RAM back
     userWaves.retireOld (5.0);                // replaced tables no voice can still be reading
+    samples.retireOld (5.0);                  // same for replaced samples
 }
 
 //==============================================================================
@@ -1179,6 +1204,65 @@ bool StacksAudioProcessor::designForSong (const juce::File& file, juce::String& 
     return true;
 }
 
+// The decode and the analysis of a long file take seconds; they run on the
+// pool, and only the result touches the engine, on the message thread.
+void StacksAudioProcessor::analyseAudioAsync (const juce::File& file, float variation)
+{
+    if (labState.generating)
+        return;
+    labState.status = "Listening to \"" + file.getFileNameWithoutExtension() + "\"...";
+    labBroadcaster.sendChangeMessage();
+    juce::WeakReference<StacksAudioProcessor> weak (this);
+    const bool song = looksLikeASong (file);
+    pool.addJob ([weak, file, variation, song]
+    {
+        juce::String error;
+        if (song)
+        {
+            std::vector<float> mono; double sr = 22050.0; float width = 0.0f;
+            SongAnalysis result;
+            const bool ok = readSongMono (file, mono, sr, width, error) && (result = analyseSong (mono, sr, width)).duration >= 5.0f;
+            if (! ok && error.isEmpty()) error = "could not analyse that file";
+            juce::MessageManager::callAsync ([weak, ok, error, result, variation]
+            {
+                auto* self = weak.get();
+                if (self == nullptr) return;
+                if (! ok) { self->labState.status = "Couldn't analyse that track: " + error; self->labBroadcaster.sendChangeMessage(); return; }
+                self->previewRootNote = result.keyRoot >= 0 ? (result.keyRoot <= 6 ? 60 + result.keyRoot : 48 + result.keyRoot) : 60;
+                self->labState.status = "Track: " + juce::String ((int) std::round (result.bpm)) + " BPM, " + result.keyName() + ", room in the " + SongAnalysis::bandName (result.openBand);
+                self->requestNewBatch (result.brief, variation, "that track");
+            });
+            return;
+        }
+        SampleBank bank;
+        auto data = bank.read (file, error);
+        std::shared_ptr<Patch> seed;
+        juce::String brief, heard;
+        if (data != nullptr)
+        {
+            const auto analysis = analyseSample (*data);
+            if (analysis.duration < 0.02f) error = "that file is silent";
+            else
+            {
+                seed = std::make_shared<Patch> (patchFromAnalysis (analysis, file.getFileNameWithoutExtension().substring (0, 24)));
+                brief = analysis.brief;
+                heard = analysis.heard;
+            }
+        }
+        juce::MessageManager::callAsync ([weak, seed, brief, heard, error, variation]
+        {
+            auto* self = weak.get();
+            if (self == nullptr) return;
+            if (seed == nullptr) { self->labState.status = "Couldn't recreate that file: " + error; self->labBroadcaster.sendChangeMessage(); return; }
+            self->applyPatch (*seed);            // hear the imitation straight away
+            self->labState.auditioned = -1;
+            self->playPreview (*seed);
+            self->labState.status = "Heard: " + heard;
+            self->requestEvolve (brief, variation);
+        });
+    });
+}
+
 void StacksAudioProcessor::clearSample()
 {
     pushUndoSnapshot();
@@ -1295,6 +1379,7 @@ bool StacksAudioProcessor::startModelDownload (const ModelInfo& chosen)
         }
         else
         {
+            pendingRequest.reset();   // the click that waited on it is not run later by surprise
             labState.status = "Download failed: " + error;
         }
         labBroadcaster.sendChangeMessage();
@@ -1347,10 +1432,11 @@ void StacksAudioProcessor::refreshOllamaModels()
 }
 
 //==============================================================================
-void StacksAudioProcessor::requestNewBatch (const juce::String& hint, float variation)
+void StacksAudioProcessor::requestNewBatch (const juce::String& hint, float variation, const juce::String& displayName)
 {
     GenerationRequest req;
     req.hint = hint;
+    req.displayName = displayName;
     req.variation = variation;
     req.count = kAiPatchesPerBatch;   // five, all grown; no random filler
     req.generation = labState.generation + 1;
@@ -1373,7 +1459,7 @@ void StacksAudioProcessor::requestFromKind (const juce::String& kind)
     const auto& list = it != briefs.end() ? it->second : briefs.at ("Pad");
     juce::Random rng;
     const juce::String brief = juce::String (list[(size_t) rng.nextInt ((int) list.size())]) + ", five different takes on it";
-    requestNewBatch (brief, 0.6f);
+    requestNewBatch (brief, 0.6f, kind + " ideas");
 }
 
 void StacksAudioProcessor::requestEvolve (const juce::String& hint, float variation)
@@ -1415,7 +1501,19 @@ void StacksAudioProcessor::startGeneration (GenerationRequest req)
     // The chosen built-in model isn't on this Mac yet: fetch it, then run this request.
     if (engineChoice.kind == EngineKind::Builtin && generator == randomGenerator)
     {
-        if (auto info = ModelManager::find (engineChoice.model); info && ! info->installed && info->url.isNotEmpty())
+        auto info = ModelManager::find (engineChoice.model);
+        if (! info)   // a forgotten custom file in the settings: back to the one that ships
+        {
+            engineChoice.model = "qwen3-4b";
+            settings().setValue ("model", engineChoice.model);
+            rebuildGenerator();
+            info = ModelManager::find (engineChoice.model);
+        }
+        if (generator != randomGenerator)
+        {
+            // fine: the default engine is here after all
+        }
+        else if (info && ! info->installed && info->url.isNotEmpty())
         {
             pendingRequest = req;
             if (isDownloading())
@@ -1453,7 +1551,7 @@ void StacksAudioProcessor::startGeneration (GenerationRequest req)
     else
     {
         labState.seed = Patch();
-        labState.seed.name = req.hint.trim().isNotEmpty() ? "\"" + req.hint.trim() + "\"" : juce::String ("Fresh ideas");
+        labState.seed.name = req.displayName.isNotEmpty() ? req.displayName : req.hint.trim().isNotEmpty() ? "\"" + req.hint.trim() + "\"" : juce::String ("Fresh ideas");
         labState.seedIsPatch = false;
     }
     labState.generating = true;
@@ -1461,7 +1559,7 @@ void StacksAudioProcessor::startGeneration (GenerationRequest req)
 
     const bool usingAi = generator != randomGenerator;
     labState.progress = -1.0f;
-    labState.progressDetail = usingAi ? "Starting " + engineName() + "..." : juce::String();
+    labState.progressDetail = usingAi ? juce::String ("Warming up...") : juce::String();
     juce::WeakReference<StacksAudioProcessor> weak (this);
 
     auto makeProgress = [weak, token, this]
@@ -1491,7 +1589,7 @@ void StacksAudioProcessor::startGeneration (GenerationRequest req)
                     self->setProgress (token, fraction, detail);
             });
         };
-        progress.shouldCancel = [this, token] { return cancelRequested.load() || generationToken != token; };
+        progress.shouldCancel = [weak, token] { auto* self = weak.get(); return self == nullptr || self->cancelRequested.load() || self->generationToken != token; };
         return progress;
     };
 
@@ -1821,6 +1919,11 @@ void StacksAudioProcessor::morphCandidate (int index, float t)
 {
     if (index < 0 || index >= (int) labState.candidates.size())
         return;
+    if (! morphInProgress)
+    {
+        pushUndoSnapshot();                    // one step back is the sound before the drag began
+        morphInProgress = true;
+    }
     const Patch& from = labState.seedIsPatch ? labState.seed : Patch();
     auto blend = morphPatch (from, labState.candidates[(size_t) index], t);
     blend.applyTo (apvts);                     // the knobs follow the drag
@@ -1847,7 +1950,13 @@ void StacksAudioProcessor::commitMorph (int index, float t)
     blend.favourite = false;
     blend.description = describePatch (blend);
     candidate = blend;
-    applyPatch (candidate);
+    {
+        const bool was = applyingUndo;
+        applyingUndo = applyingUndo || morphInProgress;   // the drag already took its snapshot
+        applyPatch (candidate);
+        applyingUndo = was;
+    }
+    morphInProgress = false;
     labState.auditioned = index;
     labState.status = "\"" + candidate.name + "\" now sits at " + juce::String (juce::roundToInt (t * 100.0f)) + "% of the way from the seed";
     labBroadcaster.sendChangeMessage();
@@ -1922,7 +2031,8 @@ juce::File StacksAudioProcessor::savePatchToLibrary (Patch& p, const juce::File&
     juce::File file (p.filePath);
     if (! file.existsAsFile() || ! file.isAChildOf (libraryRoot()))
         file = folder.getNonexistentChildFile (juce::File::createLegalFileName (p.name.isEmpty() ? "Patch" : p.name), ".json", false);
-    file.replaceWithText (p.toJson());
+    if (! file.replaceWithText (p.toJson()))
+        return {};   // the caller says so; p.filePath is left alone
     p.filePath = file.getFullPathName();
     return file;
 }
@@ -1948,6 +2058,12 @@ juce::File StacksAudioProcessor::savePreset (const juce::String& name, const juc
                         && existing.getFileNameWithoutExtension() == juce::File::createLegalFileName (p.name)))
         p.filePath.clear();
     const auto file = savePatchToLibrary (p, folder);
+    if (file == juce::File())
+    {
+        labState.status = "Couldn't save to " + folder.getFullPathName() + " - check that the folder can be written";
+        labBroadcaster.sendChangeMessage();
+        return {};
+    }
     patchName = p.name;
     patchFile = p.filePath;
     loadedSnapshot = p;

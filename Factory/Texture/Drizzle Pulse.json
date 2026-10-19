@@ -2,7 +2,7 @@
   "name": "Drizzle Pulse",
   "description": "Subtle rain pulses with gentle movement and low resonance (Drizzle + Sine(-12), light FM, 3-voice unison, Notch @ 600 Hz, inverted sweep, Key > Cutoff, LFO1 > A Morph)",
   "category": "Texture",
-  "origin": "AI",
+  "origin": "grown",
   "tags": [
     "wet",
     "pulse",

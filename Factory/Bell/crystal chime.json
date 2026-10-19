@@ -2,7 +2,7 @@
   "name": "Crystal Chime",
   "description": "A crisp bell sound with a glassy quality and precise attack (crystal chime + Formant(+12), heavy FM, 2-voice unison, Notch @ 2.5 kHz, plucky, Key > Cutoff, LFO1 > Sub)",
   "category": "Bell",
-  "origin": "AI",
+  "origin": "grown",
   "tags": [
     "clear",
     "chime",

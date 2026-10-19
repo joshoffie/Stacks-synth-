@@ -173,8 +173,13 @@ void HomeView::showKindMenu (const juce::String& kind, Tile& tile)
 void HomeView::growFromPreset (const juce::File& file)
 {
     if (! processor.loadLibraryPatch (file))
+    {
+        pickNote = "Couldn't open \"" + file.getFileNameWithoutExtension() + "\" - the file isn't a readable preset.";
+        repaint();
         return;
+    }
     note.clear();
+    pickNote.clear();
     growthSeed = (int) (juce::Time::getMillisecondCounter() & 0x7fff) + 1;
     anim = 0.0f;
     falling.clear();
@@ -191,6 +196,7 @@ void HomeView::pick (const juce::String& kind)
         return;
     category = kind;
     note.clear();
+    pickNote.clear();
     growthSeed = (int) (juce::Time::getMillisecondCounter() & 0x7fff) + 1;
     anim = 0.0f;
     falling.clear();
@@ -226,10 +232,13 @@ void HomeView::changeListenerCallback (juce::ChangeBroadcaster*)
 void HomeView::refresh()
 {
     const auto& lab = processor.lab();
-    if (lab.generating)
-        stage = Stage::growing;
+    if (lab.generating || processor.isDownloading())
+        stage = Stage::growing;   // a download before the first batch shows as growing, with its progress
     else if (stage == Stage::growing)
+    {
         stage = lab.candidates.empty() ? Stage::pick : Stage::results;
+        if (stage == Stage::pick) pickNote = lab.status;   // nothing came: say what happened
+    }
     else if (stage == Stage::results && lab.candidates.empty())
         stage = Stage::pick;
 
@@ -433,14 +442,30 @@ void HomeView::paint (juce::Graphics& g)
         g.setColour (colours::muted);
         g.setFont (StacksLookAndFeel::font (14.0f));
         g.drawText ("Pick one. You get five to play; grow the one you like.", r.removeFromTop (26), juce::Justification::centredLeft);
+        if (pickNote.isNotEmpty())
+        {
+            g.setColour (colours::accent);
+            g.setFont (StacksLookAndFeel::font (12.5f));
+            g.drawText (pickNote, r.removeFromTop (22), juce::Justification::centredLeft);
+        }
         return;
     }
     g.setFont (StacksLookAndFeel::font (24.0f, true));
     const auto& lab = processor.lab();
     const bool fromSeed = lab.seedIsPatch;
-    const juce::String heading = stage == Stage::growing ? (fromSeed ? "Growing from \"" + lab.seed.name + "\"" : "Growing " + category.toLowerCase() + " sounds")
+    const bool preparing = processor.isDownloading() && ! lab.generating;
+    const juce::String heading = preparing ? juce::String ("Getting Stacks ready")
+                               : stage == Stage::growing ? (fromSeed ? "Growing from \"" + lab.seed.name + "\"" : "Growing " + category.toLowerCase() + " sounds")
                                                          : (fromSeed ? "Grown from \"" + lab.seed.name + "\"" : "Five " + category.toLowerCase() + " sounds");
     g.drawText (heading, r.removeFromTop (34), juce::Justification::centredLeft);
+    if (preparing)
+    {
+        g.setColour (colours::muted);
+        g.setFont (StacksLookAndFeel::font (12.5f));
+        g.drawText (lab.status.isNotEmpty() ? lab.status : juce::String ("Downloading the sound engine - this happens once"), r.removeFromTop (18), juce::Justification::centredLeft);
+        g.drawText ("Your " + category.toLowerCase() + " sounds grow as soon as it lands.", r.removeFromTop (18), juce::Justification::centredLeft);
+        return;
+    }
     if (note.isNotEmpty())
     {
         g.setColour (colours::accent);

@@ -39,6 +39,7 @@ private:
     ScopeView scope;
     TunerView tuner;
     juce::TextButton settingsButton, undoButton, redoButton;
+    juce::Component::SafePointer<juce::DialogWindow> settingsWindow;   // one at a time; closed with the editor
     SynthPanel synthPanel;
     LabPanel labPanel;
     HomeView homeView;

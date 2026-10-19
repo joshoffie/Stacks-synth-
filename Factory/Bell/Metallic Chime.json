@@ -2,7 +2,7 @@
   "name": "Metallic Chime",
   "description": "A crisp chime with subtle vibrato and formant resonance (Metallic Chime + Saw(-24), heavy FM, 2-voice unison, Formant @ 1.8 kHz, Vel > Cutoff, LFO1 > FM B>A)",
   "category": "Bell",
-  "origin": "AI",
+  "origin": "grown",
   "tags": [
     "metallic",
     "vibrato",

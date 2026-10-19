@@ -31,13 +31,15 @@ public:
     // Decodes a file (message thread). Null and an error message on failure.
     std::unique_ptr<SampleData> read (const juce::File&, juce::String& error) const;
     void setActive (std::unique_ptr<SampleData>);                                   // message thread
-    void clear() noexcept                      { active.store (nullptr, std::memory_order_release); }
+    void clear()                               { setActive (nullptr); }
+    void retireOld (double olderThanSeconds);                                       // frees samples no voice can still be reading
     const SampleData* current() const noexcept { return active.load (std::memory_order_acquire); }
     juce::String name() const                  { auto* s = current(); return s != nullptr ? s->name : juce::String(); }
 
 private:
     std::atomic<const SampleData*> active { nullptr };
-    std::vector<std::unique_ptr<SampleData>> owned;
+    std::unique_ptr<SampleData> current_;                                           // the one voices may be reading
+    std::vector<std::pair<std::unique_ptr<SampleData>, double>> retired;            // replaced, with the time it happened
 };
 
 // What the player reads per block, from the modulated parameters.

@@ -2,7 +2,7 @@
   "name": "Vocal Pulse",
   "description": "A pad that pulses with vocal formant harmonics and a breathing filter cutoff modulated by the mod wheel for organic swelling",
   "category": "Pad",
-  "origin": "AI",
+  "origin": "grown",
   "tags": [
     "vocal",
     "breathing",

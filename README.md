@@ -284,11 +284,25 @@ UI. Any subset of these keys, hex `rrggbb` or `aarrggbb`:
 
 ## Giving it to friends
 
-Build in Release, then zip `~/Library/Audio/Plug-Ins/Components/Stacks.component`
-(and the VST3 if wanted). They drop it into the same folder on their Mac and
-rescan in Logic. First AI use downloads a model (ask them to pick 4B). The
-plug-in is ad-hoc signed; Gatekeeper may need a right-click → Open on the
-standalone app, and Logic may ask once to allow the component.
+`Packaging/build-installer.sh` builds `dist/Stacks-<version>.pkg`: one
+installer with the Audio Unit, the VST3, the standalone app and the sound
+engine data (the 2.5 GB GGUF, installed to
+`/Library/Application Support/Stacks/models`, where the plug-in looks after the
+user's own folder). The bundles are signed with the Developer ID Application
+certificate under the hardened runtime and the package with the Developer ID
+Installer certificate, both from the login keychain. The installer text never
+mentions what runs underneath.
+
+```bash
+Packaging/build-installer.sh --model ~/path/to/Qwen3-4B-Q4_K_M.gguf
+```
+
+Without notarisation a downloaded package opens only through System Settings >
+Privacy & Security > Open Anyway. To notarise, store an app-specific password
+once (`xcrun notarytool store-credentials stacks --apple-id ... --team-id
+P6PE9BPQ2R`) and pass `--notary-profile stacks`; the script submits, waits and
+staples, after which the package opens with a double click on any Mac.
+Receivers rescan in Logic (Plug-in Manager > Reset & Rescan) or restart the DAW.
 
 ## Layout
 

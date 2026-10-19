@@ -12,6 +12,7 @@ struct GenerationRequest
 {
     std::vector<Patch> parents;   // empty = start fresh; otherwise evolve from these
     juce::String hint;            // free-text direction from the user, may be empty
+    juce::String displayName;     // what the player sees as the seed of this batch ("Pad"); empty = the hint
     int count = 10;
     float variation = 0.5f;       // 0 = subtle changes, 1 = wild
     bool designWaves = true;      // invent new wavetables ("Custom") rather than only picking built-ins

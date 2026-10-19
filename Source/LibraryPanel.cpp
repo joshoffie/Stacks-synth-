@@ -192,16 +192,20 @@ void LibraryPanel::newFolder()
     w->addTextEditor ("name", "", "Name");
     w->addButton ("Create", 1, juce::KeyPress (juce::KeyPress::returnKey));
     w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
-    w->enterModalState (true, juce::ModalCallbackFunction::create ([this, w] (int result)
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([safe = juce::Component::SafePointer<LibraryPanel> (this), w] (int result)
     {
-        if (result == 1)
+        auto* self = safe.getComponent();
+        if (self != nullptr && result == 1)
         {
             const auto name = juce::File::createLegalFileName (w->getTextEditorContents ("name").trim());
             if (name.isNotEmpty())
             {
-                const auto folder = processor.libraryFolder().getChildFile (name);
-                folder.createDirectory();
-                openFolder (folder);
+                const auto folder = self->processor.libraryFolder().getChildFile (name);
+                if (! folder.createDirectory())
+                    juce::NativeMessageBox::showAsync (juce::MessageBoxOptions().withIconType (juce::MessageBoxIconType::WarningIcon)
+                                                           .withTitle ("Couldn't create that folder").withMessage (folder.getFullPathName()).withButton ("OK"), nullptr);
+                else
+                    self->openFolder (folder);
             }
         }
     }), true);
@@ -220,13 +224,15 @@ void LibraryPanel::saveHere()
     if (fromPreset)
         w->addButton ("Overwrite \"" + originalName + "\"", 2);
     w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
-    w->enterModalState (true, juce::ModalCallbackFunction::create ([this, w, original, originalName] (int result)
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([safe = juce::Component::SafePointer<LibraryPanel> (this), w, original, originalName] (int result)
     {
+        auto* self = safe.getComponent();
+        if (self == nullptr) return;
         if (result == 2)
-            processor.savePreset (originalName, original.getParentDirectory(), false);
+            self->processor.savePreset (originalName, original.getParentDirectory(), false);
         else if (result == 1)
-            processor.savePreset (w->getTextEditorContents ("name"), processor.libraryFolder(), true);
-        refresh();
+            self->processor.savePreset (w->getTextEditorContents ("name"), self->processor.libraryFolder(), true);
+        self->refresh();
     }), true);
 }
 
@@ -238,12 +244,15 @@ void LibraryPanel::confirmDelete (const juce::File& file)
                                            .withMessage ("Move \"" + file.getFileNameWithoutExtension() + "\" to the Trash?")
                                            .withButton ("Move to Trash")
                                            .withButton ("Cancel"),
-                                       [this, file] (int result)
+                                       [safe = juce::Component::SafePointer<LibraryPanel> (this), file] (int result)
                                        {
-                                           if (result == 0)   // the first button, Move to Trash (JUCE counts from 0)
+                                           auto* self = safe.getComponent();
+                                           if (self != nullptr && result == 0)   // the first button, Move to Trash (JUCE counts from 0)
                                            {
-                                               file.moveToTrash();
-                                               refresh();
+                                               if (! file.moveToTrash())
+                                                   juce::NativeMessageBox::showAsync (juce::MessageBoxOptions().withIconType (juce::MessageBoxIconType::WarningIcon)
+                                                                                          .withTitle ("Couldn't move that to the Trash").withMessage (file.getFullPathName()).withButton ("OK"), nullptr);
+                                               self->refresh();
                                            }
                                        });
 }
@@ -255,16 +264,17 @@ void LibraryPanel::editTags (const juce::File& file)
     w->addTextEditor ("tags", current ? current->tags.joinIntoString (", ") : juce::String(), "Tags");
     w->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
     w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
-    w->enterModalState (true, juce::ModalCallbackFunction::create ([this, w, file] (int result)
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([safe = juce::Component::SafePointer<LibraryPanel> (this), w, file] (int result)
     {
-        if (result != 1) return;
+        auto* self = safe.getComponent();
+        if (self == nullptr || result != 1) return;
         juce::StringArray tags;
         tags.addTokens (w->getTextEditorContents ("tags").toLowerCase(), ",", "");
         tags.trim();
         tags.removeEmptyStrings();
         tags.removeDuplicates (true);
-        processor.setFileTags (file, tags);
-        refresh();
+        self->processor.setFileTags (file, tags);
+        self->refresh();
     }), true);
 }
 
@@ -350,7 +360,13 @@ void LibraryPanel::refresh()
         if (activeTag.isNotEmpty() && ! row->tags.contains (activeTag))
             continue;
         row->setLoaded (loadedPath == f.getFullPathName());
-        row->onOpen  = [this, f] { processor.loadLibraryPatch (f); refresh(); };
+        row->onOpen  = [this, f]
+        {
+            if (! processor.loadLibraryPatch (f))
+                juce::NativeMessageBox::showAsync (juce::MessageBoxOptions().withIconType (juce::MessageBoxIconType::WarningIcon)
+                                                       .withTitle ("Couldn't open that preset").withMessage (f.getFileName() + " isn't a readable Stacks preset.").withButton ("OK"), nullptr);
+            refresh();
+        };
         row->onHeart = [this, f] { processor.toggleFavouriteFile (f); refresh(); };
         row->onMenu  = [this, f] { showMenuFor (f); };
         list.addAndMakeVisible (*row);

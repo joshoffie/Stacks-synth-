@@ -153,7 +153,7 @@ ParamKnob::ParamKnob (juce::AudioProcessorValueTreeState& apvts, const ParamSpec
 
     slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
     slider.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
-    baseTip = spec.aiHint;
+    baseTip = juce::String (spec.aiHint).upToFirstOccurrenceOf (" (User 1-4", false, false);   // the rest is guidance for the designer, not the player
     slider.setTooltip (baseTip);
     slider.onPopup = [this] { showModulationMenu(); };
     slider.onValueChange = [this] { if (showingValue) updateCaption(); if (! modulations.empty()) repaint(); };

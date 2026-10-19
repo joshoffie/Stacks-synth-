@@ -94,7 +94,7 @@ public:
     const LabState& lab() const                            { return labState; }
     juce::ChangeBroadcaster labBroadcaster;
 
-    void requestNewBatch (const juce::String& hint, float variation);
+    void requestNewBatch (const juce::String& hint, float variation, const juce::String& displayName = {});
     void requestFromKind (const juce::String& kind);   // home screen: "Pad", "Keys", "Bass"... becomes a brief of its own
     void requestEvolve (const juce::String& hint, float variation);
     void requestEvolveFrom (const Patch& parent, const juce::String& hint, float variation); // "plant" one candidate
@@ -206,6 +206,8 @@ public:
     // Song mode: analyse a whole track (tempo, key, where the mix has room) into a
     // brief for a fresh batch, and put the audition phrases in its key.
     bool designForSong (const juce::File&, juce::String& brief, juce::String& error);
+    // Either of the above on a background thread, then the matching batch request; the strip reports progress and errors.
+    void analyseAudioAsync (const juce::File&, float variation);
     static bool looksLikeASong (const juce::File&);     // longer than 20 seconds
     int previewRoot() const                                { return previewRootNote; }
 
@@ -323,6 +325,7 @@ private:
     std::atomic<int> dryWrite { 0 };
     juce::SmoothedValue<float> masterGain;
     double currentSampleRate = 44100.0;
+    int preparedBlockSize = 512;                          // the effects are sized for this; bigger host blocks are processed in pieces
     double currentBpm = 120.0;
 
     // Lab
@@ -346,7 +349,6 @@ private:
     int previewRemaining = 0;
     std::unique_ptr<ModelDownloader> downloader;
     int lastDownloadPercent = -1;
-    juce::ThreadPool pool { 2 };
     LabState labState;
     juce::File currentFolder;
     juce::String patchName { "Init" };
@@ -359,9 +361,11 @@ private:
     Patch loadedSnapshot;                                  // values as loaded, to spot edits
     std::vector<Patch> undoStack, redoStack;
     bool applyingUndo = false;
+    bool morphInProgress = false;                          // a block drag is running: one undo step for the whole gesture
     void writeFavouriteFlag (const juce::File&, bool);
     std::atomic<int> generationToken { 0 };                // bumps per request; stale callbacks are ignored (read from pool threads)
     std::atomic<bool> cancelRequested { false };
+    juce::ThreadPool pool { 2 };                           // last on purpose: destroyed first, so its jobs finish while everything they touch still exists
 
     JUCE_DECLARE_WEAK_REFERENCEABLE (StacksAudioProcessor)
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (StacksAudioProcessor)

@@ -19,6 +19,10 @@ double Arpeggiator::beatsPerStep (int rate) noexcept
 void Arpeggiator::prepare (double sampleRate)
 {
     sr = sampleRate > 0.0 ? sampleRate : 48000.0;
+    held.reserve (kMaxHeld);
+    orderScratch.reserve (kMaxHeld);
+    patternScratch.reserve (kMaxHeld * 4 * 4);   // every held key, four octaves, four chord notes
+    scratch.ensureSize (8192);
     reset();
 }
 
@@ -46,7 +50,8 @@ int Arpeggiator::nextNote (const Params& p, int& stepUsed)
     if (held.empty())
         return -1;
 
-    std::vector<Held> order = held;
+    auto& order = orderScratch;
+    order.assign (held.begin(), held.end());
     if (p.mode != 5)
         std::sort (order.begin(), order.end(), [] (const Held& a, const Held& b) { return a.note < b.note; });
     else
@@ -57,7 +62,8 @@ int Arpeggiator::nextNote (const Params& p, int& stepUsed)
     const auto& intervals = chords[juce::jlimit (0, 7, p.chord)];
 
     // The pattern over all octaves
-    std::vector<int> pattern;
+    auto& pattern = patternScratch;
+    pattern.clear();
     const int octaves = juce::jlimit (1, 4, p.octaves);
     for (int o = 0; o < octaves; ++o)
         for (const auto& h : order)
@@ -93,10 +99,10 @@ void Arpeggiator::process (juce::MidiBuffer& midi, int numSamples, const Params&
     {
         if (! wasOff)                 // just switched off: let any arp note go and forget the held list
         {
-            juce::MidiBuffer passthrough (midi);
-            midi.clear();
-            allNotesOff (midi, 0);
-            midi.addEvents (passthrough, 0, numSamples, 0);
+            scratch.clear();
+            allNotesOff (scratch, 0);
+            scratch.addEvents (midi, 0, numSamples, 0);
+            midi.swapWith (scratch);
             held.clear();
             wasOff = true;
         }
@@ -105,7 +111,8 @@ void Arpeggiator::process (juce::MidiBuffer& midi, int numSamples, const Params&
     wasOff = false;
 
     // Take the note messages, keep the rest.
-    juce::MidiBuffer out;
+    auto& out = scratch;
+    out.clear();
     for (const auto meta : midi)
     {
         const auto m = meta.getMessage();
@@ -119,7 +126,7 @@ void Arpeggiator::process (juce::MidiBuffer& midi, int numSamples, const Params&
             }
             bool known = false;
             for (auto& h : held) if (h.note == m.getNoteNumber()) { known = true; h.velocity = m.getVelocity(); h.released = false; }
-            if (! known) held.push_back ({ m.getNoteNumber(), (int) m.getVelocity(), orderCounter++, false });
+            if (! known && (int) held.size() < kMaxHeld) held.push_back ({ m.getNoteNumber(), (int) m.getVelocity(), orderCounter++, false });
             playingChannel = juce::jlimit (1, 16, m.getChannel());
         }
         else if (m.isNoteOff())

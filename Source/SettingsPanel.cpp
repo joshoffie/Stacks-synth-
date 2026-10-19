@@ -135,7 +135,7 @@ SettingsPanel::~SettingsPanel()
     setLookAndFeel (nullptr);
 }
 
-void SettingsPanel::show (StacksAudioProcessor& p, juce::Component* centreAround)
+juce::DialogWindow* SettingsPanel::show (StacksAudioProcessor& p, juce::Component* centreAround)
 {
     juce::DialogWindow::LaunchOptions o;
     o.content.setOwned (new SettingsPanel (p));
@@ -146,7 +146,7 @@ void SettingsPanel::show (StacksAudioProcessor& p, juce::Component* centreAround
     o.useNativeTitleBar = true;
     o.resizable = false;
     o.componentToCentreAround = centreAround;
-    o.launchAsync();
+    return o.launchAsync();
 }
 
 void SettingsPanel::paint (juce::Graphics& g)
@@ -303,9 +303,10 @@ void SettingsPanel::addModelFromUrl()
     w->addTextEditor ("url", "", "URL");
     w->addButton ("Download", 1, juce::KeyPress (juce::KeyPress::returnKey));
     w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
-    w->enterModalState (true, juce::ModalCallbackFunction::create ([this, w] (int result)
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([safe = juce::Component::SafePointer<SettingsPanel> (this), w] (int result)
     {
-        if (result != 1) return;
+        auto* self = safe.getComponent();
+        if (self == nullptr || result != 1) return;
         const juce::URL url (w->getTextEditorContents ("url").trim());
         const auto fileName = url.getFileName();
         if (! url.isWellFormed() || ! fileName.endsWithIgnoreCase (".gguf"))
@@ -320,9 +321,9 @@ void SettingsPanel::addModelFromUrl()
         m.label = m.file.getFileNameWithoutExtension().substring (0, 36);
         m.note = "downloaded from " + url.getDomain();
         m.url = url.toString (true);
-        if (! processor.startModelDownload (m))
-            statusLabel.setText ("A download is already running.", juce::dontSendNotification);
-        refresh();
+        if (! self->processor.startModelDownload (m))
+            self->statusLabel.setText ("A download is already running.", juce::dontSendNotification);
+        self->refresh();
     }), true);
 }
 

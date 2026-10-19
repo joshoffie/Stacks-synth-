@@ -236,7 +236,7 @@ public:
     {
         name = p.name;
         style = s;
-        ai = p.origin == "AI";
+        ai = p.isGrown();
         auditioned = isAuditioned;
         favourite = isFavourite;
         setTooltip (p.name + (p.category.isNotEmpty() ? "  (" + p.category + ")" : "")
@@ -441,7 +441,7 @@ void GardenView::refresh()
     for (int i = 0; i < (int) blocks.size(); ++i)
     {
         const auto& c = lab.candidates[(size_t) i];
-        blocks[(size_t) i]->set (c, styleFor (c, bank, c.origin == "AI"), i == lab.auditioned, c.favourite,
+        blocks[(size_t) i]->set (c, styleFor (c, bank, c.isGrown()), i == lab.auditioned, c.favourite,
                                  lab.seedIsPatch ? countAudibleDifferences (c, lab.seed) : -1);
     }
     seedStyled = lab.seedIsPatch;

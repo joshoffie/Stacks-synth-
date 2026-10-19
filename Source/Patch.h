@@ -21,6 +21,7 @@ struct Patch
     juce::String description;
     juce::String category;                 // e.g. "Pad", "Bass" — free text
     juce::String origin;                   // "AI" when a language model designed it, otherwise empty
+    bool isGrown() const noexcept          { return origin == "grown" || origin == "AI"; }   // designed by the engine (older files say "AI")
     std::array<float, kNumParams> values;  // real-world values; Choice params hold the index
     std::array<juce::String, kNumLfos> lfoShapes; // drawn LFO shapes as point JSON, empty = none
     std::array<juce::String, 4> userWaves;        // file names of the imported wavetables in User 1-4

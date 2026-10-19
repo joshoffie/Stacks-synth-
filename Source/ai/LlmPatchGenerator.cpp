@@ -633,7 +633,8 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
     juce::String reason;
     if (! backend->isAvailable (reason))
     {
-        progress.status ("Engine unavailable (" + reason + ") - using Random");
+        juce::Logger::writeToLog ("engine unavailable: " + reason);
+        progress.status ("The sound engine isn't ready - sketching instead");
         return fallback->generate (request, progress);
     }
 
@@ -644,8 +645,8 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
     if (req.hint.trim().isNotEmpty() && ! progress.cancelled())
     {
         const auto hint = req.hint.trim();
-        progress.status ("Thinking about \"" + hint + "\"...");
-        progress.progress (0.0f, "Thinking about what \"" + hint + "\" should sound like...");
+        progress.status ("Thinking...");
+        progress.progress (0.0f, "Thinking about what it should sound like...");
         juce::String brief, briefError;
         const juce::String briefGrammar = "root ::= [\\x20-\\x7E\\n]{80,700}\n";
         // Same system prompt as the patch call, so the model's cache of it is reused.
@@ -773,7 +774,7 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
 
         ensureMacroRoutings (*patch);
         patch->set (P::master_gain, -6.0f);
-        patch->origin = "AI";
+        patch->origin = "grown";
         patch->prompt = req.hint.trim();
         patch->parentName = req.parents.empty() ? juce::String() : base->name;
         if (patch->tags.isEmpty()) patch->tags = autoTags (*patch);
@@ -846,7 +847,8 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
 
     if (out.empty())
     {
-        progress.status ("Nothing usable came back (" + (ok ? juce::String ("empty reply") : error) + ") - using Random");
+        juce::Logger::writeToLog ("nothing usable came back: " + (ok ? juce::String ("empty reply") : error));
+        progress.status ("That take didn't land - sketching instead");
         return fallback->generate (req, progress);
     }
 

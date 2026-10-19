@@ -59,7 +59,7 @@ private:
 
     StacksAudioProcessor& processor;
     Stage stage = Stage::pick;
-    juce::String category, note;
+    juce::String category, note, pickNote;   // pickNote: why the last attempt came back empty
     std::vector<std::unique_ptr<Tile>> tiles;
     juce::TextButton growButton { "Grow from this one" }, backButton { "Start over" }, saveButton { "Save preset" }, openSynthButton { "Open the synth" };
     juce::TextButton closeButton { "Close" }, mediumButton { "Medium" }, farButton { "Far" };

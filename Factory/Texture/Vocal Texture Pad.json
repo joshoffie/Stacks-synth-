@@ -2,7 +2,7 @@
   "name": "Vocal Texture Pad",
   "description": "A pad with vocal formant resonance and subtle chorus swells (Vocal Resonance + Sine, light FM, 3-voice unison, LP24 @ 1.2 kHz, long tail, Key > Cutoff, LFO1 > Chorus Mix, reverb)",
   "category": "Texture",
-  "origin": "AI",
+  "origin": "grown",
   "tags": [
     "vocal",
     "warm",

@@ -21,7 +21,7 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
 
-    static void show (StacksAudioProcessor&, juce::Component* centreAround);
+    static juce::DialogWindow* show (StacksAudioProcessor&, juce::Component* centreAround);   // the caller owns the window's lifetime
     static juce::String guideText();
 
 private:

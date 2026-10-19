@@ -2,7 +2,7 @@
   "name": "Wobbly Tape Pluck",
   "description": "A plucked sound with slow tape delay wobble and vibrato (Grity Pluck + Saw(-12), light FM, HP12 @ 1.0 kHz, plucky, Key > Cutoff, LFO1 > Pitch, delay)",
   "category": "Pluck",
-  "origin": "AI",
+  "origin": "grown",
   "tags": [
     "wobble",
     "tape",

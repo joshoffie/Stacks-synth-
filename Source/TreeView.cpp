@@ -39,7 +39,7 @@ void FamilyTree::refresh()
         s.bounds = { x, kTop, kColumnW - 12.0f, kSeedH };
         s.generation = g; s.candidate = -1; s.seed = true;
         s.name = seed.name.isNotEmpty() ? seed.name : juce::String ("Fresh ideas");
-        s.tip = seedIsPatch ? "Seed of generation " + juce::String (g + 1) + ": " + seed.description : "Generation " + juce::String (g + 1) + " grew from a prompt" + (seed.prompt.isNotEmpty() ? ": " + seed.prompt : juce::String());
+        s.tip = seedIsPatch ? "Seed of generation " + juce::String (g + 1) + ": " + seed.description : "Generation " + juce::String (g + 1) + " grew from " + s.name;
         s.ai = seedIsPatch;
         nodes.push_back (s);
 
@@ -50,7 +50,7 @@ void FamilyTree::refresh()
             n.bounds = { x, y, kColumnW - 12.0f, kRowH - 2.0f };
             n.generation = g; n.candidate = i;
             n.name = candidates[(size_t) i].name;
-            n.ai = candidates[(size_t) i].origin == "AI";
+            n.ai = candidates[(size_t) i].isGrown();
             n.tip = candidates[(size_t) i].description;
             if (seedIsPatch) n.tip << "\n" << countAudibleDifferences (candidates[(size_t) i], seed) << " audible changes from its seed";
             nodes.push_back (n);

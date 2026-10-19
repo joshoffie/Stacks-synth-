@@ -46,9 +46,18 @@ std::unique_ptr<SampleData> SampleBank::read (const juce::File& file, juce::Stri
 void SampleBank::setActive (std::unique_ptr<SampleData> data)
 {
     const SampleData* raw = data.get();
-    if (data != nullptr)
-        owned.push_back (std::move (data));
     active.store (raw, std::memory_order_release);
+    if (current_ != nullptr)
+        retired.emplace_back (std::move (current_), juce::Time::getMillisecondCounterHiRes());
+    current_ = std::move (data);
+}
+
+void SampleBank::retireOld (double olderThanSeconds)
+{
+    const double now = juce::Time::getMillisecondCounterHiRes();
+    retired.erase (std::remove_if (retired.begin(), retired.end(),
+                                   [&] (const auto& r) { return now - r.second > olderThanSeconds * 1000.0; }),
+                   retired.end());
 }
 
 //==============================================================================

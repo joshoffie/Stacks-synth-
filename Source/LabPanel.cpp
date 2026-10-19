@@ -210,13 +210,14 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
                                                .withTitle ("Clear the Lab?")
                                                .withMessage ("Every generation and the family tree go. Your sound and your saved presets stay.")
                                                .withButton ("Clear").withButton ("Cancel").withAssociatedComponent (this),
-                                           [this] (int result)
+                                           [safe = juce::Component::SafePointer<LabPanel> (this)] (int result)
                                            {
-                                               if (result != 0) return;   // the first button, Clear
-                                               processor.clearLab();
-                                               hint.setText ({}, juce::dontSendNotification);
-                                               tweak.setText ({}, juce::dontSendNotification);
-                                               showView (View::garden);
+                                               auto* self = safe.getComponent();
+                                               if (self == nullptr || result != 0) return;   // the first button, Clear
+                                               self->processor.clearLab();
+                                               self->hint.setText ({}, juce::dontSendNotification);
+                                               self->tweak.setText ({}, juce::dontSendNotification);
+                                               self->showView (View::garden);
                                            });
     };
     addAndMakeVisible (clearButton);
@@ -396,28 +397,10 @@ void LabPanel::filesDropped (const juce::StringArray& files, int, int)
 // Analyse -> imitation as the current sound -> the brief in the prompt box -> Evolve.
 void LabPanel::recreateFromAudio (const juce::File& file)
 {
-    juce::String brief, error;
-    if (StacksAudioProcessor::looksLikeASong (file))
-    {
-        // A whole track: tempo, key and the room in the mix become the brief for a fresh batch.
-        if (! processor.designForSong (file, brief, error))
-        {
-            juce::NativeMessageBox::showAsync (juce::MessageBoxOptions().withIconType (juce::MessageBoxIconType::WarningIcon)
-                                                   .withTitle ("Couldn't analyse that track").withMessage (error).withButton ("OK"), nullptr);
-            return;
-        }
-        hint.setText (brief, juce::dontSendNotification);
-        processor.requestNewBatch (brief, (float) variation.getValue());
-        return;
-    }
-    if (! processor.recreateFromAudio (file, brief, error))
-    {
-        juce::NativeMessageBox::showAsync (juce::MessageBoxOptions().withIconType (juce::MessageBoxIconType::WarningIcon)
-                                               .withTitle ("Couldn't recreate that file").withMessage (error).withButton ("OK"), nullptr);
-        return;
-    }
-    hint.setText (brief, juce::dontSendNotification);
-    processor.requestEvolve (brief, (float) variation.getValue());
+    // A one-shot becomes an imitation to evolve from; a whole track becomes a
+    // brief for a fresh batch. Both are analysed in the background; the strip
+    // reports what was heard, or why it couldn't be.
+    processor.analyseAudioAsync (file, (float) variation.getValue());
 }
 
 void LabPanel::paint (juce::Graphics& g)
@@ -494,7 +477,7 @@ void LabPanel::layoutCards()
 
     int aiCount = 0, randomCount = 0;
     for (const auto& c : lab.candidates)
-        (c.origin == "AI" ? aiCount : randomCount)++;
+        (c.isGrown() ? aiCount : randomCount)++;
 
     const bool aiBusy = lab.generating && aiEngine;
     const bool showAi = aiCount > 0 || aiBusy;
@@ -515,7 +498,7 @@ void LabPanel::layoutCards()
         const int shown = (int) juce::jmin (cards.size(), lab.candidates.size());
         for (int i = 0; i < shown; ++i)
         {
-            if (lab.candidates[(size_t) i].origin != "AI") continue;
+            if (! lab.candidates[(size_t) i].isGrown()) continue;
             cards[(size_t) i]->setVisible (true);
             cards[(size_t) i]->setBounds (0, y, width, PatchCard::kHeight);
             y += PatchCard::kHeight;
@@ -532,7 +515,7 @@ void LabPanel::layoutCards()
     }
     for (int i = 0; i < (int) juce::jmin (cards.size(), lab.candidates.size()); ++i)
     {
-        if (lab.candidates[(size_t) i].origin == "AI") continue;
+        if (lab.candidates[(size_t) i].isGrown()) continue;
         cards[(size_t) i]->setVisible (expanded);
         if (expanded)
         {
@@ -591,7 +574,7 @@ void LabPanel::refresh()
     generationLabel.setText (lab.generation > 0 ? "GEN " + juce::String (lab.generation) : juce::String(), juce::dontSendNotification);
 
     const bool busy = processor.isBusy();
-    evolveButton.setTooltip ("Ten descendants of \"" + processor.currentPatchName() + "\", the sound you're playing now, steered by the direction text");
+    evolveButton.setTooltip ("Five descendants of \"" + processor.currentPatchName() + "\", the sound you're playing now; Variation sets how far they stray");
     evolveButton.setEnabled (! busy);
     newBatchButton.setButtonText (busy ? "Stop" : "Generate");
     newBatchButton.setTooltip (lab.generating ? "Stop generating; keep what has arrived"
@@ -623,7 +606,7 @@ void LabPanel::refresh()
     for (int i = 0; i < (int) cards.size(); ++i)
     {
         const auto& c = lab.candidates[(size_t) i];
-        cards[(size_t) i]->set (c, c.origin == "AI" ? PatchCard::Style::ai : PatchCard::Style::random,
+        cards[(size_t) i]->set (c, c.isGrown() ? PatchCard::Style::ai : PatchCard::Style::random,
                                 i == lab.auditioned, c.favourite, lab.seedIsPatch ? countAudibleDifferences (c, lab.seed) : -1);
     }
 
@@ -654,7 +637,7 @@ void LabPanel::refresh()
     // the last status line when nothing is happening.
     {
         int aiDone = 0;
-        for (const auto& c : lab.candidates) if (c.origin == "AI") ++aiDone;
+        for (const auto& c : lab.candidates) if (c.isGrown()) ++aiDone;
         const bool aiEngine = processor.engine().kind != EngineKind::Random;
         const bool batch = lab.generating && aiEngine;
         const bool otherWork = lab.tweaking || lab.explaining || processor.isDownloading();
@@ -696,18 +679,21 @@ void LabPanel::savePresetDialog()
     if (fromPreset)
         w->addButton ("Overwrite \"" + originalName + "\"", 2);
     w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
-    w->enterModalState (true, juce::ModalCallbackFunction::create ([this, w, folders, original, originalName] (int result)
+    // The window can outlive this panel (the plug-in window closes while it is up), so it holds a safe pointer.
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([safe = juce::Component::SafePointer<LabPanel> (this), w, folders, original, originalName] (int result)
     {
+        auto* self = safe.getComponent();
+        if (self == nullptr) return;
         if (result == 2)
         {
-            processor.savePreset (originalName, original.getParentDirectory(), false);
+            self->processor.savePreset (originalName, original.getParentDirectory(), false);
         }
         else if (result == 1)
         {
             const int idx = w->getComboBoxComponent ("folder")->getSelectedItemIndex();
             const auto folder = idx >= 0 && idx < (int) folders.size() ? folders[(size_t) idx] : StacksAudioProcessor::libraryRoot();
-            processor.savePreset (w->getTextEditorContents ("name"), folder, true);
-            processor.setLibraryFolder (folder);
+            self->processor.savePreset (w->getTextEditorContents ("name"), folder, true);
+            self->processor.setLibraryFolder (folder);
         }
     }), true);
 }
