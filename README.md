@@ -286,9 +286,10 @@ UI. Any subset of these keys, hex `rrggbb` or `aarrggbb`:
 
 The step-by-step release checklist is in `Packaging/RELEASING.md`.
 
-`Packaging/build-installer.sh` builds `dist/Stacks-<version>.pkg`: one
+`Packaging/build-installer.sh` builds `dist/Stacks-<version>.pkg`, one
 installer with the Audio Unit, the VST3, the standalone app and the sound
-engine data (the 2.5 GB GGUF, installed to
+engine data, plus `dist/Stacks-<version>-update.pkg`, a few MB without the
+engine data for Macs that already have it (the 2.5 GB GGUF, installed to
 `/Library/Application Support/Stacks/models`, where the plug-in looks after the
 user's own folder). The bundles are signed with the Developer ID Application
 certificate under the hardened runtime and the package with the Developer ID

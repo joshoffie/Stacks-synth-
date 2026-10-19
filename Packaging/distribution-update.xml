@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+    <title>Stacks</title>
+    <organization>com.hoffmanaudio</organization>
+    <domains enable_localSystem="true"/>
+    <options customize="allow" require-scripts="false" hostArchitectures="arm64,x86_64"/>
+    <welcome file="welcome-update.txt" mime-type="text/plain"/>
+    <conclusion file="conclusion.txt" mime-type="text/plain"/>
+    <choices-outline>
+        <line choice="au"/>
+        <line choice="vst3"/>
+        <line choice="app"/>
+    </choices-outline>
+    <choice id="au" title="Audio Unit" description="For Logic Pro, GarageBand and other Audio Unit hosts. Lands in /Library/Audio/Plug-Ins/Components.">
+        <pkg-ref id="com.hoffmanaudio.stacks.au"/>
+    </choice>
+    <choice id="vst3" title="VST3" description="For Ableton Live, Cubase, Reaper, Bitwig, FL Studio and other VST3 hosts. Lands in /Library/Audio/Plug-Ins/VST3.">
+        <pkg-ref id="com.hoffmanaudio.stacks.vst3"/>
+    </choice>
+    <choice id="app" title="Stacks app" description="Stacks as its own app, no DAW needed. Lands in Applications.">
+        <pkg-ref id="com.hoffmanaudio.stacks.app"/>
+    </choice>
+    <pkg-ref id="com.hoffmanaudio.stacks.au" version="@VERSION@" onConclusion="none">Stacks-AU.pkg</pkg-ref>
+    <pkg-ref id="com.hoffmanaudio.stacks.vst3" version="@VERSION@" onConclusion="none">Stacks-VST3.pkg</pkg-ref>
+    <pkg-ref id="com.hoffmanaudio.stacks.app" version="@VERSION@" onConclusion="none">Stacks-App.pkg</pkg-ref>
+</installer-gui-script>

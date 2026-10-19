@@ -24,19 +24,25 @@ Everything here runs on your Mac. Friends only ever receive the `.pkg` file.
    Developer ID Application certificate (hardened runtime), bundles the engine
    data, builds the package, signs it with the Developer ID Installer
    certificate, uploads it to Apple's notary service, waits for "Accepted"
-   (a few minutes) and staples the ticket. It leaves
-   `dist/Stacks-<version>.pkg` (about 2.3 GB).
+   (a few minutes) and staples the ticket. It leaves two files:
 
-   `--skip-build` reuses the binaries already in `build.nosync` (handy when only
-   the package needs remaking).
+   - `dist/Stacks-<version>.pkg` — the **full installer**, about 2.3 GB.
+     Plug-ins, app and the engine data. For a first install on a Mac.
+   - `dist/Stacks-<version>-update.pkg` — the **update**, a few MB. Plug-ins
+     and app only; it reuses the engine data already on the Mac.
 
-3. **Send the file.** Upload `dist/Stacks-<version>.pkg` to Drive, Dropbox or
-   similar and share the link.
+   `--update-only` builds just the update (no engine file needed).
+   `--skip-build` reuses the binaries already in `build.nosync`.
+
+3. **Send the right file.** First-timers get the full installer; everyone who
+   already has Stacks gets the update. Upload to Drive, Dropbox or similar and
+   share the link.
 
 ## What the friend does
 
 Download, double click, click through. Same steps for the first install and
-every update; the new version replaces the old one. Then restart the DAW (or
+every update; the new version replaces the old one. The update package only
+works on a Mac that has had the full installer once (it has no engine data). Then restart the DAW (or
 in Logic: Plug-in Manager → Reset & Rescan). Stacks appears under Hoffman Audio.
 
 Because the package is notarised and stapled, Gatekeeper opens it with a
@@ -67,7 +73,7 @@ double click; no right-click → Open, no "Open Anyway".
 ## Files
 
 - `Packaging/build-installer.sh` — the whole pipeline.
-- `Packaging/distribution.xml` — the installer's choices and text (no mention of what runs underneath).
-- `Packaging/welcome.txt`, `conclusion.txt` — the screens the friend reads.
+- `Packaging/distribution.xml`, `distribution-update.xml` — the full and update installers' choices and text (no mention of what runs underneath).
+- `Packaging/welcome.txt`, `welcome-update.txt`, `conclusion.txt` — the screens the friend reads.
 - `Packaging/Stacks.entitlements` — hardened-runtime entitlements for the bundles.
 - `dist/` — output, ignored by git.

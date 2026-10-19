@@ -2,7 +2,12 @@
 # Builds the signed macOS installer: Stacks-<version>.pkg with the Audio Unit,
 # the VST3, the standalone app and the sound engine data.
 #
-#   Packaging/build-installer.sh [--model /path/to/engine.gguf] [--notary-profile NAME] [--skip-build]
+#   Packaging/build-installer.sh [--model /path/to/engine.gguf] [--notary-profile NAME] [--skip-build] [--update-only]
+#
+# Produces dist/Stacks-<version>.pkg (full: plug-ins, app and the engine data,
+# for a first install) and dist/Stacks-<version>-update.pkg (plug-ins and app
+# only, a few MB, for everyone who already has the engine data). --update-only
+# skips the full package and does not need the engine file.
 #
 # Signing uses the Developer ID certificates in the login keychain. Pass
 # --notary-profile with a profile made by `xcrun notarytool store-credentials`
@@ -22,12 +27,14 @@ PKG_ID="Developer ID Installer"
 MODEL=""
 PROFILE=""
 SKIP_BUILD=0
+UPDATE_ONLY=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --model) MODEL="$2"; shift 2 ;;
         --notary-profile) PROFILE="$2"; shift 2 ;;
         --skip-build) SKIP_BUILD=1; shift ;;
+        --update-only) UPDATE_ONLY=1; shift ;;
         *) echo "unknown option $1" >&2; exit 2 ;;
     esac
 done
@@ -42,10 +49,12 @@ if [ -z "$MODEL" ]; then
         [ -f "$candidate" ] && MODEL="$candidate" && break
     done
 fi
-[ -f "$MODEL" ] || { echo "engine data not found; pass --model /path/to/Qwen3-4B-Q4_K_M.gguf" >&2; exit 1; }
+if [ "$UPDATE_ONLY" = 0 ]; then
+    [ -f "$MODEL" ] || { echo "engine data not found; pass --model /path/to/Qwen3-4B-Q4_K_M.gguf (or --update-only)" >&2; exit 1; }
+fi
 
 echo "== Stacks $VERSION"
-echo "   engine data: $MODEL ($(du -h "$MODEL" | cut -f1))"
+[ "$UPDATE_ONLY" = 0 ] && echo "   engine data: $MODEL ($(du -h "$MODEL" | cut -f1))"
 
 if [ "$SKIP_BUILD" = 0 ]; then
     echo "== building"
@@ -59,8 +68,10 @@ mkdir -p "$STAGE/app" "$STAGE/au" "$STAGE/vst3" "$STAGE/engine/Library/Applicati
 cp -R "$ART/Standalone/Stacks.app" "$STAGE/app/"
 cp -R "$ART/AU/Stacks.component" "$STAGE/au/"
 cp -R "$ART/VST3/Stacks.vst3" "$STAGE/vst3/"
-cp "$MODEL" "$STAGE/engine/Library/Application Support/Stacks/models/Qwen3-4B-Q4_K_M.gguf"
-chmod -R a+rX "$STAGE/engine"
+if [ "$UPDATE_ONLY" = 0 ]; then
+    cp "$MODEL" "$STAGE/engine/Library/Application Support/Stacks/models/Qwen3-4B-Q4_K_M.gguf"
+    chmod -R a+rX "$STAGE/engine"
+fi
 cp "$ROOT/Packaging/welcome.txt" "$ROOT/Packaging/conclusion.txt" "$STAGE/res/"
 
 echo "== signing bundles"
@@ -79,25 +90,36 @@ pkgbuild --component "$STAGE/vst3/Stacks.vst3" --install-location /Library/Audio
          --identifier com.hoffmanaudio.stacks.vst3 --version "$VERSION" "$WORK/pkgs/Stacks-VST3.pkg" >/dev/null
 pkgbuild --component "$STAGE/app/Stacks.app" --install-location /Applications \
          --identifier com.hoffmanaudio.stacks.app --version "$VERSION" "$WORK/pkgs/Stacks-App.pkg" >/dev/null
-pkgbuild --root "$STAGE/engine" --install-location / \
-         --identifier com.hoffmanaudio.stacks.engine --version "$VERSION" "$WORK/pkgs/Stacks-Engine.pkg" >/dev/null
-
-echo "== product package"
-sed "s/@VERSION@/$VERSION/g" "$ROOT/Packaging/distribution.xml" > "$WORK/distribution.xml"
-PKG="$WORK/Stacks-$VERSION.pkg"
-FINAL="$OUT/Stacks-$VERSION.pkg"
-productbuild --distribution "$WORK/distribution.xml" --package-path "$WORK/pkgs" --resources "$STAGE/res" \
-             --sign "$PKG_ID" --timestamp "$PKG" >/dev/null
-pkgutil --check-signature "$PKG" | head -3
-
-if [ -n "$PROFILE" ]; then
-    echo "== notarising (this takes a few minutes)"
-    xcrun notarytool submit "$PKG" --keychain-profile "$PROFILE" --wait
-    xcrun stapler staple "$PKG"
-    spctl -a -vv -t install "$PKG"
-else
-    echo "   not notarised: pass --notary-profile NAME to notarise and staple"
+if [ "$UPDATE_ONLY" = 0 ]; then
+    pkgbuild --root "$STAGE/engine" --install-location / \
+             --identifier com.hoffmanaudio.stacks.engine --version "$VERSION" "$WORK/pkgs/Stacks-Engine.pkg" >/dev/null
 fi
 
-mv -f "$PKG" "$FINAL"
-echo "== done: $FINAL ($(du -h "$FINAL" | cut -f1))"
+cp "$ROOT/Packaging/welcome-update.txt" "$STAGE/res/"
+
+# Two products from the same components: the full installer (first install,
+# carries the engine data) and the update (plug-ins and app only, a few MB).
+build_product() {   # $1 distribution file, $2 output name
+    echo "== product package: $2"
+    sed "s/@VERSION@/$VERSION/g" "$ROOT/Packaging/$1" > "$WORK/$1"
+    local pkg="$WORK/$2"
+    productbuild --distribution "$WORK/$1" --package-path "$WORK/pkgs" --resources "$STAGE/res" \
+                 --sign "$PKG_ID" --timestamp "$pkg" >/dev/null
+    pkgutil --check-signature "$pkg" | sed -n 2p
+    if [ -n "$PROFILE" ]; then
+        echo "   notarising (a few minutes)"
+        xcrun notarytool submit "$pkg" --keychain-profile "$PROFILE" --wait | grep -E "status:|id:" | tail -2
+        xcrun stapler staple "$pkg" >/dev/null
+        spctl -a -vv -t install "$pkg" 2>&1 | sed -n 2p
+    else
+        echo "   not notarised: pass --notary-profile NAME to notarise and staple"
+    fi
+    mv -f "$pkg" "$OUT/$2"
+    echo "   $OUT/$2 ($(du -h "$OUT/$2" | cut -f1))"
+}
+
+build_product distribution-update.xml "Stacks-$VERSION-update.pkg"
+if [ "$UPDATE_ONLY" = 0 ]; then
+    build_product distribution.xml "Stacks-$VERSION.pkg"
+fi
+echo "== done"

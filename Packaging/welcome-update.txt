@@ -1,0 +1,7 @@
+This updates Stacks to a newer build.
+
+It replaces the Audio Unit, the VST3 and the Stacks app. Your saved presets and settings stay as they are, and the sound engine data installed earlier is reused.
+
+If Stacks has never been installed on this Mac, use the full installer instead: this update does not include the sound engine data.
+
+After installing, restart your DAW (Logic Pro: Plug-in Manager, then Reset & Rescan Selection).
