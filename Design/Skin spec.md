@@ -5,6 +5,17 @@ export them with the same names and sizes, and the plug-in shows your version.
 Any file you leave out keeps the built-in look, so you can work one piece at a
 time.
 
+## Read this first: why knobs look different colours
+
+Every knob on screen is the **same grey body** (knob.png) with a **coloured ring
+drawn over it by the app** in the colour of its section: amber for oscillators,
+coral for the filter, teal for modulators, blue for effects. That ring also
+shows the value. So there is one knob file, and it is grey on purpose. If you
+want a different body per section, add the optional per-section files below.
+
+The folder `annotated/` holds screenshots with each file's name written next
+to the piece it paints. Start there.
+
 ## Working rules
 
 - **PNG, 2x.** Every file is painted at twice its on-screen size (one screen
@@ -34,6 +45,7 @@ right, bottom in screen pixels.
 | File | Size | Notes |
 |---|---|---|
 | knob.png | 96 x 9696 | 101 frames of 96 x 96, top = minimum, bottom = maximum. The body only; the coloured arc is drawn by the app. Frame includes a 14 px margin for the arc. |
+| knob-sound.png, knob-filter.png, knob-movement.png, knob-space.png, knob-shape.png, knob-macro.png, knob-sample.png | 96 x 9696 | optional: a different knob body per section (amber oscillator row, coral filter row, teal modulators, blue effects, violet distortion/compressor, gold macros, green sample). Any section without its own file uses knob.png. |
 | knob-master.png | 88 x 8888 | 101 frames of 88 x 88, the header volume knob. |
 
 ### Buttons

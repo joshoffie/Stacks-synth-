@@ -392,6 +392,16 @@ int GardenView::rowOf (int index, int& column, int& count) const
     }
 }
 
+std::vector<std::pair<juce::String, juce::Rectangle<int>>> GardenView::skinPieces() const
+{
+    std::vector<std::pair<juce::String, juce::Rectangle<int>>> out;
+    const auto slab = slabFace();
+    out.emplace_back ("slab.png", slab.withTop (slab.getY() - kSlabDepth).withRight (slab.getRight() + kSlabDepth).toNearestInt());
+    if (! blocks.empty() && blocks.front()->isVisible())
+        out.emplace_back ("block.png", blocks.front()->getBounds());
+    return out;
+}
+
 juce::Rectangle<float> GardenView::slabFace() const
 {
     const float w = 4.0f * baseBlockWidth() + 3.0f * kGap + 12.0f;

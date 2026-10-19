@@ -63,6 +63,9 @@ private:
     void updateTimer();
     juce::Rectangle<float> slotFor (int index) const;   // front face of slot `index`
     juce::Rectangle<float> slabFace() const;
+public:
+    std::vector<std::pair<juce::String, juce::Rectangle<int>>> skinPieces() const;   // slab and first block, own coordinates
+private:
     float baseBlockWidth() const;
     float blockHeight() const;                          // taller when the panel has room, so blocks read as cubes
     int rowOf (int index, int& column, int& count) const;

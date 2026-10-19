@@ -121,6 +121,9 @@ private:
     enum class View { garden, tree, ideas, library, explain };
     friend class StacksAudioProcessorEditor;   // renderScreens walks the views
     void showView (View);
+public:
+    std::vector<std::pair<juce::String, juce::Rectangle<int>>> skinPieces() const;   // the panel, the slab, a block; own coordinates
+private:
     void scrollTreeToNewest();
 
     StacksAudioProcessor& processor;

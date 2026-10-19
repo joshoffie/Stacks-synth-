@@ -39,6 +39,12 @@ namespace colours
 // is created.
 void loadThemeFile (const juce::File&);
 
+namespace colours
+{
+    // "sound", "filter", "movement", "space", "shape", "macro", "sample" for a row colour, else empty.
+    juce::String rowNameFor (juce::Colour);
+}
+
 // One colour per modulation source, used for rings, editors and tabs.
 juce::Colour modSourceColour (int source);
 

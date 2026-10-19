@@ -700,6 +700,16 @@ void LabPanel::savePresetDialog()
     }), true);
 }
 
+std::vector<std::pair<juce::String, juce::Rectangle<int>>> LabPanel::skinPieces() const
+{
+    std::vector<std::pair<juce::String, juce::Rectangle<int>>> out;
+    out.emplace_back ("lab.png", getLocalBounds());
+    if (garden.isVisible())
+        for (const auto& p : garden.skinPieces())
+            out.emplace_back (p.first, getLocalArea (&garden, p.second));
+    return out;
+}
+
 void LabPanel::showView (View v)
 {
     view = v;

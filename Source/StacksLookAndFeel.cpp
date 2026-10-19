@@ -196,7 +196,14 @@ void StacksLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int w
     const float zeroAngle = startAngle + zeroPos * (endAngle - startAngle);
 
     // A skinned knob: the filmstrip is the body; the coloured arc stays unless the skin says otherwise.
-    const juce::String strip = juce::jmin (width, height) >= 40 && skin::has ("knob-master") ? "knob-master" : "knob";
+    // "knob-master" for the big header knob, "knob-<section>" when that section's knob has its own strip, else "knob".
+    juce::String strip = "knob";
+    if (juce::jmin (width, height) >= 40 && skin::has ("knob-master")) strip = "knob-master";
+    else
+    {
+        const auto section = colours::rowNameFor (fill);
+        if (section.isNotEmpty() && skin::has ("knob-" + section)) strip = "knob-" + section;
+    }
     if (skin::has (strip))
     {
         if (skin::knobArc())

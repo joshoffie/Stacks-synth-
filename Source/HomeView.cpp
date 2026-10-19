@@ -209,6 +209,22 @@ void HomeView::growFromPreset (const juce::File& file)
     refresh();
 }
 
+std::vector<std::pair<juce::String, juce::Rectangle<int>>> HomeView::skinPieces() const
+{
+    std::vector<std::pair<juce::String, juce::Rectangle<int>>> out;
+    if (stage == Stage::pick)
+    {
+        if (! tiles.empty()) out.emplace_back ("tile-" + tiles.front()->name.toLowerCase() + ".png", tiles.front()->getBounds());
+        return out;
+    }
+    const auto area = stackArea();
+    const float bw = juce::jmin (150.0f, (area.getWidth() - 40.0f) / 4.6f);
+    const float rowW = 4.0f * bw + 3.0f * 14.0f;
+    out.emplace_back ("slab.png", juce::Rectangle<float> (area.getCentreX() - rowW * 0.5f - 8.0f, area.getBottom() - 50.0f, rowW + 26.0f, 44.0f).toNearestInt());
+    if (! blockComps.empty() && blockComps.front()->isVisible()) out.emplace_back ("block.png", blockComps.front()->getBounds());
+    return out;
+}
+
 void HomeView::pick (const juce::String& kind)
 {
     if (processor.isBusy())

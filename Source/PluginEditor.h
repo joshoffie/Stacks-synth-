@@ -32,6 +32,8 @@ public:
     // view) to numbered PNG files at `scale` times the window size. Used by the
     // StacksUiKit tool to hand the UI to a designer; the editor ends up back on Home.
     void renderScreens (const juce::File& directory, float scale);
+    // The same screens with each skin file's name written next to the piece it paints.
+    void annotateScreens (const juce::File& directory, float scale);
 
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;

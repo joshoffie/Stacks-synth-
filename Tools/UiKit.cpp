@@ -209,11 +209,13 @@ int main (int argc, char** argv)
     if (argc < 2)
     {
         std::printf ("usage: StacksUiKit <output directory> [scale] [preset.json]\n"
-                     "       StacksUiKit --export-skin <output directory> [scale]\n");
+                     "       StacksUiKit --export-skin <output directory> [scale]\n"
+                     "       StacksUiKit --annotate <output directory>        (screens with the skin file names written on)\n");
         return 2;
     }
     juce::ScopedJuceInitialiser_GUI init;
     const auto cwd = juce::File::getCurrentWorkingDirectory();
+    const bool annotate = juce::String (argv[1]) == "--annotate" && argc > 2;
     if (juce::String (argv[1]) == "--export-skin" && argc > 2)
     {
         stacks::StacksLookAndFeel lnf;
@@ -225,8 +227,8 @@ int main (int argc, char** argv)
         std::printf ("%d skin files written to %s\n", e.written, e.dir.getFullPathName().toRawUTF8());
         return 0;
     }
-    const auto outDir = cwd.getChildFile (argv[1]);
-    const float scale = argc > 2 ? (float) juce::String (argv[2]).getDoubleValue() : 2.0f;
+    const auto outDir = cwd.getChildFile (annotate ? argv[2] : argv[1]);
+    const float scale = ! annotate && argc > 2 ? (float) juce::String (argv[2]).getDoubleValue() : 2.0f;
     const auto repo = juce::File (__FILE__).getParentDirectory().getParentDirectory();
     const auto preset = argc > 3 ? cwd.getChildFile (argv[3]) : repo.getChildFile ("Factory/Pad/Warm Analog.json");
 
@@ -240,7 +242,8 @@ int main (int argc, char** argv)
     if (stacksEditor == nullptr)
         return 1;
     stacksEditor->setSize (1500, 860);
-    stacksEditor->renderScreens (outDir, scale > 0.0f ? scale : 2.0f);
+    if (annotate) stacksEditor->annotateScreens (outDir, 2.0f);
+    else          stacksEditor->renderScreens (outDir, scale > 0.0f ? scale : 2.0f);
     std::printf ("screens written to %s\n", outDir.getFullPathName().toRawUTF8());
     editor.reset();
     processor.reset();

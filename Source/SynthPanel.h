@@ -88,6 +88,8 @@ public:
     void endAssign();
     void setView (int rowIndex);                              // -1 = all rows, -2 = the macros page
     ModulatorsPanel* modulatorsPanel() const                  { return modulators.get(); }
+    // (skin file name, rectangle in this panel's coordinates) for the first card, display well and effect link on show
+    std::vector<std::pair<juce::String, juce::Rectangle<int>>> skinPieces() const;
     int numRows() const                                       { return (int) rows.size(); }
 
 private:

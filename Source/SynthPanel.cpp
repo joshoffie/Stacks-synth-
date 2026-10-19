@@ -834,6 +834,29 @@ void SynthPanel::handleAsyncUpdate()
     }
 }
 
+std::vector<std::pair<juce::String, juce::Rectangle<int>>> SynthPanel::skinPieces() const
+{
+    std::vector<std::pair<juce::String, juce::Rectangle<int>>> out;
+    bool card = false, inset = false, link = false;
+    for (const auto& row : rows)
+    {
+        if (row.container == nullptr || ! row.container->isVisible()) continue;
+        for (size_t i = 0; i < row.sections.size(); ++i)
+        {
+            const auto* s = row.sections[i];
+            if (! card && ! s->cells.empty()) { out.emplace_back ("card.png", getLocalArea (row.container.get(), s->bounds)); card = true; }
+            if (! inset && s->display != nullptr) { out.emplace_back ("inset.png", getLocalArea (s->display->getParentComponent(), s->display->getBounds())); inset = true; }
+            if (! link && row.caption == "EFFECTS" && i + 1 < row.sections.size())
+            {
+                const auto a = s->bounds, b = row.sections[i + 1]->bounds;
+                out.emplace_back ("link-on.png", getLocalArea (row.container.get(), juce::Rectangle<int> (a.getRight(), a.getCentreY() - 7, b.getX() - a.getRight(), 14)));
+                link = true;
+            }
+        }
+    }
+    return out;
+}
+
 int SynthPanel::effectIndexFor (const juce::String& title)
 {
     static const char* titles[kNumFx] = { "DISTORTION", "EQ", "CHORUS", "HYPER", "TAPE", "DELAY", "REVERB", "COMPRESSOR" };

@@ -38,6 +38,16 @@ void loadThemeFile (const juce::File& file)
     pick ("rowSample",   colours::rowSample);
 }
 
+juce::String colours::rowNameFor (juce::Colour c)
+{
+    struct Row { juce::Colour colour; const char* name; };
+    const Row rows[] = { { rowSound, "sound" }, { rowFilter, "filter" }, { rowMovement, "movement" }, { rowSpace, "space" },
+                         { rowShape, "shape" }, { rowMacro, "macro" }, { rowSample, "sample" } };
+    for (const auto& r : rows)
+        if (r.colour.getARGB() == c.getARGB()) return r.name;
+    return {};
+}
+
 juce::Colour modSourceColour (int source)
 {
     switch (source)
