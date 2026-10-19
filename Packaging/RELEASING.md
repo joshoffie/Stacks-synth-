@@ -38,6 +38,26 @@ Everything here runs on your Mac. Friends only ever receive the `.pkg` file.
    already has Stacks gets the update. Upload to Drive, Dropbox or similar and
    share the link.
 
+## How updates work (the model in one paragraph)
+
+The 2.3 GB is not the plug-in. It is one data file (the engine, a GGUF) that
+the plug-in reads, installed once to `/Library/Application Support/Stacks/models`.
+Everything that changes between builds lives in the plug-ins and the app, about
+15 MB together. So: a first-timer gets the **full** package once; from then on
+every new build goes out as the **update** package, which overwrites the
+plug-ins and app in place and leaves the engine data alone. There is always
+one copy of Stacks on their Mac, the one most recently sent; nothing piles up,
+and their presets and settings (in their home folder) are never touched.
+
+- Someone new later: full package, whatever version is current (the full
+  package always carries the current code as well).
+- The engine data changes (a different model file): that build must go out as
+  the full package again, and this document should say so. The file name the
+  plug-in looks for is `Qwen3-4B-Q4_K_M.gguf`; a different model should keep
+  that name or `ModelManager::builtInCatalogue` must learn the new one.
+- Same version number twice: macOS may treat the second package as already
+  installed and skip files. Always bump.
+
 ## What the friend does
 
 Download, double click, click through. Same steps for the first install and
