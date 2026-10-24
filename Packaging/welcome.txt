@@ -6,4 +6,4 @@ This installer puts the Audio Unit and VST3 plug-ins in your system plug-in fold
 
 After installing, open your DAW and look for Stacks under Hoffman Audio. Logic Pro and GarageBand may need a rescan: Logic Pro > Settings > Plug-in Manager, then Reset & Rescan Selection, or simply restart the DAW.
 
-Requirements: macOS 12 or later, Apple silicon or Intel, 8 GB of memory (16 GB recommended).
+Requirements: a Mac with Apple silicon (M1 or later), macOS 12 or later, 8 GB of memory (16 GB recommended).

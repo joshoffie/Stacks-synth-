@@ -13,8 +13,8 @@ coral for the filter, teal for modulators, blue for effects. That ring also
 shows the value. So there is one knob file, and it is grey on purpose. If you
 want a different body per section, add the optional per-section files below.
 
-The folder `annotated/` holds screenshots with each file's name written next
-to the piece it paints. Start there.
+The folder `screens/` holds every screen of the plug-in with each file's
+name written next to the piece it paints. Start there.
 
 ## Working rules
 
@@ -106,7 +106,8 @@ cmake --build build.nosync --target StacksUiKit
 ./build.nosync/StacksUiKit_artefacts/Release/StacksUiKit --export-skin Skin 2
 ```
 
-Render the screens with a skin folder to check it:
+Render the labelled screens through a skin folder to check it (add `--plain`
+before the folder for screens without labels):
 
 ```bash
 STACKS_SKIN_DIR="$PWD/Skin" ./build.nosync/StacksUiKit_artefacts/Release/StacksUiKit Design/screens 2

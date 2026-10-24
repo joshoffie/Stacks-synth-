@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.22)
 # Oldest macOS the plugin will run on. Must be set before project().
 set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS version")
 
-project(Stacks VERSION 0.1.0 LANGUAGES C CXX)
+project(Stacks VERSION 0.1.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

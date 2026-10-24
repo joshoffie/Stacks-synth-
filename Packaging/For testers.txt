@@ -1,0 +1,40 @@
+STACKS - BETA NOTES
+
+Thanks for testing. This is the first build to leave the studio, so anything
+odd is worth telling us about.
+
+NEEDS
+A Mac with Apple silicon (M1 or later), macOS 12 or later, 8 GB of memory
+(16 GB is better), about 3 GB of free disk space.
+
+INSTALL
+1. Download Stacks-0.1.1.pkg (2.3 GB; the sound engine data is most of it).
+2. Double-click it and click through. It installs the Audio Unit, the VST3,
+   the Stacks app and the engine data. It asks for your Mac password once.
+3. Open your DAW. Logic Pro and GarageBand: if Stacks doesn't appear under
+   Hoffman Audio, open Logic Pro > Settings > Plug-in Manager, select Stacks
+   and press "Reset & Rescan Selection", or just restart Logic.
+   Ableton, Reaper, Bitwig, FL: rescan plug-ins or restart the DAW.
+   The Stacks app in Applications works on its own, no DAW needed.
+
+FIRST SOUND
+Pick a kind of sound on the Home screen (Pad, Keys, Bass...). The first one
+after a launch takes 20 to 40 seconds while the engine warms up, longer the
+very first time. After that it's quicker. You get five sounds: click a block
+to hear it, play the keyboard, then "Grow from this one", "Save preset" or
+"Open the synth" for every knob.
+
+PLEASE TELL US
+- Did the installer open with a double-click, with no warning beyond the
+  password prompt?
+- Did Stacks show up in your DAW? Which DAW and which macOS version?
+- How long did the first sound take? Did the Home screen show anything while
+  you waited?
+- Anything that froze, crashed, went silent, or made a horrible noise.
+- Anything confusing. If you didn't know what to do next, that's a bug too.
+
+A screenshot plus what you clicked just before is the most useful thing you
+can send.
+
+Saved presets live in Music > Stacks Patches. Updates will come as a small
+Stacks-x.x.x-update.pkg: same double-click, installs over this one.

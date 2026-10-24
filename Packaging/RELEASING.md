@@ -60,6 +60,13 @@ and their presets and settings (in their home folder) are never touched.
 
 ## What the friend does
 
+**Apple silicon only.** The binaries are arm64; the installer refuses Intel
+Macs and macOS older than 12. Making Intel work needs a universal build of
+the engine (llama.cpp) and would run the engine far too slowly to be useful.
+
+`Packaging/For testers.txt` is the note to send beta testers with the link.
+
+
 Download, double click, click through. Same steps for the first install and
 every update; the new version replaces the old one. The update package only
 works on a Mac that has had the full installer once (it has no engine data). Then restart the DAW (or

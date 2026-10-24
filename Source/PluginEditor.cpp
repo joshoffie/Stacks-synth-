@@ -176,14 +176,136 @@ void StacksAudioProcessorEditor::resized()
     synthPanel.setBounds (r);
 }
 
-void StacksAudioProcessorEditor::renderScreens (const juce::File& directory, float scale)
+namespace
+{
+    using Piece = std::pair<juce::String, juce::Rectangle<int>>;
+
+    // Walks the tree for the standard controls; each file name is reported once.
+    void collectPieces (juce::Component& root, juce::Component& c, std::vector<Piece>& out, juce::Rectangle<int> header)
+    {
+        if (! c.isVisible() || c.getWidth() <= 0 || c.getHeight() <= 0) return;   // isShowing() needs a window; the tool has none
+        const auto r = root.getLocalArea (&c, c.getLocalBounds());
+        auto add = [&] (const juce::String& name)
+        {
+            for (const auto& p : out) if (p.first == name) return;
+            out.emplace_back (name, r);
+        };
+        if (dynamic_cast<stacks::ParamKnob*> (&c) != nullptr)
+            add (header.contains (r.getCentre()) ? "knob-master.png" : "knob.png");
+        else if (auto* b = dynamic_cast<juce::TextButton*> (&c))
+        {
+            if ((bool) b->getProperties()["tab"]) { if (! header.contains (r.getCentre()) && b->getToggleState()) add ("tab-on.png"); }   // a selected page tab, not a header icon
+            else if (b->findColour (juce::TextButton::buttonColourId).getPerceivedBrightness() > 0.45f) add ("button-bright.png");
+            else add ("button.png");
+        }
+        else if (dynamic_cast<juce::ToggleButton*> (&c) != nullptr) add ("toggle-on.png");
+        else if (dynamic_cast<juce::ComboBox*> (&c) != nullptr) add ("combo.png");
+        else if (auto* s = dynamic_cast<juce::Slider*> (&c))
+        {
+            if (! s->isRotary()) add ("slider-track.png");
+        }
+        else if (dynamic_cast<juce::TextEditor*> (&c) != nullptr) add ("texteditor.png");
+        for (auto* child : c.getChildren())
+            collectPieces (root, *child, out, header);
+    }
+}
+
+// Boxes one example of every skinned piece on screen and writes its file name
+// beside it. Labels are placed where they hit neither another label nor a
+// boxed piece, trying above, below, right and left in turn.
+void StacksAudioProcessorEditor::drawAnnotations (juce::Image& image, float scale)
+{
+    std::vector<Piece> pieces;
+    // The two whole-window surfaces, labelled at a corner: the header strip, and the window background
+    // (pointed at the gap above the keyboard, which is plain background on every screen).
+    pieces.emplace_back ("header.png", juce::Rectangle<int> (headerBounds.getRight() - 560, headerBounds.getBottom() - 2, 1, 1));
+    pieces.emplace_back ("background.png", juce::Rectangle<int> (8, keyboard.getY() - 20, 1, 1));
+    for (auto* child : getChildren())   // not from the editor itself: headless, it reports itself invisible
+        collectPieces (*this, *child, pieces, headerBounds);
+    auto addFrom = [&] (juce::Component& panel, const std::vector<Piece>& list)
+    {
+        if (! panel.isVisible()) return;
+        for (const auto& p : list)
+        {
+            bool seen = false;
+            for (const auto& q : pieces) seen = seen || q.first == p.first;
+            if (! seen) pieces.emplace_back (p.first, getLocalArea (&panel, p.second));
+        }
+    };
+    addFrom (synthPanel, synthPanel.skinPieces());
+    addFrom (labPanel, labPanel.skinPieces());
+    addFrom (homeView, homeView.skinPieces());
+    pieces.emplace_back ("key-white.png", getLocalArea (&keyboard, keyboard.getRectangleForKey (48).toNearestInt()));
+    pieces.emplace_back ("key-black.png", getLocalArea (&keyboard, keyboard.getRectangleForKey (49).toNearestInt()));
+
+    juce::Graphics g (image);
+    g.addTransform (juce::AffineTransform::scale (scale));
+    const juce::Colour ink (0xffffd166);
+    const auto font = StacksLookAndFeel::font (12.0f, true);
+    g.setFont (font);
+
+    // Big surfaces get a label only, no box: a box round the whole window says nothing.
+    auto labelOnly = [] (const juce::String& n) { return n == "header.png" || n == "lab.png" || n == "background.png"; };
+    std::vector<juce::Rectangle<int>> taken;
+    for (const auto& p : pieces)
+        if (! labelOnly (p.first)) taken.push_back (p.second.expanded (3));
+
+    auto place = [&] (const juce::Rectangle<int>& r, int w) -> juce::Rectangle<int>
+    {
+        const int h = 18, gap = 6;
+        const juce::Rectangle<int> options[] = {
+            { r.getX(), r.getY() - h - gap, w, h }, { r.getX(), r.getBottom() + gap, w, h },
+            { r.getRight() + gap, r.getCentreY() - h / 2, w, h }, { r.getX() - w - gap, r.getCentreY() - h / 2, w, h },
+            { r.getRight() - w, r.getY() - h - gap, w, h }, { r.getRight() - w, r.getBottom() + gap, w, h } };
+        const auto screen = getLocalBounds().reduced (2);
+        for (int push = 0; push < 12; ++push)
+            for (auto o : options)
+            {
+                o = o.translated (0, (o.getY() < r.getY() ? -1 : 1) * push * (h + 2));
+                if (! screen.contains (o)) continue;
+                bool clear = true;
+                for (const auto& t : taken) clear = clear && ! t.intersects (o);
+                if (clear) return o;
+            }
+        return { juce::jlimit (2, getWidth() - w - 2, r.getX()), juce::jlimit (2, getHeight() - h - 2, r.getY() - h - gap), w, h };
+    };
+
+    for (const auto& p : pieces)
+    {
+        auto r = p.second;
+        if (r.isEmpty()) continue;
+        const bool boxed = ! labelOnly (p.first);
+        if (! boxed && r.getWidth() > 1) r = juce::Rectangle<int> (r.getX() + 8, r.getY() + 4, 1, 1);   // point at the surface's top-left
+        if (boxed)
+        {
+            g.setColour (ink);
+            g.drawRect (r.expanded (2), 2);
+        }
+        const int w = (int) font.getStringWidthFloat (p.first) + 12;
+        const auto label = boxed ? place (r, w) : juce::Rectangle<int> (juce::jlimit (2, getWidth() - w - 2, r.getX()), r.getY(), w, 18);
+        taken.push_back (label.expanded (2));
+        // a leader from the label to the nearest point of the piece
+        const auto from = label.getConstrainedPoint (r.getCentre()).toFloat();
+        const auto to = r.getConstrainedPoint (label.getCentre()).toFloat();
+        g.setColour (ink);
+        if (boxed && from.getDistanceFrom (to) > 2.0f) g.drawLine ({ from, to }, 1.5f);
+        g.setColour (juce::Colours::black.withAlpha (0.88f));
+        g.fillRoundedRectangle (label.toFloat(), 4.0f);
+        g.setColour (ink);
+        g.drawRoundedRectangle (label.toFloat(), 4.0f, 1.0f);
+        g.drawText (p.first, label, juce::Justification::centred);
+    }
+}
+
+void StacksAudioProcessorEditor::renderScreens (const juce::File& directory, float scale, bool annotate)
 {
     directory.createDirectory();
     int shot = 0;
     auto shoot = [&] (const juce::String& name)
     {
         resized();
-        const auto image = createComponentSnapshot (getLocalBounds(), true, scale);
+        auto image = createComponentSnapshot (getLocalBounds(), true, scale);
+        if (annotate) drawAnnotations (image, scale);
         const auto file = directory.getChildFile (juce::String (++shot).paddedLeft ('0', 2) + " " + name + ".png");
         file.deleteFile();
         juce::FileOutputStream out (file);
@@ -217,120 +339,6 @@ void StacksAudioProcessorEditor::renderScreens (const juce::File& directory, flo
     labPanel.showView (LabPanel::View::garden);  shoot ("lab - stacks");
     labPanel.showView (LabPanel::View::tree);    shoot ("lab - history");
     labPanel.showView (LabPanel::View::ideas);   shoot ("lab - list");
-    labPanel.showView (LabPanel::View::library); shoot ("lab - library");
-    labPanel.showView (LabPanel::View::garden);
-    setHome (true);
-}
-
-namespace
-{
-    using Piece = std::pair<juce::String, juce::Rectangle<int>>;
-
-    // Walks the tree for the standard controls; each file name is reported once.
-    void collectPieces (juce::Component& root, juce::Component& c, std::vector<Piece>& out, juce::Rectangle<int> header)
-    {
-        if (! c.isVisible() || c.getWidth() <= 0 || c.getHeight() <= 0) return;   // isShowing() needs a window; the tool has none
-        auto add = [&] (const juce::String& name)
-        {
-            for (const auto& p : out) if (p.first == name) return;
-            out.emplace_back (name, root.getLocalArea (&c, c.getLocalBounds()));
-        };
-        if (auto* knob = dynamic_cast<stacks::ParamKnob*> (&c))
-        {
-            const auto r = root.getLocalArea (&c, c.getLocalBounds());
-            add (header.contains (r.getCentre()) ? "knob-master.png" : "knob.png");
-            (void) knob;
-        }
-        else if (auto* b = dynamic_cast<juce::TextButton*> (&c))
-        {
-            const auto r = root.getLocalArea (&c, c.getLocalBounds());
-            if ((bool) b->getProperties()["tab"]) { if (! header.contains (r.getCentre()) && b->getToggleState()) add ("tab-on.png"); }   // a real, selected page tab, not a header icon
-            else if (b->findColour (juce::TextButton::buttonColourId).getPerceivedBrightness() > 0.45f) add ("button-bright.png");
-            else add ("button.png");
-        }
-        else if (dynamic_cast<juce::ToggleButton*> (&c) != nullptr) add ("toggle-on.png");
-        else if (dynamic_cast<juce::ComboBox*> (&c) != nullptr) add ("combo.png");
-        else if (auto* s = dynamic_cast<juce::Slider*> (&c))
-        {
-            if (! s->isRotary()) add ("slider-track.png");
-        }
-        else if (dynamic_cast<juce::TextEditor*> (&c) != nullptr) add ("texteditor.png");
-        for (auto* child : c.getChildren())
-            collectPieces (root, *child, out, header);
-    }
-}
-
-void StacksAudioProcessorEditor::annotateScreens (const juce::File& directory, float scale)
-{
-    directory.createDirectory();
-    int shot = 0;
-    auto shoot = [&] (const juce::String& name)
-    {
-        resized();
-        auto image = createComponentSnapshot (getLocalBounds(), true, scale);
-
-        std::vector<Piece> pieces;
-        pieces.emplace_back ("header.png", headerBounds);
-        for (auto* child : getChildren())   // not from the editor itself: headless, it reports itself invisible
-            collectPieces (*this, *child, pieces, headerBounds);
-        auto addFrom = [&] (juce::Component& panel, const std::vector<Piece>& list)
-        {
-            if (! panel.isVisible()) return;
-            for (const auto& p : list)
-            {
-                bool seen = false;
-                for (const auto& q : pieces) seen = seen || q.first == p.first;
-                if (! seen) pieces.emplace_back (p.first, getLocalArea (&panel, p.second));
-            }
-        };
-        addFrom (synthPanel, synthPanel.skinPieces());
-        addFrom (labPanel, labPanel.skinPieces());
-        addFrom (homeView, homeView.skinPieces());
-        pieces.emplace_back ("key-white.png", getLocalArea (&keyboard, keyboard.getRectangleForKey (48).toNearestInt()));
-        pieces.emplace_back ("key-black.png", getLocalArea (&keyboard, keyboard.getRectangleForKey (49).toNearestInt()));
-        pieces.emplace_back ("background.png", juce::Rectangle<int> (getWidth() - 150, getHeight() - keyboard.getHeight() - 30, 140, 20));
-
-        juce::Graphics g (image);
-        g.addTransform (juce::AffineTransform::scale (scale));
-        const juce::Colour ink (0xffffd166);
-        g.setFont (StacksLookAndFeel::font (12.0f, true));
-        int n = 0;
-        for (const auto& p : pieces)
-        {
-            const auto r = p.second;
-            if (r.isEmpty()) continue;
-            g.setColour (ink);
-            g.drawRect (r.expanded (2), 2);
-            // The label sits above the piece, or below when there is no room; alternate sides so neighbours don't stack.
-            const int w = (int) g.getCurrentFont().getStringWidthFloat (p.first) + 12;
-            const bool below = r.getY() < 30 || (n % 2 == 1 && r.getBottom() + 26 < getHeight());
-            int lx = juce::jlimit (2, getWidth() - w - 2, p.first.startsWith ("key-black") ? r.getRight() + 4 : p.first.startsWith ("key-white") ? r.getX() - w - 4 : r.getX());
-            int ly = below ? r.getBottom() + 6 : r.getY() - 24;
-            juce::Rectangle<int> label (lx, ly, w, 18);
-            g.setColour (juce::Colours::black.withAlpha (0.85f));
-            g.fillRoundedRectangle (label.toFloat(), 4.0f);
-            g.setColour (ink);
-            g.drawRoundedRectangle (label.toFloat(), 4.0f, 1.0f);
-            g.drawLine ((float) label.getX() + 8.0f, below ? (float) label.getY() : (float) label.getBottom(), (float) r.getX() + 4.0f, below ? (float) r.getBottom() : (float) r.getY(), 1.5f);
-            g.drawText (p.first, label, juce::Justification::centred);
-            ++n;
-        }
-
-        const auto file = directory.getChildFile (juce::String (++shot).paddedLeft ('0', 2) + " " + name + " (annotated).png");
-        file.deleteFile();
-        juce::FileOutputStream out (file);
-        if (out.openedOk())
-            juce::PNGImageFormat().writeImageToStream (image, out);
-    };
-
-    setHome (true);
-    shoot ("home");
-    setHome (false);
-    synthPanel.setView (-2); shoot ("synth - macros");
-    synthPanel.setView (-1); shoot ("synth - all");
-    synthPanel.setView (2);  shoot ("synth - effects");
-    synthPanel.setView (-1);
-    labPanel.showView (LabPanel::View::garden);  shoot ("lab - stacks");
     labPanel.showView (LabPanel::View::library); shoot ("lab - library");
     labPanel.showView (LabPanel::View::garden);
     setHome (true);

@@ -1,7 +1,8 @@
 STACKS UI KIT
 
-1. Open the "annotated" folder. Each screenshot has the name of the image file
-   written next to the piece it paints (yellow boxes).
+1. Open the "screens" folder. Every screen of the plug-in is there, and each
+   one has the name of the image file written next to the piece it paints
+   (yellow boxes and labels).
 2. The "skin" folder holds those image files: the current look, at 2x.
    Open any of them in Photoshop, repaint, export as PNG with the SAME NAME
    and SAME SIZE, and put it back in the folder.
@@ -13,6 +14,4 @@ STACKS UI KIT
 
 The knobs: every knob is the same grey body (knob.png). The coloured ring and
 pointer colour come from the app, per section. That is why there is one knob
-file and it is grey.
-
-"screens" is every screen of the plug-in without labels, for reference.
+file and it is grey. Want a different body per section? See "Skin spec.md".

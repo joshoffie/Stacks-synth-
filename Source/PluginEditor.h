@@ -29,11 +29,10 @@ public:
     std::unique_ptr<juce::ComponentTraverser> createKeyboardFocusTraverser() override;   // no automatic focus target
 
     // Paints every screen (home, each synth page, each modulator tab, each lab
-    // view) to numbered PNG files at `scale` times the window size. Used by the
-    // StacksUiKit tool to hand the UI to a designer; the editor ends up back on Home.
-    void renderScreens (const juce::File& directory, float scale);
-    // The same screens with each skin file's name written next to the piece it paints.
-    void annotateScreens (const juce::File& directory, float scale);
+    // view) to numbered PNG files at `scale` times the window size, by default
+    // with each skin file's name written next to the piece it paints. Used by
+    // the StacksUiKit tool; the editor ends up back on Home.
+    void renderScreens (const juce::File& directory, float scale, bool annotate = true);
 
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
@@ -53,6 +52,7 @@ private:
     juce::TextButton modeButton;   // Home <-> Synth
     bool showingHome = true;
     void setHome (bool);
+    void drawAnnotations (juce::Image&, float scale);
     StacksKeyboard keyboard;
     juce::Rectangle<int> headerBounds;
     juce::TooltipWindow tooltips { this, 600 };

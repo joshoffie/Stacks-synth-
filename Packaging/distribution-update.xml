@@ -3,7 +3,8 @@
     <title>Stacks</title>
     <organization>com.hoffmanaudio</organization>
     <domains enable_localSystem="true"/>
-    <options customize="allow" require-scripts="false" hostArchitectures="arm64,x86_64"/>
+    <allowed-os-versions><os-version min="12.0"/></allowed-os-versions>
+    <options customize="allow" require-scripts="false" hostArchitectures="arm64"/>
     <welcome file="welcome-update.txt" mime-type="text/plain"/>
     <conclusion file="conclusion.txt" mime-type="text/plain"/>
     <choices-outline>
