@@ -18,11 +18,14 @@ INSTALL
    The Stacks app in Applications works on its own, no DAW needed.
 
 FIRST SOUND
-Pick a kind of sound on the Home screen (Pad, Keys, Bass...). The first one
-after a launch takes 20 to 40 seconds while the engine warms up, longer the
-very first time. After that it's quicker. You get five sounds: click a block
-to hear it, play the keyboard, then "Grow from this one", "Save preset" or
-"Open the synth" for every knob.
+The first time you open Stacks, a short guide points out what to click on
+each screen. You can bring it back from the gear menu.
+
+Pick a kind of sound on the Home screen (Pad, Keys, Bass...). The very first
+sound can take up to a minute while the engine warms up, and all five about
+two minutes. After that it's quicker. You can click a block to hear it as
+soon as it lands, even while the rest are still growing. Then use "Grow from
+this one", "Save preset" or "Open the synth" for every knob.
 
 PLEASE TELL US
 - Did the installer open with a double-click, with no warning beyond the

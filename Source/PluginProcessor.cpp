@@ -922,6 +922,19 @@ void StacksAudioProcessor::setCurrentPatchName (const juce::String& name)
 }
 
 //==============================================================================
+bool StacksAudioProcessor::tourSeen (const juce::String& screen) const { return settings().getBoolValue ("tour_" + screen, false); }
+void StacksAudioProcessor::markTourSeen (const juce::String& screen)
+{
+    settings().setValue ("tour_" + screen, true);
+    settings().saveIfNeeded();
+}
+void StacksAudioProcessor::resetTours()
+{
+    for (auto* screen : { "home", "results", "synth" })
+        settings().removeValue (juce::String ("tour_") + screen);
+    settings().saveIfNeeded();
+}
+
 void StacksAudioProcessor::loadEngineFromSettings()
 {
     auto& s = settings();

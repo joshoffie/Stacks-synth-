@@ -834,6 +834,18 @@ void SynthPanel::handleAsyncUpdate()
     }
 }
 
+juce::Rectangle<int> SynthPanel::tourArea (const juce::String& what) const
+{
+    juce::Rectangle<int> r;
+    if (what == "tabs")
+        for (const auto& b : viewButtons) r = r.isEmpty() ? b->getBounds() : r.getUnion (b->getBounds());
+    else if (what == "knob")
+        for (auto* k : knobs)
+            if (k->isVisible() && k->getParentComponent() != nullptr && k->getParentComponent()->isVisible())
+                return getLocalArea (k->getParentComponent(), k->getBounds());
+    return r;
+}
+
 std::vector<std::pair<juce::String, juce::Rectangle<int>>> SynthPanel::skinPieces() const
 {
     std::vector<std::pair<juce::String, juce::Rectangle<int>>> out;

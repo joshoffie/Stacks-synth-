@@ -123,6 +123,7 @@ private:
     void showView (View);
 public:
     std::vector<std::pair<juce::String, juce::Rectangle<int>>> skinPieces() const;   // the panel, the slab, a block; own coordinates
+    juce::Rectangle<int> tourArea (const juce::String& what) const { return what == "evolve" ? evolveButton.getBounds() : what == "library" ? libraryTab.getBounds() : juce::Rectangle<int>(); }
 private:
     void scrollTreeToNewest();
 

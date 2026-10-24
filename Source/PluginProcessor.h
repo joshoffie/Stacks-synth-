@@ -164,6 +164,11 @@ public:
     void cancelDownload();
     bool isDownloading() const                             { return downloader != nullptr && downloader->isRunning(); }
     bool isBusy() const                                    { return labState.generating || isDownloading(); }
+
+    // First-visit tours, one per screen ("home", "results", "synth"), remembered across launches and instances.
+    bool tourSeen (const juce::String& screen) const;
+    void markTourSeen (const juce::String& screen);
+    void resetTours();
     std::shared_ptr<LlmBackend> aiBackend() const          { return activeBackend; }   // null with the random engine
 
     // Undo / redo over whole sounds: every load, drag and knob gesture leaves a snapshot.

@@ -124,6 +124,15 @@ SettingsPanel::SettingsPanel (StacksAudioProcessor& p) : processor (p)
     // addAndMakeVisible (saveGuideButton);   // engine choice parked: the model ships inside the app
     addChildComponent (saveGuideButton);
 
+    tipsButton.setTooltip ("The short guide on each screen shows again the next time you open it");
+    tipsButton.onClick = [this]
+    {
+        processor.resetTours();
+        tipsButton.setButtonText ("Tips will show again");
+        tipsButton.setEnabled (false);
+    };
+    addAndMakeVisible (tipsButton);
+
     processor.labBroadcaster.addChangeListener (this);
     rebuildMenu();
     refresh();
@@ -139,7 +148,7 @@ juce::DialogWindow* SettingsPanel::show (StacksAudioProcessor& p, juce::Componen
 {
     juce::DialogWindow::LaunchOptions o;
     o.content.setOwned (new SettingsPanel (p));
-    o.content->setSize (640, 200);   // only calm, MPE and microtuning remain
+    o.content->setSize (640, 236);   // calm, MPE, microtuning and the tips
     o.dialogTitle = "Stacks settings";
     o.dialogBackgroundColour = colours::background;
     o.escapeKeyTriggersCloseButton = true;
@@ -182,6 +191,7 @@ void SettingsPanel::resized()
     r.removeFromTop (4);
     mtsLabel.setBounds (r.removeFromTop (20));
     r.removeFromTop (12);
+    tipsButton.setBounds (r.removeFromTop (26).removeFromLeft (180));
 
     // guideTitle.setBounds (r.removeFromTop (18));
     // saveGuideButton.setBounds (r.removeFromBottom (26).removeFromLeft (200));

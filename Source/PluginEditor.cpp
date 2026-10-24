@@ -79,6 +79,12 @@ StacksAudioProcessorEditor::StacksAudioProcessorEditor (StacksAudioProcessor& p)
     synthProcessor.labBroadcaster.addChangeListener (this);
     changeListenerCallback (nullptr);
 
+    addChildComponent (tour);   // added last so it sits over everything
+    juce::Timer::callAfterDelay (700, [safe = juce::Component::SafePointer<StacksAudioProcessorEditor> (this)]
+    {
+        if (safe != nullptr) safe->maybeStartTour();
+    });
+
     setResizable (true, true);
     setResizeLimits (1280, 720, 2600, 1600);
     setSize (1500, 860);
@@ -96,6 +102,50 @@ void StacksAudioProcessorEditor::changeListenerCallback (juce::ChangeBroadcaster
     patchName.setText (synthProcessor.currentPatchName(), juce::dontSendNotification);
     undoButton.setEnabled (synthProcessor.canUndo());
     redoButton.setEnabled (synthProcessor.canRedo());
+    if (showingHome && homeView.showingResults() && ! synthProcessor.tourSeen ("results") && ! tour.isRunning())
+        maybeStartTour();   // the first five sounds just landed
+}
+
+void StacksAudioProcessorEditor::maybeStartTour()
+{
+    if (tour.isRunning() || ! isShowing())
+        return;
+    auto in = [this] (juce::Component& c, juce::Rectangle<int> r) { return std::function<juce::Rectangle<int>()> ([this, &c, r] { return getLocalArea (&c, r); }); };
+    auto whole = [this] (juce::Component& c) { return std::function<juce::Rectangle<int>()> ([this, &c] { return getLocalArea (c.getParentComponent(), c.getBounds()); }); };
+    std::vector<TourOverlay::Step> steps;
+    juce::String screen;
+    if (showingHome && ! homeView.showingResults() && ! synthProcessor.tourSeen ("home"))
+    {
+        screen = "home";
+        steps = { { in (homeView, homeView.tourArea ("tiles")), "Pick a kind of sound. Stacks makes five new ones just for you." },
+                  { whole (keyboard), "Play notes here, or use your own MIDI keyboard." },
+                  { whole (modeButton), "Synth opens every knob. Home always brings you back here." },
+                  { [this] { return getLocalArea (this, undoButton.getBounds().getUnion (redoButton.getBounds())); }, "Undo and redo any change." } };
+    }
+    else if (showingHome && homeView.showingResults() && ! synthProcessor.tourSeen ("results"))
+    {
+        screen = "results";
+        steps = { { in (homeView, homeView.tourArea ("blocks")), "Click a block to hear it. Each one is a new sound." },
+                  { in (homeView, homeView.tourArea ("variation")), "Choose how different the next five should be." },
+                  { in (homeView, homeView.tourArea ("grow")), "Grow from this one makes five new sounds based on it." },
+                  { in (homeView, homeView.tourArea ("save")), "Save preset keeps the sound in your library." },
+                  { in (homeView, homeView.tourArea ("open")), "Open the synth to change every detail." } };
+    }
+    else if (! showingHome && ! synthProcessor.tourSeen ("synth"))
+    {
+        screen = "synth";
+        steps = { { in (synthPanel, synthPanel.tourArea ("tabs")), "Each tab shows one part of the sound. All shows everything." },
+                  { in (synthPanel, synthPanel.tourArea ("knob")), "Drag a knob up or down. Hover over it to see its value." },
+                  { in (labPanel, labPanel.tourArea ("evolve")), "Evolve makes five new sounds from the one you hear now." },
+                  { in (labPanel, labPanel.tourArea ("library")), "Library holds every preset and the sounds you save." },
+                  { whole (modeButton), "Home takes you back to the simple view." } };
+    }
+    if (screen.isEmpty())
+        return;
+    synthProcessor.markTourSeen (screen);   // once, even if another instance is open too
+    tour.setBounds (getLocalBounds());
+    tour.toFront (false);
+    tour.start (std::move (steps), {});
 }
 
 namespace
@@ -174,6 +224,7 @@ void StacksAudioProcessorEditor::resized()
     labPanel.setBounds (r.removeFromRight (kLabWidth));
     r.removeFromRight (kMargin);
     synthPanel.setBounds (r);
+    tour.setBounds (getLocalBounds());
 }
 
 namespace
@@ -352,6 +403,11 @@ void StacksAudioProcessorEditor::setHome (bool home)
     labPanel.setVisible (! home);
     modeButton.setButtonText (home ? "Synth" : "Home");
     resized();
+    if (tour.isRunning()) tour.finish();   // a tour belongs to the screen it was started on
+    juce::Timer::callAfterDelay (350, [safe = juce::Component::SafePointer<StacksAudioProcessorEditor> (this)]
+    {
+        if (safe != nullptr) safe->maybeStartTour();
+    });
 }
 
 } // namespace stacks

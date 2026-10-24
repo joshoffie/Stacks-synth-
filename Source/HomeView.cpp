@@ -209,6 +209,19 @@ void HomeView::growFromPreset (const juce::File& file)
     refresh();
 }
 
+juce::Rectangle<int> HomeView::tourArea (const juce::String& what) const
+{
+    juce::Rectangle<int> r;
+    auto unite = [&r] (juce::Rectangle<int> b) { r = r.isEmpty() ? b : r.getUnion (b); };
+    if (what == "tiles")          for (const auto& t : tiles) unite (t->getBounds());
+    else if (what == "blocks")    r = stackArea().toNearestInt();
+    else if (what == "variation") { unite (closeButton.getBounds()); unite (mediumButton.getBounds()); unite (farButton.getBounds()); }
+    else if (what == "grow")      r = growButton.getBounds();
+    else if (what == "save")      r = saveButton.getBounds();
+    else if (what == "open")      r = openSynthButton.getBounds();
+    return r;
+}
+
 std::vector<std::pair<juce::String, juce::Rectangle<int>>> HomeView::skinPieces() const
 {
     std::vector<std::pair<juce::String, juce::Rectangle<int>>> out;

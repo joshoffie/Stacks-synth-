@@ -150,6 +150,7 @@ set(STACKS_SOURCES
     Source/Controls.cpp
     Source/StacksLookAndFeel.cpp
     Source/Skin.cpp
+    Source/TourOverlay.cpp
     Source/Displays.cpp
     Source/SettingsPanel.cpp
     Source/TreeView.cpp
@@ -191,6 +192,7 @@ if(APPLE)
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
         JUCE_STRICT_REFCOUNTEDPOINTER=1
+        JUCE_MODAL_LOOPS_PERMITTED=1
         "JucePlugin_Name=\"Stacks\"")
     target_link_libraries(StacksUiKit
         PRIVATE

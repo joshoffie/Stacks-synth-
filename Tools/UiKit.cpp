@@ -204,16 +204,127 @@ namespace
     };
 }
 
+
+namespace
+{
+    // What a new user does on first launch, without a window: pick Pad, wait
+    // for the five sounds, play one, save it, load it back. Fails loudly.
+    int smokeTest()
+    {
+        using namespace stacks;
+        int failures = 0;
+        auto check = [&] (bool ok, const juce::String& what)
+        {
+            std::printf ("  %s  %s\n", ok ? "ok  " : "FAIL", what.toRawUTF8());
+            if (! ok) ++failures;
+        };
+        auto visibleWordsOk = [] (const juce::String& text)
+        {
+            for (auto* bad : { "AI ", " AI", "Qwen", "qwen", "llama", "Llama", "Ollama", "model", "Model", "GGUF", "gguf" })
+                if (text.contains (bad)) return false;
+            return true;
+        };
+
+        std::printf ("Stacks smoke test\n");
+        const auto t0 = juce::Time::getMillisecondCounterHiRes();
+        auto processor = std::make_unique<StacksAudioProcessor>();
+        processor->prepareToPlay (48000.0, 512);
+        const auto library = StacksAudioProcessor::libraryRoot();
+        int presets = 0;
+        for (const auto& f : library.getChildFile ("Factory").findChildFiles (juce::File::findFiles, true, "*.json")) { (void) f; ++presets; }
+        // The presets are copied from the app bundle; this bare tool has none, so the check only applies inside one.
+        const bool bundled = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getParentDirectory().getParentDirectory()
+                                 .getChildFile ("Resources").getChildFile ("Factory").isDirectory();
+        if (bundled) check (presets >= 100, "factory presets installed: " + juce::String (presets) + " in " + library.getFullPathName());
+        else         std::printf ("  skip  factory presets (no app bundle around this tool)\n");
+
+        processor->requestFromKind ("Pad");
+        juce::StringArray statuses;
+        double firstAt = -1.0;
+        const double deadline = juce::Time::getMillisecondCounterHiRes() + 15.0 * 60.0 * 1000.0;
+        bool started = false;
+        while (juce::Time::getMillisecondCounterHiRes() < deadline)
+        {
+            juce::MessageManager::getInstance()->runDispatchLoopUntil (200);
+            const auto& lab = processor->lab();
+            started = started || lab.generating || processor->isDownloading();
+            for (const auto& text : { lab.status, lab.progressDetail })
+                if (text.isNotEmpty() && ! statuses.contains (text)) statuses.add (text);
+            if (firstAt < 0.0 && ! lab.candidates.empty()) firstAt = juce::Time::getMillisecondCounterHiRes();
+            if (started && ! lab.generating && ! processor->isDownloading()) break;
+        }
+        const auto& lab = processor->lab();
+        const auto secs = [&] (double at) { return juce::String ((at - t0) / 1000.0, 1) + " s"; };
+        check (started, "a Pad batch started");
+        check (! processor->isDownloading(), "no download needed (engine data found)");
+        check ((int) lab.candidates.size() == StacksAudioProcessor::kAiPatchesPerBatch,
+               "sounds grown: " + juce::String ((int) lab.candidates.size()) + (firstAt > 0 ? ", first after " + secs (firstAt) : juce::String()) + ", all after " + secs (juce::Time::getMillisecondCounterHiRes()));
+        int grown = 0;
+        for (const auto& c : lab.candidates) if (c.isGrown()) ++grown;
+        check (grown == (int) lab.candidates.size() && grown > 0, juce::String (grown) + " designed by the engine, not the fallback");
+        bool wordsOk = true;
+        for (const auto& t : statuses)
+        {
+            const bool ok = visibleWordsOk (t);
+            wordsOk = wordsOk && ok;
+            if (! ok) std::printf ("        shown: %s\n", t.toRawUTF8());
+        }
+        std::printf ("        %d distinct status lines; first \"%s\", last \"%s\"\n", statuses.size(),
+                     statuses.isEmpty() ? "" : statuses[0].toRawUTF8(), statuses.isEmpty() ? "" : statuses[statuses.size() - 1].toRawUTF8());
+        for (const auto& c : lab.candidates) wordsOk = wordsOk && visibleWordsOk (c.name) && visibleWordsOk (c.description);
+        check (wordsOk, "nothing shown names the engine");
+
+        if (! lab.candidates.empty())
+        {
+            processor->audition (0);
+            juce::AudioBuffer<float> buffer (2, 512);
+            double sum = 0.0; long count = 0; bool finite = true;
+            for (int block = 0; block < 190; ++block)   // two seconds: note on, held, released
+            {
+                juce::MidiBuffer midi;
+                if (block == 4)   midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+                if (block == 150) midi.addEvent (juce::MidiMessage::noteOff (1, 60), 0);
+                buffer.clear();
+                processor->processBlock (buffer, midi);
+                if (block >= 10 && block < 150)
+                    for (int ch = 0; ch < 2; ++ch)
+                        for (int i = 0; i < 512; ++i)
+                        {
+                            const float v = buffer.getSample (ch, i);
+                            finite = finite && std::isfinite (v);
+                            sum += (double) v * v; ++count;
+                        }
+            }
+            const double rms = count > 0 ? std::sqrt (sum / (double) count) : 0.0;
+            check (finite, "audio is finite");
+            check (rms > 0.003 && rms < 1.0, "\"" + lab.candidates[0].name + "\" makes sound (rms " + juce::String (rms, 4) + ")");
+
+            const auto mine = library.getChildFile ("My Sounds");
+            mine.createDirectory();
+            const auto saved = processor->savePreset ("Smoke Test", mine, true);
+            check (saved.existsAsFile(), "saved to " + saved.getFullPathName());
+            check (saved.existsAsFile() && processor->loadLibraryPatch (saved), "loaded back");
+            saved.deleteFile();
+        }
+        processor.reset();
+        std::printf ("%s (%d failure%s)\n", failures == 0 ? "PASS" : "FAIL", failures, failures == 1 ? "" : "s");
+        return failures == 0 ? 0 : 1;
+    }
+}
+
 int main (int argc, char** argv)
 {
-    if (argc < 2)
+    if (argc < 2 || (argc == 2 && juce::String (argv[1]) != "--smoke"))
     {
         std::printf ("usage: StacksUiKit <output directory> [scale] [preset.json]   (screens labelled with skin file names)\n"
                      "       StacksUiKit --export-skin <output directory> [scale]\n"
-                     "       StacksUiKit --plain <output directory> [scale]  (screens without the file-name labels)\n");
+                     "       StacksUiKit --plain <output directory> [scale]  (screens without the file-name labels)\n"
+                     "       StacksUiKit --smoke                              (first-launch test: grow five pads, play, save)\n");
         return 2;
     }
     juce::ScopedJuceInitialiser_GUI init;
+    if (juce::String (argv[1]) == "--smoke")
+        return smokeTest();
     const auto cwd = juce::File::getCurrentWorkingDirectory();
     const bool plain = juce::String (argv[1]) == "--plain" && argc > 2;   // screens without the file-name labels
     if (juce::String (argv[1]) == "--export-skin" && argc > 2)

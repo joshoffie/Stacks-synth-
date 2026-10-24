@@ -11,6 +11,7 @@
 #include "TunerView.h"
 #include "SynthPanel.h"
 #include "LabPanel.h"
+#include "TourOverlay.h"
 
 namespace stacks
 {
@@ -52,6 +53,8 @@ private:
     juce::TextButton modeButton;   // Home <-> Synth
     bool showingHome = true;
     void setHome (bool);
+    void maybeStartTour();                 // the first visit to a screen gets its short tour
+    TourOverlay tour;
     void drawAnnotations (juce::Image&, float scale);
     StacksKeyboard keyboard;
     juce::Rectangle<int> headerBounds;

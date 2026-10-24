@@ -91,6 +91,7 @@ public:
     // (skin file name, rectangle in this panel's coordinates) for the first card, display well and effect link on show
     std::vector<std::pair<juce::String, juce::Rectangle<int>>> skinPieces() const;
     int numRows() const                                       { return (int) rows.size(); }
+    juce::Rectangle<int> tourArea (const juce::String& what) const;   // "tabs", "knob"; own coordinates
 
 private:
     class RowContainer;

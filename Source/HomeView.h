@@ -60,6 +60,8 @@ private:
 public:
     static void paintTileFace (juce::Graphics&, juce::Rectangle<float>, juce::Colour, bool hover, const juce::String& kind = {});   // the tile's background, no words
     std::vector<std::pair<juce::String, juce::Rectangle<int>>> skinPieces() const;   // a tile, the slab, a block; own coordinates
+    bool showingResults() const noexcept { return stage == Stage::results; }
+    juce::Rectangle<int> tourArea (const juce::String& what) const;   // "tiles", "blocks", "variation", "grow", "save", "open"; own coordinates
 private:
 
     StacksAudioProcessor& processor;
