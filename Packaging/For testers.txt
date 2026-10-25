@@ -16,6 +16,9 @@ INSTALL
    and press "Reset & Rescan Selection", or just restart Logic.
    Ableton, Reaper, Bitwig, FL: rescan plug-ins or restart the DAW.
    The Stacks app in Applications works on its own, no DAW needed.
+   Not showing up in Logic? Make sure Logic isn't running under Rosetta:
+   Applications > Logic Pro > Cmd+I > untick "Open using Rosetta".
+   Stacks only loads in a DAW running natively on Apple silicon.
 
 FIRST SOUND
 The first time you open Stacks, a short guide points out what to click on
