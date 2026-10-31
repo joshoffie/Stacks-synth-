@@ -133,6 +133,21 @@ SettingsPanel::SettingsPanel (StacksAudioProcessor& p) : processor (p)
     };
     addAndMakeVisible (tipsButton);
 
+    sizeLabel.setText ("Window size", juce::dontSendNotification);
+    sizeLabel.setFont (StacksLookAndFeel::font (12.0f, true));
+    sizeLabel.setColour (juce::Label::textColourId, colours::muted);
+    addAndMakeVisible (sizeLabel);
+    struct SizeChoice { juce::TextButton* button; float scale; const char* tip; };
+    for (const auto& c : { SizeChoice { &sizeSmall, 0.7f, "70 percent: fits a 13 inch screen with room to spare" },
+                           SizeChoice { &sizeMedium, 0.85f, "85 percent" },
+                           SizeChoice { &sizeLarge, 1.0f, "Full size, 1500 by 860" },
+                           SizeChoice { &sizeFit, 0.0f, "As large as this screen allows" } })
+    {
+        c.button->setTooltip (c.tip);
+        c.button->onClick = [this, k = c.scale] { processor.setUiScale (k); };
+        addAndMakeVisible (*c.button);
+    }
+
     processor.labBroadcaster.addChangeListener (this);
     rebuildMenu();
     refresh();
@@ -148,7 +163,7 @@ juce::DialogWindow* SettingsPanel::show (StacksAudioProcessor& p, juce::Componen
 {
     juce::DialogWindow::LaunchOptions o;
     o.content.setOwned (new SettingsPanel (p));
-    o.content->setSize (640, 236);   // calm, MPE, microtuning and the tips
+    o.content->setSize (640, 300);   // calm, MPE, microtuning, the tips, the window size
     o.dialogTitle = "Stacks settings";
     o.dialogBackgroundColour = colours::background;
     o.escapeKeyTriggersCloseButton = true;
@@ -192,6 +207,10 @@ void SettingsPanel::resized()
     mtsLabel.setBounds (r.removeFromTop (20));
     r.removeFromTop (12);
     tipsButton.setBounds (r.removeFromTop (26).removeFromLeft (180));
+    r.removeFromTop (12);
+    sizeLabel.setBounds (r.removeFromTop (18));
+    auto sizes = r.removeFromTop (26);
+    for (auto* b : { &sizeSmall, &sizeMedium, &sizeLarge, &sizeFit }) { b->setBounds (sizes.removeFromLeft (96)); sizes.removeFromLeft (6); }
 
     // guideTitle.setBounds (r.removeFromTop (18));
     // saveGuideButton.setBounds (r.removeFromBottom (26).removeFromLeft (200));

@@ -38,6 +38,7 @@ struct LabState
     int tweakSerial = 0;                        // bumps when a tweak lands (or fails), so the panels can flash
     std::vector<int> tweakedParams;             // what the last tweak moved
     juce::String progressDetail;                // what the model is doing right now
+    juce::StringArray liveWrites;               // the last settings written for the sound in progress, as shown text ("Cutoff 1.2 kHz")
 };
 
 enum class EngineKind { Random, Ollama, Builtin };
@@ -166,6 +167,10 @@ public:
     bool isBusy() const                                    { return labState.generating || isDownloading(); }
 
     // First-visit tours, one per screen ("home", "results", "synth"), remembered across launches and instances.
+    // The window's scale, 0.6..1.5 of the 1500 x 860 design; 0 = fit the screen. Remembered per user.
+    float uiScale() const;
+    void setUiScale (float scaleOrZero);
+
     bool tourSeen (const juce::String& screen) const;
     void markTourSeen (const juce::String& screen);
     void resetTours();
@@ -265,6 +270,7 @@ public:
 
 private:
     void startGeneration (GenerationRequest);
+    void addLiveWrites (int token, const juce::StringArray& idValuePairs);   // message thread: the settings just written
     void autoSaveGeneration();                             // every finished batch lands in Library/Generations
     void addCandidate (int token, Patch);
     void setStatus (int token, const juce::String&);

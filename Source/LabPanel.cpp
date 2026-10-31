@@ -289,7 +289,11 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
 
     evolveButton.setColour (juce::TextButton::buttonColourId, colours::accent);
     evolveButton.setColour (juce::TextButton::textColourOffId, juce::Colours::black);
-    evolveButton.onClick = [this] { processor.requestEvolve (hint.getText(), (float) variation.getValue()); };
+    evolveButton.onClick = [this]
+    {
+        if (processor.lab().generating) processor.cancelGeneration();   // "Stop"
+        else processor.requestEvolve (hint.getText(), (float) variation.getValue());
+    };
     addAndMakeVisible (evolveButton);
 
     fromAudioButton.setTooltip ("Pick an audio file (or drop one anywhere on this panel). A short recording is recreated: Stacks measures its pitch, envelope, spectrum, noise, width and vibrato, loads an imitation at once and evolves it. A whole track (over 20 s) is analysed for tempo, key and where the mix has room, and a fresh batch is designed to fit it.");
@@ -576,8 +580,10 @@ void LabPanel::refresh()
     generationLabel.setText (lab.generation > 0 ? "GEN " + juce::String (lab.generation) : juce::String(), juce::dontSendNotification);
 
     const bool busy = processor.isBusy();
-    evolveButton.setTooltip ("Five descendants of \"" + processor.currentPatchName() + "\", the sound you're playing now; Variation sets how far they stray");
-    evolveButton.setEnabled (! busy);
+    evolveButton.setTooltip (lab.generating ? "Stop growing; the sounds that have landed stay"
+                                            : "Five descendants of \"" + processor.currentPatchName() + "\", the sound you're playing now; Variation sets how far they stray");
+    evolveButton.setButtonText (lab.generating ? "Stop" : "Evolve");
+    evolveButton.setEnabled (! processor.isDownloading());
     newBatchButton.setButtonText (busy ? "Stop" : "Generate");
     newBatchButton.setTooltip (lab.generating ? "Stop generating; keep what has arrived"
                              : processor.isDownloading() ? "Cancel the download"

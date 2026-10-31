@@ -28,11 +28,13 @@ struct GenerationProgress
     std::function<void (const juce::String&)> onStatus;  // short progress text for the UI
     std::function<void (float, const juce::String&)> onProgress; // 0..1 toward the next patch (-1 = unknown), with detail
     std::function<bool()> shouldCancel;                  // polled; true = stop as soon as possible
+    std::function<void (const juce::StringArray&)> onWrites;   // settings just written for the patch in progress, as "id\tvalue" (and "wave\tname")
 
     void patch (const Patch& p) const        { if (onPatch) onPatch (p); }
     void status (const juce::String& s) const { if (onStatus) onStatus (s); }
     void progress (float f, const juce::String& detail) const { if (onProgress) onProgress (f, detail); }
     bool cancelled() const                   { return shouldCancel && shouldCancel(); }
+    void writes (const juce::StringArray& w) const { if (onWrites && ! w.isEmpty()) onWrites (w); }
 };
 
 // Anything that can turn a request into candidate patches. generate() runs on

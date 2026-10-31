@@ -1,4 +1,5 @@
 #include "LlmPatchGenerator.h"
+#include <set>
 
 #include <string>
 
@@ -792,8 +793,64 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
     });
 
     // Progress toward the next patch, read off the half-written JSON: the name
-    // appears early, then each parameter is one more step toward ~18.
+    // appears early, then each parameter is one more step toward ~18. Each
+    // finished "key": value pair is also reported once, so the UI can show the
+    // settings being written.
     double lastProgressMs = 0.0;
+    std::set<std::string> reportedKeys;
+    size_t reportedForPatch = 0;
+    auto reportWrites = [&] (const std::string& obj)
+    {
+        if (reportedForPatch != out.size()) { reportedKeys.clear(); reportedForPatch = out.size(); }
+        juce::StringArray fresh;
+        size_t pos = 0;
+        while ((pos = obj.find ("\":", pos)) != std::string::npos)
+        {
+            const auto keyEnd = pos;
+            const auto keyStart = obj.rfind ('"', keyEnd - 1);
+            pos += 2;
+            if (keyStart == std::string::npos) continue;
+            const std::string key = obj.substr (keyStart + 1, keyEnd - keyStart - 1);
+            // the value runs to the next top-level comma or closing brace; objects and arrays are skipped
+            size_t v = pos;
+            while (v < obj.size() && obj[v] == ' ') ++v;
+            if (v >= obj.size()) break;
+            std::string value;
+            if (obj[v] == '"')
+            {
+                const auto close = obj.find ('"', v + 1);
+                if (close == std::string::npos) break;          // still streaming
+                value = obj.substr (v + 1, close - v - 1);
+            }
+            else if (obj[v] == '{' || obj[v] == '[')
+            {
+                int depth = 0; size_t e = v;
+                for (; e < obj.size(); ++e) { if (obj[e] == '{' || obj[e] == '[') ++depth; else if (obj[e] == '}' || obj[e] == ']') { if (--depth == 0) break; } }
+                if (e >= obj.size()) break;                      // still streaming
+                if (key == "waveA" || key == "waveB" || key == "waveC")
+                {
+                    const auto inner = obj.substr (v, e - v + 1);
+                    const auto n = inner.find ("\"name\":\"");
+                    if (n != std::string::npos) { const auto ne = inner.find ('"', n + 8); if (ne != std::string::npos) value = inner.substr (n + 8, ne - n - 8); }
+                    if (value.empty()) value = "new table";
+                    if (! reportedKeys.count (key)) { reportedKeys.insert (key); fresh.add ("wave\t" + titleCase (spaceOutCamelCase (juce::String::fromUTF8 (value.c_str())))); }
+                }
+                pos = e + 1;
+                continue;
+            }
+            else
+            {
+                const auto end = obj.find_first_of (",}", v);
+                if (end == std::string::npos) break;             // still streaming
+                value = obj.substr (v, end - v);
+            }
+            if (key == "name" || key == "description" || key == "category" || key == "parent" || key == "patches") continue;
+            if (reportedKeys.count (key)) continue;
+            reportedKeys.insert (key);
+            fresh.add (juce::String::fromUTF8 (key.c_str()) + "\t" + juce::String::fromUTF8 (value.c_str()).trim());
+        }
+        progress.writes (fresh);
+    };
     auto reportProgress = [&] (bool force)
     {
         const double now = juce::Time::getMillisecondCounterHiRes();
@@ -807,6 +864,7 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
             progress.progress (0.0f, done == 0 ? "Thinking about the first patch..." : "Thinking about patch " + juce::String (done + 1) + "...");
             return;
         }
+        reportWrites (obj);
         juce::String name;
         const auto nameAt = obj.find ("\"name\":\"");
         if (nameAt != std::string::npos)

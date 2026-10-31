@@ -922,6 +922,14 @@ void StacksAudioProcessor::setCurrentPatchName (const juce::String& name)
 }
 
 //==============================================================================
+float StacksAudioProcessor::uiScale() const { return (float) settings().getDoubleValue ("uiScale", 0.0); }
+void StacksAudioProcessor::setUiScale (float k)
+{
+    settings().setValue ("uiScale", (double) k);
+    settings().saveIfNeeded();
+    labBroadcaster.sendChangeMessage();
+}
+
 bool StacksAudioProcessor::tourSeen (const juce::String& screen) const { return settings().getBoolValue ("tour_" + screen, false); }
 void StacksAudioProcessor::markTourSeen (const juce::String& screen)
 {
@@ -1568,6 +1576,7 @@ void StacksAudioProcessor::startGeneration (GenerationRequest req)
         labState.seedIsPatch = false;
     }
     labState.generating = true;
+    labState.liveWrites.clear();
     labState.status = "Growing...";
 
     const bool usingAi = generator != randomGenerator;
@@ -1592,6 +1601,14 @@ void StacksAudioProcessor::startGeneration (GenerationRequest req)
             {
                 if (auto* self = weak.get())
                     self->setStatus (token, s);
+            });
+        };
+        progress.onWrites = [weak, token] (const juce::StringArray& writes)
+        {
+            juce::MessageManager::callAsync ([weak, token, writes]
+            {
+                if (auto* self = weak.get())
+                    self->addLiveWrites (token, writes);
             });
         };
         progress.onProgress = [weak, token] (float fraction, const juce::String& detail)
@@ -1659,6 +1676,61 @@ void StacksAudioProcessor::setStatus (int token, const juce::String& s)
     if (token != generationToken)
         return;
     labState.status = s;
+    labBroadcaster.sendChangeMessage();
+}
+
+// A setting the engine just wrote, as the player would read it on a knob.
+static juce::String describeWrite (const juce::String& id, const juce::String& raw)
+{
+    const int index = paramIndexForId (id);
+    if (index < 0)
+        return {};
+    const auto& spec = paramSpecs()[(size_t) index];
+    juce::String value;
+    if (spec.kind == ParamKind::Choice && spec.choices != nullptr)
+    {
+        const int i = raw.getIntValue();
+        const auto& names = spec.choices();
+        value = i >= 0 && i < names.size() ? names[i] : raw;
+    }
+    else
+    {
+        const float f = raw.getFloatValue();
+        const juce::String unit (spec.unit);
+        if (unit == "Hz" && f >= 1000.0f)      value = juce::String (f / 1000.0f, 1) + " kHz";
+        else if (unit == "Hz")                 value = juce::String (juce::roundToInt (f)) + " Hz";
+        else if (unit == "ms" && f >= 1000.0f) value = juce::String (f / 1000.0f, 2) + " s";
+        else if (unit.isNotEmpty())            value = juce::String (std::abs (f) < 10.0f ? juce::String (f, 1) : juce::String (juce::roundToInt (f))) + " " + unit;
+        else if (spec.min >= 0.0f && spec.max <= 1.0f) value = juce::String (juce::roundToInt (f * 100.0f)) + "%";
+        else                                   value = std::abs (f) < 10.0f ? juce::String (f, 2) : juce::String (juce::roundToInt (f));
+    }
+    return juce::String (spec.name) + "  " + value;
+}
+
+void StacksAudioProcessor::addLiveWrites (int token, const juce::StringArray& writes)
+{
+    if (token != generationToken || ! labState.generating)
+        return;
+    labState.tweakedParams.clear();
+    for (const auto& w : writes)
+    {
+        const auto id = w.upToFirstOccurrenceOf ("\t", false, false);
+        const auto raw = w.fromFirstOccurrenceOf ("\t", false, false);
+        juce::String line;
+        if (id == "wave") line = "Wavetable  " + raw;
+        else
+        {
+            line = describeWrite (id, raw);
+            const int index = paramIndexForId (id);
+            if (index >= 0) labState.tweakedParams.push_back (index);
+        }
+        if (line.isEmpty()) continue;
+        labState.liveWrites.add (line);
+    }
+    while (labState.liveWrites.size() > 8)
+        labState.liveWrites.remove (0);
+    if (! labState.tweakedParams.empty())
+        ++labState.tweakSerial;   // the Synth page flashes the knobs being written
     labBroadcaster.sendChangeMessage();
 }
 

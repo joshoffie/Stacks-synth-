@@ -40,6 +40,8 @@ private:
     juce::ToggleButton calmToggle { "Calm mode: no live knob markers or LFO playhead (the scope stays)" };
     juce::Label mtsLabel;   // MTS-ESP status
     juce::TextButton tipsButton { "Show the tips again" };
+    juce::Label sizeLabel;
+    juce::TextButton sizeSmall { "Small" }, sizeMedium { "Medium" }, sizeLarge { "Large" }, sizeFit { "Fit screen" };
     juce::ToggleButton mpeToggle  { "MPE: per-note pitch bend (48 st on channels 2-16), pressure and slide (CC74); channel 1 is the master" };
     juce::TextEditor guide;
     juce::StringArray menuBuiltins, menuOllama;

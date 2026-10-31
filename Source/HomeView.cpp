@@ -108,7 +108,11 @@ HomeView::HomeView (StacksAudioProcessor& p) : processor (p)
     addChildComponent (growButton);
 
     backButton.setTooltip ("Back to the kinds of sound");
-    backButton.onClick = [this] { stage = Stage::pick; note.clear(); refresh(); };
+    backButton.onClick = [this]
+    {
+        if (processor.lab().generating) { processor.cancelGeneration(); return; }   // "Stop": keep what has landed
+        stage = Stage::pick; note.clear(); refresh();
+    };
     addChildComponent (backButton);
 
     saveButton.setTooltip ("Save the sound you are hearing: pick a folder and a name");
@@ -299,7 +303,8 @@ void HomeView::refresh()
     saveButton.setVisible (results);
     saveButton.setEnabled (results && lab.auditioned >= 0);
     backButton.setVisible (stage != Stage::pick);
-    backButton.setEnabled (stage != Stage::growing);
+    backButton.setButtonText (lab.generating ? "Stop" : "Start over");
+    backButton.setTooltip (lab.generating ? "Stop growing; the sounds that have landed stay" : "Back to the kinds of sound");
     openSynthButton.setVisible (results);
     for (auto* b : { &closeButton, &mediumButton, &farButton }) b->setVisible (results);
 
@@ -574,6 +579,22 @@ void HomeView::paintGrowth (juce::Graphics& g, juce::Rectangle<float> area)
     g.setColour (colours::muted);
     g.setFont (StacksLookAndFeel::font (13.0f));
     if (stageText.isNotEmpty()) g.drawText (stageText, area.removeFromTop (22), juce::Justification::centred);
+
+    // The settings being written, newest brightest, so the work is visible.
+    const auto& writes = processor.lab().liveWrites;
+    if (processor.lab().generating && ! writes.isEmpty())
+    {
+        g.setFont (StacksLookAndFeel::font (12.0f));
+        const int shown = juce::jmin (6, writes.size());
+        auto lines = area.removeFromTop ((float) shown * 17.0f + 4.0f);
+        for (int i = 0; i < shown; ++i)
+        {
+            const int idx = writes.size() - shown + i;
+            const float age = (float) (shown - 1 - i) / (float) juce::jmax (1, shown - 1);   // 0 = newest
+            g.setColour (colours::text.withAlpha (0.85f - 0.6f * age));
+            g.drawText (writes[idx], lines.removeFromTop (17.0f), juce::Justification::centred);
+        }
+    }
 }
 
 // The block being written assembles piece by piece: its edges trace in, the

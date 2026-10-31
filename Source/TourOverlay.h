@@ -40,7 +40,7 @@ private:
     int current = 0;
     bool running = false;
     juce::Rectangle<int> hole;
-    juce::TextButton nextButton { "Next" }, skipButton { "Skip" };
+    juce::TextButton nextButton { "Next" }, skipButton { "Skip" }, closeButton { juce::String::fromUTF8 ("\xc3\x97") };   // the cross ends the tour on any step
 };
 
 } // namespace stacks

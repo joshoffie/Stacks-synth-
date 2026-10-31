@@ -54,6 +54,11 @@ private:
     bool showingHome = true;
     void setHome (bool);
     void maybeStartTour();                 // the first visit to a screen gets its short tour
+    float uiScale() const;                 // window width over the design width
+    void applyStoredScale();               // size the window from the remembered scale, or fit the screen
+    static constexpr int kDesignW = 1500, kDesignH = 860;
+    juce::Component content;               // everything lives in here at design size; the editor scales it as one picture
+    bool layingOut = false;
     TourOverlay tour;
     void drawAnnotations (juce::Image&, float scale);
     StacksKeyboard keyboard;

@@ -31,12 +31,12 @@ StacksAudioProcessorEditor::StacksAudioProcessorEditor (StacksAudioProcessor& p)
     patchName.setEditable (false, true, false);
     patchName.setTooltip ("The sound you're hearing. Double-click to rename it.");
     patchName.onTextChange = [this] { synthProcessor.setCurrentPatchName (patchName.getText()); };
-    addAndMakeVisible (patchName);
+    content.addAndMakeVisible (patchName);
 
     masterKnob.setAccent (colours::accent);
-    addAndMakeVisible (masterKnob);
-    addAndMakeVisible (scope);
-    addAndMakeVisible (tuner);
+    content.addAndMakeVisible (masterKnob);
+    content.addAndMakeVisible (scope);
+    content.addAndMakeVisible (tuner);
 
     settingsButton.setButtonText (juce::String::fromUTF8 ("\xe2\x9a\x99"));   // gear
     settingsButton.setTooltip ("Settings: calm mode, MPE and microtuning");
@@ -45,16 +45,16 @@ StacksAudioProcessorEditor::StacksAudioProcessorEditor (StacksAudioProcessor& p)
         if (settingsWindow != nullptr) { settingsWindow->toFront (true); return; }
         settingsWindow = SettingsPanel::show (synthProcessor, this);
     };
-    addAndMakeVisible (settingsButton);
+    content.addAndMakeVisible (settingsButton);
 
     undoButton.setButtonText (juce::String::fromUTF8 ("\xe2\x86\xb6"));   // undo arrow
     undoButton.setTooltip ("Undo (Cmd+Z): back to the sound before the last load, drag, tweak or knob move");
     undoButton.onClick = [this] { synthProcessor.undo(); };
-    addAndMakeVisible (undoButton);
+    content.addAndMakeVisible (undoButton);
     redoButton.setButtonText (juce::String::fromUTF8 ("\xe2\x86\xb7"));
     redoButton.setTooltip ("Redo (Shift+Cmd+Z)");
     redoButton.onClick = [this] { synthProcessor.redo(); };
-    addAndMakeVisible (redoButton);
+    content.addAndMakeVisible (redoButton);
     for (auto* b : { &settingsButton, &undoButton, &redoButton })
     {
         styleAsTab (*b);
@@ -65,29 +65,54 @@ StacksAudioProcessorEditor::StacksAudioProcessorEditor (StacksAudioProcessor& p)
     // until it is clicked.
     setWantsKeyboardFocus (true);
     setFocusContainerType (juce::Component::FocusContainerType::keyboardFocusContainer);
-    addAndMakeVisible (synthPanel);
-    addAndMakeVisible (labPanel);
-    addAndMakeVisible (homeView);
+    content.addAndMakeVisible (synthPanel);
+    content.addAndMakeVisible (labPanel);
+    content.addAndMakeVisible (homeView);
     homeView.onOpenSynth = [this] { setHome (false); };
     homeView.onSave = [this] { labPanel.savePresetDialog(); };
     modeButton.setTooltip ("Home: pick a kind of sound and grow it. Synth: every knob.");
     modeButton.onClick = [this] { setHome (! showingHome); };
-    addAndMakeVisible (modeButton);
+    content.addAndMakeVisible (modeButton);
     setHome (true);
-    addAndMakeVisible (keyboard);
+    content.addAndMakeVisible (keyboard);
 
     synthProcessor.labBroadcaster.addChangeListener (this);
     changeListenerCallback (nullptr);
 
-    addChildComponent (tour);   // added last so it sits over everything
+    content.addChildComponent (tour);   // added last so it sits over everything
     juce::Timer::callAfterDelay (700, [safe = juce::Component::SafePointer<StacksAudioProcessorEditor> (this)]
     {
         if (safe != nullptr) safe->maybeStartTour();
     });
 
+    addAndMakeVisible (content);
     setResizable (true, true);
-    setResizeLimits (1280, 720, 2600, 1600);
-    setSize (1500, 860);
+    getConstrainer()->setFixedAspectRatio ((double) kDesignW / (double) kDesignH);
+    setResizeLimits (juce::roundToInt (kDesignW * 0.6f), juce::roundToInt (kDesignH * 0.6f), juce::roundToInt (kDesignW * 1.5f), juce::roundToInt (kDesignH * 1.5f));
+    applyStoredScale();
+}
+
+float StacksAudioProcessorEditor::uiScale() const
+{
+    return getWidth() > 0 ? (float) getWidth() / (float) kDesignW : 1.0f;
+}
+
+// The remembered scale, or one that fits the screen this window is on (a 13 inch
+// MacBook gets about 85 percent), in steps of five percent.
+void StacksAudioProcessorEditor::applyStoredScale()
+{
+    float k = synthProcessor.uiScale();
+    if (k <= 0.0f)
+    {
+        auto area = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay() != nullptr
+                        ? juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()->userArea : juce::Rectangle<int> (1500, 900);
+        if (auto* display = juce::Desktop::getInstance().getDisplays().getDisplayForRect (getScreenBounds()))
+            area = display->userArea;
+        k = juce::jmin (1.0f, (float) (area.getHeight() - 160) / (float) kDesignH, (float) (area.getWidth() - 80) / (float) kDesignW);
+        k = std::floor (k * 20.0f) / 20.0f;
+    }
+    k = juce::jlimit (0.6f, 1.5f, k);
+    setSize (juce::roundToInt (kDesignW * k), juce::roundToInt (kDesignH * k));
 }
 
 StacksAudioProcessorEditor::~StacksAudioProcessorEditor()
@@ -102,6 +127,17 @@ void StacksAudioProcessorEditor::changeListenerCallback (juce::ChangeBroadcaster
     patchName.setText (synthProcessor.currentPatchName(), juce::dontSendNotification);
     undoButton.setEnabled (synthProcessor.canUndo());
     redoButton.setEnabled (synthProcessor.canRedo());
+    if (! layingOut)
+    {
+        const float wanted = synthProcessor.uiScale();
+        if (wanted <= 0.0f || std::abs (wanted - uiScale()) > 0.005f)
+        {
+            layingOut = true;
+            applyStoredScale();
+            if (wanted <= 0.0f) synthProcessor.setUiScale (uiScale());   // "fit the screen" settles into a number
+            layingOut = false;
+        }
+    }
     if (showingHome && homeView.showingResults() && ! synthProcessor.tourSeen ("results") && ! tour.isRunning())
         maybeStartTour();   // the first five sounds just landed
 }
@@ -110,8 +146,8 @@ void StacksAudioProcessorEditor::maybeStartTour()
 {
     if (tour.isRunning() || ! isShowing())
         return;
-    auto in = [this] (juce::Component& c, juce::Rectangle<int> r) { return std::function<juce::Rectangle<int>()> ([this, &c, r] { return getLocalArea (&c, r); }); };
-    auto whole = [this] (juce::Component& c) { return std::function<juce::Rectangle<int>()> ([this, &c] { return getLocalArea (c.getParentComponent(), c.getBounds()); }); };
+    auto in = [this] (juce::Component& c, juce::Rectangle<int> r) { return std::function<juce::Rectangle<int>()> ([this, &c, r] { return content.getLocalArea (&c, r); }); };
+    auto whole = [this] (juce::Component& c) { return std::function<juce::Rectangle<int>()> ([this, &c] { return content.getLocalArea (c.getParentComponent(), c.getBounds()); }); };
     std::vector<TourOverlay::Step> steps;
     juce::String screen;
     if (showingHome && ! homeView.showingResults() && ! synthProcessor.tourSeen ("home"))
@@ -120,7 +156,7 @@ void StacksAudioProcessorEditor::maybeStartTour()
         steps = { { in (homeView, homeView.tourArea ("tiles")), "Pick a kind of sound. Stacks makes five new ones just for you." },
                   { whole (keyboard), "Play notes here, or use your own MIDI keyboard." },
                   { whole (modeButton), "Synth opens every knob. Home always brings you back here." },
-                  { [this] { return getLocalArea (this, undoButton.getBounds().getUnion (redoButton.getBounds())); }, "Undo and redo any change." } };
+                  { [this] { return undoButton.getBounds().getUnion (redoButton.getBounds()); }, "Undo and redo any change." } };
     }
     else if (showingHome && homeView.showingResults() && ! synthProcessor.tourSeen ("results"))
     {
@@ -165,6 +201,7 @@ std::unique_ptr<juce::ComponentTraverser> StacksAudioProcessorEditor::createKeyb
 
 bool StacksAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
 {
+    if (key.getKeyCode() == juce::KeyPress::escapeKey && tour.isRunning()) { tour.finish(); return true; }
     const bool cmd = key.getModifiers().isCommandDown();
     if (cmd && key.getKeyCode() == 'Z' && key.getModifiers().isShiftDown()) { synthProcessor.redo(); return true; }
     if (cmd && key.getKeyCode() == 'Z')  { synthProcessor.undo(); return true; }
@@ -175,7 +212,8 @@ bool StacksAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
 void StacksAudioProcessorEditor::paint (juce::Graphics& g)
 {
     g.fillAll (colours::background);
-    if (skin::has ("background")) skin::drawStretched (g, "background", getLocalBounds().toFloat());
+    g.addTransform (juce::AffineTransform::scale (uiScale()));
+    if (skin::has ("background")) skin::drawStretched (g, "background", juce::Rectangle<float> ((float) kDesignW, (float) kDesignH));
     if (skin::has ("header"))     skin::drawStretched (g, "header", headerBounds.toFloat());
 
     // Header: the wordmark, and a hairline under the whole strip.
@@ -195,7 +233,17 @@ void StacksAudioProcessorEditor::paint (juce::Graphics& g)
 
 void StacksAudioProcessorEditor::resized()
 {
-    auto r = getLocalBounds();
+    // The window is a scaled picture of the 1500 x 860 design.
+    const float k = uiScale();
+    content.setBounds (0, 0, kDesignW, kDesignH);
+    content.setTransform (juce::AffineTransform::scale (k));
+    if (! layingOut && std::abs (synthProcessor.uiScale() - k) > 0.005f && synthProcessor.uiScale() > 0.0f)
+    {
+        layingOut = true;
+        synthProcessor.setUiScale (k);   // a dragged corner is remembered
+        layingOut = false;
+    }
+    auto r = juce::Rectangle<int> (kDesignW, kDesignH);
 
     auto header = r.removeFromTop (kHeaderHeight);
     headerBounds = header;
@@ -224,7 +272,7 @@ void StacksAudioProcessorEditor::resized()
     labPanel.setBounds (r.removeFromRight (kLabWidth));
     r.removeFromRight (kMargin);
     synthPanel.setBounds (r);
-    tour.setBounds (getLocalBounds());
+    tour.setBounds (content.getLocalBounds());
 }
 
 namespace
@@ -271,8 +319,9 @@ void StacksAudioProcessorEditor::drawAnnotations (juce::Image& image, float scal
     // (pointed at the gap above the keyboard, which is plain background on every screen).
     pieces.emplace_back ("header.png", juce::Rectangle<int> (headerBounds.getRight() - 560, headerBounds.getBottom() - 2, 1, 1));
     pieces.emplace_back ("background.png", juce::Rectangle<int> (8, keyboard.getY() - 20, 1, 1));
-    for (auto* child : getChildren())   // not from the editor itself: headless, it reports itself invisible
-        collectPieces (*this, *child, pieces, headerBounds);
+    jassert (std::abs (uiScale() - 1.0f) < 0.01f);   // the labels are measured in design space; the tool renders at 100 percent
+    for (auto* child : content.getChildren())   // not from the editor itself: headless, it reports itself invisible
+        collectPieces (content, *child, pieces, headerBounds);
     auto addFrom = [&] (juce::Component& panel, const std::vector<Piece>& list)
     {
         if (! panel.isVisible()) return;
@@ -280,14 +329,14 @@ void StacksAudioProcessorEditor::drawAnnotations (juce::Image& image, float scal
         {
             bool seen = false;
             for (const auto& q : pieces) seen = seen || q.first == p.first;
-            if (! seen) pieces.emplace_back (p.first, getLocalArea (&panel, p.second));
+            if (! seen) pieces.emplace_back (p.first, content.getLocalArea (&panel, p.second));
         }
     };
     addFrom (synthPanel, synthPanel.skinPieces());
     addFrom (labPanel, labPanel.skinPieces());
     addFrom (homeView, homeView.skinPieces());
-    pieces.emplace_back ("key-white.png", getLocalArea (&keyboard, keyboard.getRectangleForKey (48).toNearestInt()));
-    pieces.emplace_back ("key-black.png", getLocalArea (&keyboard, keyboard.getRectangleForKey (49).toNearestInt()));
+    pieces.emplace_back ("key-white.png", content.getLocalArea (&keyboard, keyboard.getRectangleForKey (48).toNearestInt()));
+    pieces.emplace_back ("key-black.png", content.getLocalArea (&keyboard, keyboard.getRectangleForKey (49).toNearestInt()));
 
     juce::Graphics g (image);
     g.addTransform (juce::AffineTransform::scale (scale));
@@ -308,7 +357,7 @@ void StacksAudioProcessorEditor::drawAnnotations (juce::Image& image, float scal
             { r.getX(), r.getY() - h - gap, w, h }, { r.getX(), r.getBottom() + gap, w, h },
             { r.getRight() + gap, r.getCentreY() - h / 2, w, h }, { r.getX() - w - gap, r.getCentreY() - h / 2, w, h },
             { r.getRight() - w, r.getY() - h - gap, w, h }, { r.getRight() - w, r.getBottom() + gap, w, h } };
-        const auto screen = getLocalBounds().reduced (2);
+        const auto screen = content.getLocalBounds().reduced (2);
         for (int push = 0; push < 12; ++push)
             for (auto o : options)
             {
@@ -318,7 +367,7 @@ void StacksAudioProcessorEditor::drawAnnotations (juce::Image& image, float scal
                 for (const auto& t : taken) clear = clear && ! t.intersects (o);
                 if (clear) return o;
             }
-        return { juce::jlimit (2, getWidth() - w - 2, r.getX()), juce::jlimit (2, getHeight() - h - 2, r.getY() - h - gap), w, h };
+        return { juce::jlimit (2, kDesignW - w - 2, r.getX()), juce::jlimit (2, kDesignH - h - 2, r.getY() - h - gap), w, h };
     };
 
     for (const auto& p : pieces)
@@ -333,7 +382,7 @@ void StacksAudioProcessorEditor::drawAnnotations (juce::Image& image, float scal
             g.drawRect (r.expanded (2), 2);
         }
         const int w = (int) font.getStringWidthFloat (p.first) + 12;
-        const auto label = boxed ? place (r, w) : juce::Rectangle<int> (juce::jlimit (2, getWidth() - w - 2, r.getX()), r.getY(), w, 18);
+        const auto label = boxed ? place (r, w) : juce::Rectangle<int> (juce::jlimit (2, kDesignW - w - 2, r.getX()), r.getY(), w, 18);
         taken.push_back (label.expanded (2));
         // a leader from the label to the nearest point of the piece
         const auto from = label.getConstrainedPoint (r.getCentre()).toFloat();

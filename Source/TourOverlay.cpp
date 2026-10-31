@@ -14,7 +14,7 @@ TourOverlay::TourOverlay()
 {
     setInterceptsMouseClicks (true, true);
     setWantsKeyboardFocus (false);
-    for (auto* b : { &nextButton, &skipButton })
+    for (auto* b : { &nextButton, &skipButton, &closeButton })
     {
         b->setWantsKeyboardFocus (false);
         b->setMouseClickGrabsKeyboardFocus (false);
@@ -24,6 +24,8 @@ TourOverlay::TourOverlay()
     nextButton.setColour (juce::TextButton::textColourOffId, juce::Colours::black);
     nextButton.onClick = [this] { show (current + 1); };
     skipButton.onClick = [this] { finish(); };
+    closeButton.setTooltip ("Close the guide (Esc)");
+    closeButton.onClick = [this] { finish(); };
     setVisible (false);
 }
 
@@ -74,6 +76,7 @@ juce::Rectangle<int> TourOverlay::bubbleBounds() const
 
 void TourOverlay::resized()
 {
+    closeButton.setBounds (bubbleBounds().removeFromTop (22).removeFromRight (22).reduced (3));
     auto b = bubbleBounds().reduced (12).removeFromBottom (26);
     nextButton.setBounds (b.removeFromRight (78));
     b.removeFromRight (8);
