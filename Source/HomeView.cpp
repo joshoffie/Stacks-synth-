@@ -226,6 +226,7 @@ juce::Rectangle<int> HomeView::tourArea (const juce::String& what) const
     else if (what == "grow")      r = growButton.getBounds();
     else if (what == "save")      r = saveButton.getBounds();
     else if (what == "open")      r = openSynthButton.getBounds();
+    else if (what == "life")      r = lifeSwitch.getBounds();
     return r;
 }
 

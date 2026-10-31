@@ -1410,6 +1410,12 @@ static void testLiveWrites()
     CHECK (w.size() == 1 && w[0] == "chorus_mix\t0.4");   // finished now; the earlier two are not repeated
     w = LlmPatchGenerator::extractWrites ("{\"name\":\"Warm Glass\",\"filter_cutoff\": 820,\"oscA_wave\":3,\"chorus_mix\":0.4,\"reverb_mix\":0.5,\"waveA\":{\"name\":\"glassy bell\",\"spectra\":[[1,0,0.5]]},\"delay_mode\":1}", seen);
     CHECK (w.size() == 3 && w[0] == "reverb_mix\t0.5" && w[1] == "wave\tGlassy Bell" && w[2] == "delay_mode\t1");
+    // the real reply: settings nested under "params", choices by name, the table after
+    std::set<std::string> seen2;
+    w = LlmPatchGenerator::extractWrites ("{\"name\":\"Velvet Horizon\",\"category\":\"Lead\",\"parent\":1,\"params\":{\"oscA_wave\":\"Saw\",\"oscA_morph\":0.7,\"filter_type\":\"LP24\",\"filter_cutoff\":2400,\"lfo1_sync\":\"Free\",\"unison_detune\":22},\"waveA\":{\"name\":\"Neon Saw\",\"tail\":7,\"spectra\":[[9,8", seen2);
+    CHECK (w.size() == 6 && w[0] == "oscA_wave\tSaw" && w[2] == "filter_type\tLP24" && w[3] == "filter_cutoff\t2400" && w[5] == "unison_detune\t22");
+    w = LlmPatchGenerator::extractWrites ("{\"name\":\"Velvet Horizon\",\"params\":{\"oscA_wave\":\"Saw\",\"oscA_morph\":0.7,\"filter_type\":\"LP24\",\"filter_cutoff\":2400,\"lfo1_sync\":\"Free\",\"unison_detune\":22},\"waveA\":{\"name\":\"Neon Saw\",\"tail\":7,\"spectra\":[[9,8,7]]}}", seen2);
+    CHECK (w.size() == 1 && w[0] == "wave\tNeon Saw");
 }
 
 static void testCharacterAndEffects()

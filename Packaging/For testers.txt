@@ -8,7 +8,8 @@ A Mac with Apple silicon (M1 or later), macOS 12 or later, 8 GB of memory
 (16 GB is better), about 3 GB of free disk space.
 
 INSTALL
-1. Download Stacks-0.1.1.pkg (2.3 GB; the sound engine data is most of it).
+1. Download Stacks-0.1.2.pkg (2.3 GB; the sound engine data is most of it).
+   Already have Stacks? Download Stacks-0.1.2-update.pkg (small) instead.
 2. Double-click it and click through. It installs the Audio Unit, the VST3,
    the Stacks app and the engine data. It asks for your Mac password once.
 3. Open your DAW. Logic Pro and GarageBand: if Stacks doesn't appear under
@@ -29,6 +30,22 @@ sound can take up to a minute while the engine warms up, and all five about
 two minutes. After that it's quicker. You can click a block to hear it as
 soon as it lands, even while the rest are still growing. Then use "Grow from
 this one", "Save preset" or "Open the synth" for every knob.
+
+NEW IN 0.1.2 (from your notes)
+- The five sounds now land in a family tree. Drag the empty space to look
+  back at every earlier generation and click any block to play it again.
+- The + on a block adds it to the mix. Add two or three and Grow makes five
+  sounds that take something from each.
+- Close, Medium and Far are different now. Far designs new sounds around what
+  made the original itself instead of nudging its knobs. Tell us if Far feels
+  like new ideas that are still related.
+- Life (Off to 5) on the Home screen and in the header lets the sound slowly
+  wander as you play. Off is the preset exactly.
+- The window scales. Drag a corner, or pick a size in the gear menu.
+- Stop ends a batch early. Esc or the cross closes the guide.
+- On the Synth page the sections are switches: turn some off and the rest
+  grow to fill the space.
+- You can watch the settings being written while a sound grows.
 
 PLEASE TELL US
 - Did the installer open with a double-click, with no warning beyond the

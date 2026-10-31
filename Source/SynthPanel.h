@@ -86,7 +86,9 @@ public:
 
     void beginAssign (int source);
     void endAssign();
-    void setView (int rowIndex);                              // -1 = all rows, -2 = the macros page
+    void setView (int rowIndex);                              // -1 = all rows, -2 = the macros page, i = only that row
+    void toggleRow (int rowIndex);                            // a section chip: on or off; the rows on show share the space
+    bool isRowShown (int rowIndex) const;
     ModulatorsPanel* modulatorsPanel() const                  { return modulators.get(); }
     // (skin file name, rectangle in this panel's coordinates) for the first card, display well and effect link on show
     std::vector<std::pair<juce::String, juce::Rectangle<int>>> skinPieces() const;
@@ -147,7 +149,9 @@ private:
     std::unique_ptr<ModulatorsPanel> modulators;
     std::vector<std::unique_ptr<juce::TextButton>> viewButtons;
     std::unique_ptr<MacroPage> macroPage;
-    int viewMode = -1;                                        // -1 = all
+    int viewMode = -1;                                        // -2 = the macros page, otherwise the rows in `rowOn` share the space
+    std::vector<bool> rowOn;                                  // one flag per row
+    void applyRows();                                         // visibility, chips and layout from `rowOn`
     int assigningSource = -1;
     int seenTweakSerial = 0;
     ParamKnob* delayTimeKnob = nullptr;                      // dims while the delay is tempo-synced

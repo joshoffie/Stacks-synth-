@@ -145,6 +145,33 @@ any MTS-ESP master (the free MTS-ESP Mini, Scala, Surge XT as master) and every
 note in Stacks follows its scale, keys the scale leaves out stay silent. Nothing
 to set up; Settings shows the connected scale.
 
+## Growing sounds
+
+Home grows five sounds from a kind (Pad, Keys...) or from a sound you pick.
+Every batch lands in the **family tree**: generations as columns, each block
+joined to the sounds it grew from, the newest batch dropping in at the right.
+Drag the empty space to look back, pinch or Cmd-scroll to zoom, click any
+block to hear it. The **+** on a block (or a Cmd-click) adds it to the mix;
+Grow then reads "Grow from these N" and every child takes something from each
+parent. While a batch grows, the waiting slots fill to the engine's progress
+and the settings being written stream past.
+
+**Close, Medium and Far** are three different mechanics. Close hands the
+engine the parent's values and asks for knob moves. Medium makes each child
+rebuild two named areas from scratch and inherit the rest. Far never shows
+the engine a number from the parent: it gets the sound's identity in words
+(source, envelope class, filter, movement, space, character) and designs new
+patches around it, from the defaults. A structural distance (other wavetable
+family, warp, oscillator presence or interval, FM, sub, noise, unison, filter
+type and routing, a cutoff an octave away, the filter envelope's direction,
+the envelope class, connections, LFO shapes, effects on and their modes, the
+chain order, the arpeggiator, the sampler) sets targets per mode, and a child
+that lands too close is repaired with directed idea moves, not noise.
+
+**Life** (Off, 1 to 5; on Home and in the header) lets a sound slowly wander
+as it plays: slow noise plus a nudge on every note on eighteen knobs, as an
+offset layer. Off is the preset exactly. It saves with the preset.
+
 ## The AI Lab
 
 The **STACKS** tab shows the loop as a plant: the sound you're playing is the
@@ -285,6 +312,11 @@ UI. Any subset of these keys, hex `rrggbb` or `aarrggbb`:
 ## Giving it to friends
 
 The step-by-step release checklist is in `Packaging/RELEASING.md`.
+
+The window is one scaled picture of the 1500 x 860 design: drag a corner or
+pick Small, Medium, Large or Fit screen in the gear menu; the size is
+remembered. On the Synth page the section names are switches: the sections on
+show share the space.
 
 `Packaging/build-installer.sh` builds `dist/Stacks-<version>.pkg`, one
 installer with the Audio Unit, the VST3, the standalone app and the sound

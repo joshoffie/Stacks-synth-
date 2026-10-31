@@ -935,6 +935,13 @@ void StacksAudioProcessor::setUiScale (float k)
     labBroadcaster.sendChangeMessage();
 }
 
+int StacksAudioProcessor::synthRowsMask() const { return settings().getIntValue ("synthRows", 0); }
+void StacksAudioProcessor::setSynthRowsMask (int mask)
+{
+    settings().setValue ("synthRows", mask);
+    settings().saveIfNeeded();
+}
+
 bool StacksAudioProcessor::tourSeen (const juce::String& screen) const { return settings().getBoolValue ("tour_" + screen, false); }
 void StacksAudioProcessor::markTourSeen (const juce::String& screen)
 {
@@ -2327,6 +2334,12 @@ juce::String StacksAudioProcessor::labToJson() const
     obj->setProperty ("patchFile", patchFile);
     obj->setProperty ("patchFavourite", patchFavourite);
     return juce::JSON::toString (juce::var (obj), true);
+}
+
+void StacksAudioProcessor::loadLabJsonForTools (const juce::String& json)
+{
+    labFromJson (json);
+    labBroadcaster.sendChangeMessage();
 }
 
 void StacksAudioProcessor::labFromJson (const juce::String& json)

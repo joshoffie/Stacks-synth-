@@ -102,7 +102,8 @@ public:
     void requestEvolve (const juce::String& hint, float variation);
     void requestEvolveFrom (const Patch& parent, const juce::String& hint, float variation); // "plant" one candidate
     void requestGrowFrom (const std::vector<std::pair<int, int>>& treeNodes, float variation);   // one or several tree nodes as parents
-    const Patch* patchAt (int generation, int candidate) const;   // a tree node's patch (candidate -1 = that generation's seed), null if gone
+    const Patch* patchAt (int generation, int candidate) const;
+    void loadLabJsonForTools (const juce::String& json);   // tools only: a lab state (generations, tree) from JSON   // a tree node's patch (candidate -1 = that generation's seed), null if gone
     void cancelGeneration();
     void goBackGeneration();
     void audition (int candidateIndex);
@@ -174,6 +175,9 @@ public:
     // The window's scale, 0.6..1.5 of the 1500 x 860 design; 0 = fit the screen. Remembered per user.
     float uiScale() const;
     void setUiScale (float scaleOrZero);
+
+    int synthRowsMask() const;              // which Synth sections are on show (bit per row); 0 = all
+    void setSynthRowsMask (int mask);
 
     bool tourSeen (const juce::String& screen) const;
     void markTourSeen (const juce::String& screen);

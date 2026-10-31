@@ -136,11 +136,11 @@ void StacksAudioProcessorEditor::changeListenerCallback (juce::ChangeBroadcaster
     if (! layingOut)
     {
         const float wanted = synthProcessor.uiScale();
-        if (wanted <= 0.0f || std::abs (wanted - uiScale()) > 0.005f)
+        if (wanted <= 0.0f || std::abs (wanted - (float) getWidth() / (float) kDesignW) > 0.005f)
         {
             layingOut = true;
             applyStoredScale();
-            if (wanted <= 0.0f) synthProcessor.setUiScale (uiScale());   // "fit the screen" settles into a number
+            if (wanted <= 0.0f) synthProcessor.setUiScale ((float) getWidth() / (float) kDesignW);   // "fit the screen" settles into a number
             layingOut = false;
         }
     }
@@ -168,7 +168,9 @@ void StacksAudioProcessorEditor::maybeStartTour()
     {
         screen = "results";
         steps = { { in (homeView, homeView.tourArea ("blocks")), "Click a block to hear it. Each one is a new sound." },
+                  { in (homeView, homeView.tourArea ("blocks")), "Drag the empty space to look back at earlier sounds. The + on a block adds it to the mix." },
                   { in (homeView, homeView.tourArea ("variation")), "Choose how different the next five should be." },
+                  { in (homeView, homeView.tourArea ("life")), "Life lets the sound slowly change as you play. Off is the sound exactly." },
                   { in (homeView, homeView.tourArea ("grow")), "Grow from this one makes five new sounds based on it." },
                   { in (homeView, homeView.tourArea ("save")), "Save preset keeps the sound in your library." },
                   { in (homeView, homeView.tourArea ("open")), "Open the synth to change every detail." } };
@@ -176,7 +178,7 @@ void StacksAudioProcessorEditor::maybeStartTour()
     else if (! showingHome && ! synthProcessor.tourSeen ("synth"))
     {
         screen = "synth";
-        steps = { { in (synthPanel, synthPanel.tourArea ("tabs")), "Each tab shows one part of the sound. All shows everything." },
+        steps = { { in (synthPanel, synthPanel.tourArea ("tabs")), "Switch sections on and off. The ones on share the space. All shows everything." },
                   { in (synthPanel, synthPanel.tourArea ("knob")), "Drag a knob up or down. Hover over it to see its value." },
                   { in (labPanel, labPanel.tourArea ("evolve")), "Evolve makes five new sounds from the one you hear now." },
                   { in (labPanel, labPanel.tourArea ("library")), "Library holds every preset and the sounds you save." },
@@ -244,14 +246,18 @@ void StacksAudioProcessorEditor::resized()
     content.setBounds (0, 0, kDesignW, kDesignH);
     content.setTransform (juce::AffineTransform::scale (k).translated (std::floor (((float) getWidth() - kDesignW * k) * 0.5f),
                                                                        std::floor (((float) getHeight() - kDesignH * k) * 0.5f)));
-    if (! layingOut && std::abs (synthProcessor.uiScale() - k) > 0.005f && synthProcessor.uiScale() > 0.0f)
+    // The remembered scale follows the width only: a host that trims a few pixels
+    // of height (the standalone's options bar) must not shrink the window a
+    // little more on every launch.
+    const float remembered = (float) getWidth() / (float) kDesignW;
+    if (! layingOut && std::abs (synthProcessor.uiScale() - remembered) > 0.005f && synthProcessor.uiScale() > 0.0f)
     {
         // A dragged corner is remembered, once the size has settled; hosts resize us a few times on the way in.
-        juce::Timer::callAfterDelay (900, [safe = juce::Component::SafePointer<StacksAudioProcessorEditor> (this), k]
+        juce::Timer::callAfterDelay (900, [safe = juce::Component::SafePointer<StacksAudioProcessorEditor> (this), remembered]
         {
-            if (safe == nullptr || std::abs (safe->uiScale() - k) > 0.005f || safe->layingOut) return;
+            if (safe == nullptr || safe->layingOut || std::abs ((float) safe->getWidth() / (float) kDesignW - remembered) > 0.005f) return;
             safe->layingOut = true;
-            safe->synthProcessor.setUiScale (k);
+            safe->synthProcessor.setUiScale (remembered);
             safe->layingOut = false;
         });
     }

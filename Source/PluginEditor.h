@@ -34,6 +34,7 @@ public:
     // with each skin file's name written next to the piece it paints. Used by
     // the StacksUiKit tool; the editor ends up back on Home.
     void renderScreens (const juce::File& directory, float scale, bool annotate = true);
+    void showHomeResults() { homeView.showResults(); }   // tools: the five-sounds screen
 
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;

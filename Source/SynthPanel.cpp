@@ -649,7 +649,7 @@ SynthPanel::SynthPanel (StacksAudioProcessor& p) : processor (p), apvts (p.apvts
             knob->onRemoveModulation = [this] (int slot) { processor.clearModulation (slot); };
             knob->onShowSource = [this] (int source)
             {
-                if (viewMode >= 0 && viewMode != (int) rows.size() - 1) setView (-1);   // the modulators row must be on screen
+                if (! isRowShown ((int) rows.size() - 1)) { if (viewMode == -2) viewMode = -1; rowOn[rows.size() - 1] = true; applyRows(); }   // the modulators row must be on screen
                 modulators->showSource (source);
             };
             if (juce::String (spec.id) == "delay_time") delayTimeKnob = knob.get();
@@ -746,7 +746,8 @@ SynthPanel::SynthPanel (StacksAudioProcessor& p) : processor (p), apvts (p.apvts
         auto b = std::make_unique<juce::TextButton> (text);
         styleAsTab (*b);
         b->setColour (juce::TextButton::buttonOnColourId, colour);
-        b->onClick = [this, mode] { setView (mode); };
+        b->onClick = [this, mode] { if (mode >= 0) toggleRow (mode); else setView (mode); };
+        b->setTooltip (mode == -2 ? "The six big knobs on a page of their own" : mode == -1 ? "Every section" : "Show or hide this section; the sections on show share the space");
         addAndMakeVisible (*b);
         viewButtons.push_back (std::move (b));
     };
@@ -754,7 +755,11 @@ SynthPanel::SynthPanel (StacksAudioProcessor& p) : processor (p), apvts (p.apvts
     addViewButton ("ALL", -1, colours::accent);
     for (int i = 0; i < (int) rows.size(); ++i)
         addViewButton (rows[(size_t) i].caption, i, rows[(size_t) i].colour);
-    setView (-1);
+    rowOn.assign (rows.size(), true);
+    if (const int mask = processor.synthRowsMask(); mask > 0)   // the sections left on last time
+        for (int i = 0; i < (int) rows.size(); ++i) rowOn[(size_t) i] = (mask >> i) & 1;
+    viewMode = -1;
+    applyRows();
 
     for (int e = 0; e < kNumFx; ++e)
     {
@@ -1019,15 +1024,55 @@ SynthPanel::Section* SynthPanel::findSection (const juce::String& title)
     return nullptr;
 }
 
+// Sections are toggles: any mix of rows can be on show and they share the
+// space, growing when others are off. ALL turns every row on; MACROS is its
+// own page. `setView` keeps the old meaning for callers: -2 macros, -1 all,
+// i = only that row.
 void SynthPanel::setView (int rowIndex)
 {
-    viewMode = rowIndex;
+    if (rowOn.size() != rows.size()) rowOn.assign (rows.size(), true);
+    if (rowIndex == -2) viewMode = -2;
+    else
+    {
+        viewMode = -1;
+        for (int i = 0; i < (int) rows.size(); ++i) rowOn[(size_t) i] = rowIndex < 0 || rowIndex == i;
+    }
+    applyRows();
+}
+
+void SynthPanel::toggleRow (int rowIndex)
+{
+    if (rowOn.size() != rows.size()) rowOn.assign (rows.size(), true);
+    if (rowIndex < 0 || rowIndex >= (int) rows.size()) return;
+    if (viewMode == -2) { viewMode = -1; applyRows(); return; }   // leaving the macros page: the rows come back as they were
+    int on = 0;
+    for (bool b : rowOn) on += b ? 1 : 0;
+    if (rowOn[(size_t) rowIndex] && on == 1) return;              // the last row stays
+    rowOn[(size_t) rowIndex] = ! rowOn[(size_t) rowIndex];
+    applyRows();
+}
+
+bool SynthPanel::isRowShown (int rowIndex) const
+{
+    return viewMode != -2 && rowIndex >= 0 && rowIndex < (int) rowOn.size() && rowOn[(size_t) rowIndex];
+}
+
+void SynthPanel::applyRows()
+{
+    bool all = true;
+    for (bool b : rowOn) all = all && b;
     for (int i = 0; i < (int) viewButtons.size(); ++i)
-        viewButtons[(size_t) i]->setToggleState (i - 2 == rowIndex, juce::dontSendNotification);
+    {
+        const int mode = i - 2;
+        viewButtons[(size_t) i]->setToggleState (mode == -2 ? viewMode == -2 : mode == -1 ? (viewMode != -2 && all) : isRowShown (mode), juce::dontSendNotification);
+    }
     for (int i = 0; i < (int) rows.size(); ++i)
-        rows[(size_t) i].container->setVisible (viewMode == -1 || viewMode == i);
+        rows[(size_t) i].container->setVisible (isRowShown (i));
     macroPage->setVisible (viewMode == -2);
     if (viewMode == -2) macroPage->refreshTargets();
+    int mask = 0;
+    for (int i = 0; i < (int) rowOn.size(); ++i) if (rowOn[(size_t) i]) mask |= 1 << i;
+    processor.setSynthRowsMask (viewMode == -2 ? 0 : (all ? 0 : mask));
     resized();
     repaint();
 }
@@ -1115,8 +1160,9 @@ void SynthPanel::resized()
     macroPage->setBounds (area);
 
     std::vector<Row*> shown;
-    if (viewMode < 0)                           for (auto& row : rows) shown.push_back (&row);
-    else if (viewMode < (int) rows.size())      shown.push_back (&rows[(size_t) viewMode]);
+    if (viewMode != -2)
+        for (int i = 0; i < (int) rows.size(); ++i)
+            if (isRowShown (i)) shown.push_back (&rows[(size_t) i]);
     if (shown.empty())
         return;
 
@@ -1124,7 +1170,7 @@ void SynthPanel::resized()
     const int availW = area.getWidth() - 2, availH = area.getHeight() - 2;
     int widest = 0, totalH = (int) (shown.size() - 1) * kGap;
     for (auto* row : shown) { widest = juce::jmax (widest, row->naturalWidth); totalH += row->naturalHeight; }
-    const float maxScale = viewMode >= 0 ? 2.0f : 1.35f;
+    const float maxScale = shown.size() == 1 ? 2.0f : shown.size() == 2 ? 1.7f : 1.35f;   // fewer sections on show grow larger
     const float scale = juce::jlimit (0.5f, maxScale, juce::jmin ((float) availW / (float) widest, (float) availH / (float) totalH));
 
     // Leftover height goes to the rows that can use it: those with displays

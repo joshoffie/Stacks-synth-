@@ -240,6 +240,7 @@ namespace
 
         processor->requestFromKind ("Pad");
         juce::StringArray statuses;
+        int liveWritesSeen = 0;
         double firstAt = -1.0;
         const double deadline = juce::Time::getMillisecondCounterHiRes() + 15.0 * 60.0 * 1000.0;
         bool started = false;
@@ -250,6 +251,8 @@ namespace
             started = started || lab.generating || processor->isDownloading();
             for (const auto& text : { lab.status, lab.progressDetail })
                 if (text.isNotEmpty() && ! statuses.contains (text)) statuses.add (text);
+            for (const auto& w : lab.liveWrites)
+                if (! statuses.contains ("write: " + w)) { statuses.add ("write: " + w); ++liveWritesSeen; }
             if (firstAt < 0.0 && ! lab.candidates.empty()) firstAt = juce::Time::getMillisecondCounterHiRes();
             if (started && ! lab.generating && ! processor->isDownloading()) break;
         }
@@ -273,6 +276,7 @@ namespace
                      statuses.isEmpty() ? "" : statuses[0].toRawUTF8(), statuses.isEmpty() ? "" : statuses[statuses.size() - 1].toRawUTF8());
         for (const auto& c : lab.candidates) wordsOk = wordsOk && visibleWordsOk (c.name) && visibleWordsOk (c.description);
         check (wordsOk, "nothing shown names the engine");
+        check (liveWritesSeen >= 20, "settings shown while writing: " + juce::String (liveWritesSeen) + (liveWritesSeen > 0 ? ", e.g. " + statuses[statuses.indexOf (statuses[0].startsWith ("write: ") ? statuses[0] : juce::String())] : juce::String()));
 
         if (! lab.candidates.empty())
         {
@@ -325,6 +329,95 @@ int main (int argc, char** argv)
     juce::ScopedJuceInitialiser_GUI init;
     if (juce::String (argv[1]) == "--smoke")
         return smokeTest();
+    if (juce::String (argv[1]) == "--tree-shot" && argc > 2)
+    {
+        // Two batches (a kind, then a mix of two of its sounds), then every screen rendered with the tree in place.
+        using namespace stacks;
+        const auto out = juce::File::getCurrentWorkingDirectory().getChildFile (argv[2]);
+        auto processor = std::make_unique<StacksAudioProcessor>();
+        processor->prepareToPlay (48000.0, 512);
+        auto wait = [&]
+        {
+            const double deadline = juce::Time::getMillisecondCounterHiRes() + 15.0 * 60.0 * 1000.0;
+            bool started = false;
+            while (juce::Time::getMillisecondCounterHiRes() < deadline)
+            {
+                juce::MessageManager::getInstance()->runDispatchLoopUntil (200);
+                started = started || processor->lab().generating;
+                if (started && ! processor->lab().generating) break;
+            }
+        };
+        if (argc > 3 && juce::String (argv[3]) == "--fake")
+        {
+            // Three generations from factory presets, no engine: instant, for layout work.
+            const auto repo = juce::File (__FILE__).getParentDirectory().getParentDirectory();
+            auto files = repo.getChildFile ("Factory").findChildFiles (juce::File::findFiles, true, "*.json");
+            files.sort();
+            auto batch = [&] (int from)
+            {
+                juce::Array<juce::var> arr;
+                for (int i = from; i < from + 5 && i < files.size(); ++i)
+                    if (auto p = Patch::fromJson (files[i].loadFileAsString())) arr.add (p->toVar());
+                return juce::var (arr);
+            };
+            auto refs = [] (std::initializer_list<std::pair<int, int>> rs)
+            {
+                juce::Array<juce::var> arr;
+                for (const auto& r : rs) { juce::Array<juce::var> pair; pair.add (r.first); pair.add (r.second); arr.add (juce::var (pair)); }
+                return juce::var (arr);
+            };
+            auto gen = [&] (int from, int number, const juce::var& parents, const juce::String& seedName)
+            {
+                auto* h = new juce::DynamicObject();
+                h->setProperty ("candidates", batch (from));
+                Patch seed; seed.name = seedName;
+                h->setProperty ("seed", seed.toVar());
+                h->setProperty ("seedIsPatch", false);
+                h->setProperty ("generation", number);
+                h->setProperty ("parents", parents);
+                return juce::var (h);
+            };
+            auto* root = new juce::DynamicObject();
+            root->setProperty ("generation", 3);
+            root->setProperty ("auditioned", 1);
+            root->setProperty ("candidates", batch (10));
+            Patch seed; seed.name = "Mix";
+            root->setProperty ("seed", seed.toVar());
+            root->setProperty ("seedIsPatch", false);
+            root->setProperty ("parents", refs ({ { 1, 1 }, { 1, 3 } }));
+            juce::Array<juce::var> hist;
+            hist.add (gen (0, 1, refs ({}), "Pad ideas"));
+            hist.add (gen (5, 2, refs ({ { 0, 2 } }), "Grown"));
+            root->setProperty ("history", juce::var (hist));
+            processor->loadLabJsonForTools (juce::JSON::toString (juce::var (root)));
+            std::printf ("fake tree: 3 generations from factory presets\n");
+        }
+        else
+        {
+            processor->requestFromKind ("Pad");
+            wait();
+            std::printf ("batch 1: %d sounds\n", (int) processor->lab().candidates.size());
+            if (processor->lab().candidates.size() >= 2)
+            {
+                processor->requestGrowFrom ({ { 0, 0 }, { 0, 1 } }, 0.8f);
+                wait();
+                std::printf ("batch 2 (mix of two): %d sounds\n", (int) processor->lab().candidates.size());
+            }
+        }
+        processor->audition (0);
+        std::unique_ptr<juce::AudioProcessorEditor> editor (processor->createEditor());
+        if (auto* e = dynamic_cast<StacksAudioProcessorEditor*> (editor.get()))
+        {
+            e->setSize (1500, 860);
+            e->showHomeResults();
+            juce::MessageManager::getInstance()->runDispatchLoopUntil (1500);   // let the blocks drop in
+            e->renderScreens (out, 2.0f, false);
+            std::printf ("screens written to %s\n", out.getFullPathName().toRawUTF8());
+        }
+        editor.reset();
+        processor.reset();
+        return 0;
+    }
     const auto cwd = juce::File::getCurrentWorkingDirectory();
     const bool plain = juce::String (argv[1]) == "--plain" && argc > 2;   // screens without the file-name labels
     if (juce::String (argv[1]) == "--export-skin" && argc > 2)

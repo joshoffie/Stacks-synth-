@@ -207,8 +207,8 @@ void TreeCanvas::refresh()
     const int gens = (int) lab.history.size(), cands = (int) lab.candidates.size();
     const bool structural = gens != knownGenerations;
     rebuild (knownGenerations < 0);   // the first fill (a restored session) sits still
-    if (structural && knownGenerations >= 0) centreOnNewest (true);
-    if (knownGenerations < 0) centreOnNewest (false);
+    if (structural && knownGenerations >= 0 && centredWithSize) centreOnNewest (true);
+    if (knownGenerations < 0 && getWidth() > 0) { centreOnNewest (false); centredWithSize = true; }
     knownGenerations = gens; knownCandidates = cands;
     placeNodes();
     bool moving = animatingPan || lab.generating;
@@ -334,6 +334,7 @@ void TreeCanvas::visibilityChanged()
 
 void TreeCanvas::resized()
 {
+    if (! centredWithSize && getWidth() > 0 && getHeight() > 0) { centredWithSize = true; centreOnNewest (false); return; }
     placeNodes();
 }
 
