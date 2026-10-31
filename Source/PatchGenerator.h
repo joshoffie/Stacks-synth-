@@ -56,6 +56,35 @@ void mutatePatch (Patch&, float amount, juce::int64 seed);
 // differs (source/target). The Lab uses it to keep descendants apart.
 int countAudibleDifferences (const Patch&, const Patch&);
 
+// Structural differences: a different wavetable family or designed table, warp,
+// oscillator presence or interval, FM / sub / noise presence, unison class,
+// filter type / routing / model, a cutoff an octave away, the filter envelope's
+// direction, the amp envelope's class, modulation connections (as a set),
+// LFO shapes in use, which effects are on and their modes, the chain order,
+// the arpeggiator and the sampler. Knob nudges do not count; new ideas do.
+int countStructuralDifferences (const Patch&, const Patch&);
+
+// How far a grow request strays, from its Variation amount.
+enum class GrowMode { Close, Medium, Far };
+GrowMode growModeFor (float variation) noexcept;
+
+// "swelling pad", "short pluck", "percussive", "sustained, long tail", "sustained".
+juce::String envelopeClass (const Patch&);
+
+// What makes a sound itself, in a few short phrases a designer could keep while
+// changing everything else: source, envelope class, filter, movement, space, character.
+juce::StringArray identityTraits (const Patch&);
+
+// Directed changes with intent, used instead of random noise when a child is too
+// close to its parent or a sibling: each one is a real idea (another wavetable
+// family, a rethought filter, new movement, a different space...). `move` wraps
+// around kNumIdeaMoves; `seed` makes the choice inside the move repeatable.
+constexpr int kNumIdeaMoves = 8;
+void applyIdeaMove (Patch&, int move, juce::int64 seed);
+
+// Far mode keeps the parent's identity: envelope class and category survive.
+void keepIdentity (Patch& child, const Patch& parent);
+
 // Honours what a prompt asks for by name: "lush chorus", "with delay", "tape",
 // "shimmer", "distorted", "wide", "sub bass", "portamento", "punchy", "riser",
 // "arp". Raises the settings those words call for and never lowers what the

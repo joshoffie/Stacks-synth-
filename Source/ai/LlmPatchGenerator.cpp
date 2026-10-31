@@ -18,6 +18,23 @@ namespace
     const std::vector<const char*>& coreParamIds();
     bool isCoreParam (const char* id);
 
+    // Structural distance a grown child must keep, by mode (tuned with `StacksTests --bench`).
+    constexpr int kMediumFromParent = 3, kMediumBetweenSiblings = 2;
+    constexpr int kFarFromParent = 6,    kFarBetweenSiblings = 4;
+
+    // The parent a child is closest to (Far mode has no named parent).
+    const Patch* parentFor (const GenerationRequest& req, const Patch& child, const Patch* fallback)
+    {
+        const Patch* best = fallback;
+        int bestDistance = 1 << 30;
+        for (const auto& parent : req.parents)
+        {
+            const int d = countStructuralDifferences (child, parent);
+            if (d < bestDistance) { bestDistance = d; best = &parent; }
+        }
+        return best;
+    }
+
     // The parent as the model sees it: the core settings, whatever differs from
     // the defaults, and the connections that are switched on. Everything else is
     // a default the child inherits anyway - and every value shown here is one
@@ -39,8 +56,11 @@ namespace
             for (int i = 0; i < kNumParams; ++i)
             {
                 const juce::String id (specs[(size_t) i].id);
-                if (id.startsWith ("mod") || isCoreParam (specs[(size_t) i].id) || id == "master_gain")
+                if (id.startsWith ("mod") || isCoreParam (specs[(size_t) i].id) || id == "master_gain" || id == "life")
+                {
+                    if (id == "life") obj->removeProperty ("life");   // a performance setting, not part of the design
                     continue;
+                }
                 if (std::abs (p.values[(size_t) i] - defaults.values[(size_t) i]) < 1.0e-4f)
                     obj->removeProperty (specs[(size_t) i].id);
             }
@@ -100,7 +120,7 @@ namespace
     bool isExtraParam (const char* id)
     {
         const juce::String s (id);
-        if (s == "master_gain" || s == "bend_range" || s.startsWith ("smp_") || s.startsWith ("grain_") || s.startsWith ("seq_") || s.startsWith ("fx_pos_") || s.startsWith ("fx_on_") || isCoreParam (id) || s.startsWith ("mod") || s.startsWith ("lfo3_") || s.startsWith ("lfo4_") || s.startsWith ("macro") || s.startsWith ("arp_"))
+        if (s == "master_gain" || s == "bend_range" || s == "life" || s.startsWith ("smp_") || s.startsWith ("grain_") || s.startsWith ("seq_") || s.startsWith ("fx_pos_") || s.startsWith ("fx_on_") || isCoreParam (id) || s.startsWith ("mod") || s.startsWith ("lfo3_") || s.startsWith ("lfo4_") || s.startsWith ("macro") || s.startsWith ("arp_"))
             return false;
         if ((s.startsWith ("lfo1_") || s.startsWith ("lfo2_")) && (s.endsWith ("_shape") || s.endsWith ("_rate") || s.endsWith ("_sync")))
             return false;
@@ -120,33 +140,65 @@ namespace
             "replace the LFO connection with a different target (Pan, Cutoff, Amp, Chorus Mix or Reverb Mix), a different shape and rate",
             "half speed: slower LFO rate, longer aenv_release, a longer, darker reverb",
         };
-        static const char* const bolder[] = {
-            "change oscillator B: another wave, oscB_coarse an octave or a fifth away as a silent FM modulator, fm_amount 0.3-0.6",
-            "make it rhythmic: a Square or Random LFO synced to 1/8 or 1/16 on Cutoff or Pan at 0.4-0.6",
-            "thin and resonant: less sub_level and fm_amount, filter_res 0.5-0.7, a touch of noise_level",
-            "an inverted filter sweep: negative filter_env with a long fenv_decay, over a Plate reverb",
-            "Mod Env > FM B>A 0.4-0.6 with menv_decay 0.3 for a metallic attack, then a soft body",
-            "a tape-delay texture: delay_mode Tape, delay_feedback 0.5-0.7, delay_mix 0.4, chorus_mode Ensemble",
+        // Medium: each child rebuilds two areas from scratch and inherits the rest.
+        static const char* const areas[] = {
+            "the source (oscillators, wavetable choice or design, FM, sub, noise)",
+            "the filter (type, cutoff, resonance, drive and the filter envelope)",
+            "the movement (LFO shapes and rates and every connection)",
+            "the space (which effects are on, their modes and amounts, the chain order)",
+            "the character (unison, glide, drift, warmth, the arpeggiator)",
         };
-        static const char* const wild[] = {
-            "turn it into a Pluck with the same tone: aenv_sustain 0, aenv_decay 0.2-0.5, filter_env 2-4",
-            "turn it into a Bass: oscA_coarse -12, sub_level 0.6-0.9, filter_cutoff 150-600, no reverb",
-            "turn it into a Lead: glide 0.05-0.12, a Sine LFO vibrato on Pitch at 0.02-0.03 and 5-6 Hz, unison 2-3",
-            "turn it into a Texture: Grit or Formant on oscillator A, noise, a Random LFO on A Morph, long delay feedback",
-            "turn it into a Bell: fm_amount 0.5-0.8 with oscB_coarse 19 or 24 as a silent modulator, aenv_sustain 0, long release",
+        // Far: a new design around the same identity.
+        static const char* const reimagine[] = {
+            "the same mood from a different engine: another wavetable family, and build the tone from FM or a second oscillator instead of the original source",
+            "strip it to two elements and let one of them move with a slow LFO",
+            "add a rhythmic layer: a Square or Random LFO synced to 1/8 or 1/16 on Cutoff or Amp, the tone itself kept",
+            "move the colour into the effects: a plainer source, then tape, chorus or a long reverb doing the work",
+            "darker and heavier: an octave down, a sub, a closed filter, slower movement, a longer tail",
+            "brighter and lighter: a thinner source, an open filter, faster movement, a shorter tail",
+            "the same tone in another room: a different reverb type and delay mode, the chain in a new order, one effect switched off",
+            "a formant, vocal reading of the same idea: Formant or Glass table, a slow Morph sweep, filter_res 0.3-0.5",
+            "a glassy reading: FM with oscB_coarse 19 or 24 as a silent modulator, a touch of shimmer reverb",
+            "a wide reading: unison 4-6 with detune 15-30, Hyper width, the filter a little darker to make room",
         };
-        std::vector<const char*> pool (std::begin (gentle), std::end (gentle));
-        if (req.variation > 0.33f) pool.insert (pool.end(), std::begin (bolder), std::end (bolder));
-        if (req.variation > 0.66f) pool.insert (pool.end(), std::begin (wild), std::end (wild));
 
         juce::Random rng ((juce::int64) juce::Time::getHighResolutionTicks());
-        std::vector<const char*> order (pool);
-        for (int i = (int) order.size() - 1; i > 0; --i)
-            std::swap (order[(size_t) i], order[(size_t) rng.nextInt (i + 1)]);
+        auto shuffled = [&] (const char* const* begin, const char* const* end)
+        {
+            std::vector<const char*> order (begin, end);
+            for (int i = (int) order.size() - 1; i > 0; --i)
+                std::swap (order[(size_t) i], order[(size_t) rng.nextInt (i + 1)]);
+            return order;
+        };
 
         juce::String s;
-        for (int i = 0; i < req.count; ++i)
-            s << "  Descendant " << (i + 1) << ": " << order[(size_t) i % order.size()] << ".\n";
+        switch (growModeFor (req.variation))
+        {
+            case GrowMode::Close:
+            {
+                const auto order = shuffled (std::begin (gentle), std::end (gentle));
+                for (int i = 0; i < req.count; ++i)
+                    s << "  Descendant " << (i + 1) << ": " << order[(size_t) i % order.size()] << ".\n";
+                break;
+            }
+            case GrowMode::Medium:
+            {
+                for (int i = 0; i < req.count; ++i)
+                {
+                    const auto two = shuffled (std::begin (areas), std::end (areas));
+                    s << "  Descendant " << (i + 1) << ": rebuild " << two[0] << " and " << two[1]
+                      << " from scratch - write every setting in those two areas yourself, do not reuse the parent's values there - and inherit the rest.\n";
+                }
+                break;
+            }
+            case GrowMode::Far:
+            {
+                const auto order = shuffled (std::begin (reimagine), std::end (reimagine));
+                for (int i = 0; i < req.count; ++i)
+                    s << "  Patch " << (i + 1) << ": " << order[(size_t) i % order.size()] << ".\n";
+                break;
+            }
+        }
         return s;
     }
 
@@ -452,8 +504,36 @@ juce::String LlmPatchGenerator::userPrompt (const GenerationRequest& req)
         if (req.designWaves)
             s << "Design a new wavetable (waveA) for each one.\n";
     }
+    else if (growModeFor (req.variation) == GrowMode::Far)
+    {
+        // Far: no numbers from the parent at all. Its identity in words, and a
+        // new design around it. Whatever the model leaves out comes from the
+        // defaults, not from the parent, so nothing can be copied.
+        s << "The user picked " << (req.parents.size() > 1 ? "these favourites" : "a favourite") << " and wants new sounds that still feel related.\n";
+        for (int i = 0; i < (int) req.parents.size(); ++i)
+        {
+            const auto& parent = req.parents[(size_t) i];
+            s << "Favourite " << (i + 1) << " - \"" << parent.name << "\"";
+            if (parent.category.isNotEmpty()) s << " (" << parent.category << ")";
+            if (parent.description.isNotEmpty()) s << ": " << parent.description;
+            s << "\n  Its identity, the things to keep:\n";
+            for (const auto& trait : identityTraits (parent))
+                s << "    - " << trait << "\n";
+        }
+        s << "Create " << req.count << " new patches from scratch. Do not reuse the favourite's settings: invent each patch's own values for every area. "
+          << "Each patch keeps the identity above" << (req.parents.size() > 1 ? " (at least one trait from each favourite; say which in its description)" : "")
+          << " and takes its own direction:\n" << descendantDirections (req);
+        s << "Name each one with two fresh words; one word may echo the favourite's name.\n";
+        if (req.designWaves)
+            s << "Design a new wavetable (waveA) for each patch: a new shape, in the spirit of the favourite's source but not its spectrum.\n";
+        if (req.hint.trim().isNotEmpty())
+            s << "Direction from the user: \"" << req.hint.trim() << "\". Follow it closely.\n";
+        if (req.brief.isNotEmpty())
+            s << "Sound brief (your own notes on that direction - turn it into settings): " << req.brief << "\n";
+    }
     else
     {
+        const bool medium = growModeFor (req.variation) == GrowMode::Medium;
         s << "The user picked these favourites:\n";
         for (int i = 0; i < (int) req.parents.size(); ++i)
         {
@@ -473,7 +553,8 @@ juce::String LlmPatchGenerator::userPrompt (const GenerationRequest& req)
         s << "Set \"parent\" to the number of the parent whose values fill in anything you omit. "
           << "Give each descendant a fresh two-word name that shares one word with its parent.\n";
         if (req.designWaves)
-            s << "Design each descendant's waveA as a relative of its parent's spectrum: keep the character, change the shape.\n";
+            s << (medium ? "Design each descendant's waveA as a new shape in the family of its parent's spectrum.\n"
+                         : "Design each descendant's waveA as a relative of its parent's spectrum: keep the character, change the shape.\n");
         s << "Never copy a parent: a descendant must differ in at least " << juce::roundToInt (2.0f + 8.0f * req.variation)
           << " settings that you can hear (a knob moved by a quarter of its range or more, a different choice, a different connection), and its wavetable spectrum must change too.\n";
         if (req.hint.trim().isNotEmpty())
@@ -629,6 +710,64 @@ juce::String LlmPatchGenerator::grammar (int patchCount, bool designWaves)
     return g;
 }
 
+// Finished "key": value pairs in a half-written patch object, each reported
+// once (keys already in `reported` are skipped). Strings, numbers and the
+// designed tables (reported as "wave<TAB>name") count; name, description and
+// the parent reference do not. Returned as "id<TAB>value".
+juce::StringArray LlmPatchGenerator::extractWrites (const std::string& obj, std::set<std::string>& reported)
+{
+    juce::StringArray fresh;
+    size_t pos = 0;
+    while ((pos = obj.find ("\":", pos)) != std::string::npos)
+    {
+        const auto keyEnd = pos;
+        const auto keyStart = keyEnd > 0 ? obj.rfind ('"', keyEnd - 1) : std::string::npos;
+        pos += 2;
+        if (keyStart == std::string::npos) continue;
+        const std::string key = obj.substr (keyStart + 1, keyEnd - keyStart - 1);
+        size_t v = pos;
+        while (v < obj.size() && (obj[v] == ' ' || obj[v] == '\n' || obj[v] == '\t')) ++v;
+        if (v >= obj.size()) break;
+        std::string value;
+        if (obj[v] == '"')
+        {
+            const auto close = obj.find ('"', v + 1);
+            if (close == std::string::npos) break;          // still streaming
+            value = obj.substr (v + 1, close - v - 1);
+            pos = close + 1;
+        }
+        else if (obj[v] == '{' || obj[v] == '[')
+        {
+            int depth = 0; size_t e = v;
+            for (; e < obj.size(); ++e) { if (obj[e] == '{' || obj[e] == '[') ++depth; else if (obj[e] == '}' || obj[e] == ']') { if (--depth == 0) break; } }
+            if (e >= obj.size()) break;                      // still streaming
+            if ((key == "waveA" || key == "waveB" || key == "waveC") && ! reported.count (key))
+            {
+                const auto inner = obj.substr (v, e - v + 1);
+                const auto n = inner.find ("\"name\":\"");
+                if (n != std::string::npos) { const auto ne = inner.find ('"', n + 8); if (ne != std::string::npos) value = inner.substr (n + 8, ne - n - 8); }
+                if (value.empty()) value = "new table";
+                reported.insert (key);
+                fresh.add ("wave\t" + titleCase (spaceOutCamelCase (juce::String::fromUTF8 (value.c_str()))));
+            }
+            pos = e + 1;
+            continue;
+        }
+        else
+        {
+            const auto end = obj.find_first_of (",}\n", v);
+            if (end == std::string::npos) break;             // still streaming
+            value = obj.substr (v, end - v);
+            pos = end;
+        }
+        if (key == "name" || key == "description" || key == "category" || key == "parent" || key == "patches") continue;
+        if (reported.count (key)) continue;
+        reported.insert (key);
+        fresh.add (juce::String::fromUTF8 (key.c_str()) + "\t" + juce::String::fromUTF8 (value.c_str()).trim());
+    }
+    return fresh;
+}
+
 std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request, const GenerationProgress& progress)
 {
     juce::String reason;
@@ -666,6 +805,12 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
     }
 
     progress.status ("Writing...");
+    switch (growModeFor (req.variation))   // careful when nudging, adventurous when reimagining
+    {
+        case GrowMode::Close:  backend->setTemperature (req.parents.empty() ? 0.8f : 0.6f); break;
+        case GrowMode::Medium: backend->setTemperature (0.8f); break;
+        case GrowMode::Far:    backend->setTemperature (req.parents.empty() ? 0.9f : 1.0f); break;
+    }
 
     // Written up front so a failed run can still be inspected.
     {
@@ -685,9 +830,11 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
         if (auto* obj = v.getDynamicObject(); obj == nullptr || ! (obj->hasProperty ("params") || obj->hasProperty ("name")))
             return;
 
-        // Pick the base this patch builds on: the named parent, else parent 1, else defaults.
+        // Pick the base this patch builds on: the named parent, else parent 1, else
+        // defaults. Far mode always builds on the defaults: nothing is inherited.
         const Patch* base = &defaults;
-        if (! req.parents.empty())
+        const auto mode = growModeFor (req.variation);
+        if (! req.parents.empty() && mode != GrowMode::Far)
         {
             base = &req.parents.front();
             if (auto* obj = v.getDynamicObject())
@@ -750,34 +897,63 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
         }
 
         // Descendants must be audibly different from the parent and from each
-        // other; the model drifts toward near-copies, so push them apart.
+        // other; the model drifts toward near-copies, so push them apart. Close
+        // asks for knob moves; Medium and Far ask for structural changes (other
+        // choices, connections, effects) and repair with directed idea moves
+        // rather than noise, so a too-close child becomes a different idea.
         if (! req.parents.empty())
         {
-            const int wanted = juce::roundToInt (2.0f + 8.0f * req.variation);
             const auto seed = (juce::int64) juce::Time::getHighResolutionTicks() + (juce::int64) out.size() * 7919;
-            auto tooClose = [&]
+            if (mode == GrowMode::Close)
             {
-                if (countAudibleDifferences (*patch, *base) < wanted) return true;
-                for (const auto& sibling : out)
-                    if (countAudibleDifferences (*patch, sibling) < juce::jmax (2, wanted / 2)) return true;
-                return false;
-            };
-            for (int attempt = 0; attempt < 4 && tooClose(); ++attempt)
+                const int wanted = juce::roundToInt (2.0f + 8.0f * req.variation);
+                auto tooClose = [&]
+                {
+                    if (countAudibleDifferences (*patch, *base) < wanted) return true;
+                    for (const auto& sibling : out)
+                        if (countAudibleDifferences (*patch, sibling) < juce::jmax (2, wanted / 2)) return true;
+                    return false;
+                };
+                for (int attempt = 0; attempt < 4 && tooClose(); ++attempt)
+                {
+                    mutatePatch (*patch, 0.3f + 0.4f * req.variation, seed + attempt);
+                    if (! patch->waves[0].isEmpty() && patch->waves[0] == base->waves[0])
+                        patch->waves[0] = mutateWave (patch->waves[0], 0.4f + 0.4f * req.variation, seed + attempt);
+                    if (! patch->waves[0].isEmpty())
+                        patch->set (P::oscA_wave, (float) kCustomWave);
+                    keepPatchInTune (*patch);
+                }
+            }
+            else
             {
-                mutatePatch (*patch, 0.3f + 0.4f * req.variation, seed + attempt);
-                if (! patch->waves[0].isEmpty() && patch->waves[0] == base->waves[0])
-                    patch->waves[0] = mutateWave (patch->waves[0], 0.4f + 0.4f * req.variation, seed + attempt);
-                if (! patch->waves[0].isEmpty())
-                    patch->set (P::oscA_wave, (float) kCustomWave);
-                keepPatchInTune (*patch);
+                const int fromParent = mode == GrowMode::Far ? kFarFromParent : kMediumFromParent;
+                const int betweenSiblings = mode == GrowMode::Far ? kFarBetweenSiblings : kMediumBetweenSiblings;
+                auto tooClose = [&]
+                {
+                    for (const auto& parent : req.parents)
+                        if (countStructuralDifferences (*patch, parent) < fromParent) return true;
+                    for (const auto& sibling : out)
+                        if (countStructuralDifferences (*patch, sibling) < betweenSiblings) return true;
+                    return false;
+                };
+                juce::Random order ((juce::int64) seed);
+                int move = order.nextInt (kNumIdeaMoves);
+                for (int attempt = 0; attempt < 8 && tooClose(); ++attempt, ++move)
+                {
+                    applyIdeaMove (*patch, move, seed + attempt);
+                    keepPatchInTune (*patch);
+                    if (mode == GrowMode::Far) keepIdentity (*patch, *parentFor (req, *patch, base));
+                }
             }
         }
+        if (mode == GrowMode::Far && ! req.parents.empty())
+            keepIdentity (*patch, *parentFor (req, *patch, base));
 
         ensureMacroRoutings (*patch);
         patch->set (P::master_gain, -6.0f);
         patch->origin = "grown";
         patch->prompt = req.hint.trim();
-        patch->parentName = req.parents.empty() ? juce::String() : base->name;
+        patch->parentName = req.parents.empty() ? juce::String() : parentFor (req, *patch, base)->name;
         if (patch->tags.isEmpty()) patch->tags = autoTags (*patch);
         for (const auto& parent : req.parents)   // the model copied the parent's blurb: describe the child instead
             if (patch->description.length() > 20 && parent.description.startsWithIgnoreCase (patch->description))
@@ -802,53 +978,9 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
     auto reportWrites = [&] (const std::string& obj)
     {
         if (reportedForPatch != out.size()) { reportedKeys.clear(); reportedForPatch = out.size(); }
-        juce::StringArray fresh;
-        size_t pos = 0;
-        while ((pos = obj.find ("\":", pos)) != std::string::npos)
-        {
-            const auto keyEnd = pos;
-            const auto keyStart = obj.rfind ('"', keyEnd - 1);
-            pos += 2;
-            if (keyStart == std::string::npos) continue;
-            const std::string key = obj.substr (keyStart + 1, keyEnd - keyStart - 1);
-            // the value runs to the next top-level comma or closing brace; objects and arrays are skipped
-            size_t v = pos;
-            while (v < obj.size() && obj[v] == ' ') ++v;
-            if (v >= obj.size()) break;
-            std::string value;
-            if (obj[v] == '"')
-            {
-                const auto close = obj.find ('"', v + 1);
-                if (close == std::string::npos) break;          // still streaming
-                value = obj.substr (v + 1, close - v - 1);
-            }
-            else if (obj[v] == '{' || obj[v] == '[')
-            {
-                int depth = 0; size_t e = v;
-                for (; e < obj.size(); ++e) { if (obj[e] == '{' || obj[e] == '[') ++depth; else if (obj[e] == '}' || obj[e] == ']') { if (--depth == 0) break; } }
-                if (e >= obj.size()) break;                      // still streaming
-                if (key == "waveA" || key == "waveB" || key == "waveC")
-                {
-                    const auto inner = obj.substr (v, e - v + 1);
-                    const auto n = inner.find ("\"name\":\"");
-                    if (n != std::string::npos) { const auto ne = inner.find ('"', n + 8); if (ne != std::string::npos) value = inner.substr (n + 8, ne - n - 8); }
-                    if (value.empty()) value = "new table";
-                    if (! reportedKeys.count (key)) { reportedKeys.insert (key); fresh.add ("wave\t" + titleCase (spaceOutCamelCase (juce::String::fromUTF8 (value.c_str())))); }
-                }
-                pos = e + 1;
-                continue;
-            }
-            else
-            {
-                const auto end = obj.find_first_of (",}", v);
-                if (end == std::string::npos) break;             // still streaming
-                value = obj.substr (v, end - v);
-            }
-            if (key == "name" || key == "description" || key == "category" || key == "parent" || key == "patches") continue;
-            if (reportedKeys.count (key)) continue;
-            reportedKeys.insert (key);
-            fresh.add (juce::String::fromUTF8 (key.c_str()) + "\t" + juce::String::fromUTF8 (value.c_str()).trim());
-        }
+        const auto fresh = extractWrites (obj, reportedKeys);
+        static int traced = 0;
+        if (traced++ < 6) std::fprintf (stderr, "[trace] extractWrites -> %d from %d chars; onWrites=%d\n", fresh.size(), (int) obj.size(), (int) (bool) progress.onWrites);
         progress.writes (fresh);
     };
     auto reportProgress = [&] (bool force)

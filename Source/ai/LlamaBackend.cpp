@@ -267,7 +267,7 @@ bool LlamaBackend::chat (const juce::String& systemPrompt, const juce::String& u
     llama_sampler_chain_add (sampler, llama_sampler_init_top_k (40));
     llama_sampler_chain_add (sampler, llama_sampler_init_top_p (0.95f, 1));
     llama_sampler_chain_add (sampler, llama_sampler_init_min_p (0.05f, 1));
-    llama_sampler_chain_add (sampler, llama_sampler_init_temp (0.8f));
+    llama_sampler_chain_add (sampler, llama_sampler_init_temp (temperature.load()));
     llama_sampler_chain_add (sampler, llama_sampler_init_dist ((uint32_t) juce::Time::getHighResolutionTicks()));
 
     const double tPrompt = juce::Time::getMillisecondCounterHiRes();

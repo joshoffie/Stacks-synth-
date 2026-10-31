@@ -70,6 +70,7 @@ private:
     std::vector<std::unique_ptr<Tile>> tiles;
     juce::TextButton growButton { "Grow from this one" }, backButton { "Start over" }, saveButton { "Save preset" }, openSynthButton { "Open the synth" };
     juce::TextButton closeButton { "Close" }, mediumButton { "Medium" }, farButton { "Far" };
+    LifeSwitch lifeSwitch;
     float variation = 0.55f;
     float anim = 0.0f;
     int growthSeed = 1;

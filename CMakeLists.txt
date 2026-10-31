@@ -151,6 +151,7 @@ set(STACKS_SOURCES
     Source/StacksLookAndFeel.cpp
     Source/Skin.cpp
     Source/TourOverlay.cpp
+    Source/Life.cpp
     Source/Displays.cpp
     Source/SettingsPanel.cpp
     Source/TreeView.cpp
@@ -211,6 +212,7 @@ juce_add_console_app(StacksTests PRODUCT_NAME "StacksTests")
 target_sources(StacksTests PRIVATE
     Tests/Tests.cpp
     Source/Parameters.cpp
+    Source/Life.cpp
     Source/Wavetable.cpp
     Source/Patch.cpp
     Source/PatchGenerator.cpp

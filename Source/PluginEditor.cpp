@@ -21,7 +21,8 @@ StacksAudioProcessorEditor::StacksAudioProcessorEditor (StacksAudioProcessor& p)
       synthPanel (p),
       labPanel (p),
       homeView (p),
-      keyboard (p.keyboardState)
+      keyboard (p.keyboardState),
+      lifeButton (p.apvts, true)
 {
     skin::load();   // PNG pieces replace the drawn look wherever a file exists (see Design/Skin spec.md)
     setLookAndFeel (&lookAndFeel);
@@ -55,6 +56,7 @@ StacksAudioProcessorEditor::StacksAudioProcessorEditor (StacksAudioProcessor& p)
     redoButton.setTooltip ("Redo (Shift+Cmd+Z)");
     redoButton.onClick = [this] { synthProcessor.redo(); };
     content.addAndMakeVisible (redoButton);
+    content.addAndMakeVisible (lifeButton);
     for (auto* b : { &settingsButton, &undoButton, &redoButton })
     {
         styleAsTab (*b);
@@ -255,6 +257,8 @@ void StacksAudioProcessorEditor::resized()
     undoButton.setBounds (header.removeFromRight (26).withSizeKeepingCentre (24, 26));
     header.removeFromRight (10);
     tuner.setBounds (header.removeFromRight (230).reduced (0, 8));
+    header.removeFromRight (8);
+    lifeButton.setBounds (header.removeFromRight (60).withSizeKeepingCentre (58, 24));
     header.removeFromRight (10);
     header.removeFromLeft (112);   // the wordmark, painted
     modeButton.setBounds (header.removeFromLeft (64).withSizeKeepingCentre (62, 24));

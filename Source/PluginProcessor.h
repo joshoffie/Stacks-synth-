@@ -13,6 +13,7 @@
 #include "Arpeggiator.h"
 #include "Sampler.h"
 #include "ai/ModelManager.h"
+#include "Life.h"
 #include "ai/LlamaBackend.h"
 
 namespace stacks
@@ -308,6 +309,7 @@ private:
     void reloadSample();                              // what the Custom slots were built from
     bool designWaves = true;
     SynthParams params;                                   // base values this block
+    Life life;                                            // the Life layer's offsets go into `params` each block
     SynthParams fxParams;                                 // base + global modulation, read by the effects
     std::array<std::atomic<float>, kNumParams> liveValues {};
     VoiceContext voiceContext;

@@ -25,6 +25,9 @@ public:
     // `grammar` is an optional GBNF grammar the reply must follow; backends
     // that cannot enforce one ignore it.
     // `onPhase` reports coarse stages ("Loading model", "Reading your sound").
+    // Sampling temperature for the next chats (0.6 careful .. 1.0 adventurous). Backends that cannot set it ignore it.
+    virtual void setTemperature (float) {}
+
     virtual bool chat (const juce::String& systemPrompt,
                        const juce::String& userPrompt,
                        const juce::String& grammar,

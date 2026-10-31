@@ -47,6 +47,12 @@ const juce::StringArray& arpChordNames()
     return names;
 }
 
+const juce::StringArray& lifeNames()
+{
+    static const juce::StringArray names { "Off", "1", "2", "3", "4", "5" };
+    return names;
+}
+
 const juce::StringArray& onOffNames()
 {
     static const juce::StringArray names { "Off", "On" };

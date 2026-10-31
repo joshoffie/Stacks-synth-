@@ -30,11 +30,13 @@ public:
                const std::function<void (const juce::String&)>& onPhase,
                const std::function<bool()>& shouldCancel, juce::String& error) override;
 
+    void setTemperature (float t) override   { temperature.store (juce::jlimit (0.2f, 1.5f, t)); }
     const juce::File& file() const           { return modelFile; }
     bool isLoaded() const                    { return loaded.load(); }
     void unloadIfIdle (double idleSeconds);  // safe to call from the message thread
 
 private:
+    std::atomic<float> temperature { 0.8f };
     bool ensureLoaded (juce::String& error, const std::function<bool()>& cancelled); // caller holds `lock`
     void unload();                           // caller holds `lock`
 

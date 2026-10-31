@@ -1,4 +1,5 @@
 #include "Controls.h"
+#include "Life.h"
 #include "Skin.h"
 #include "StacksLookAndFeel.h"
 
@@ -596,6 +597,88 @@ void StacksKeyboard::drawBlackNote (int, juce::Graphics& g, juce::Rectangle<floa
 juce::String StacksKeyboard::getWhiteNoteText (int midiNoteNumber)
 {
     return midiNoteNumber % 12 == 0 ? "C" + juce::String (midiNoteNumber / 12 - 1) : juce::String();
+}
+
+
+//==============================================================================
+LifeSwitch::LifeSwitch (juce::AudioProcessorValueTreeState& state, bool isCompact)
+    : apvts (state), compact (isCompact)
+{
+    caption.setText ("Life", juce::dontSendNotification);
+    caption.setFont (StacksLookAndFeel::font (11.0f, true));
+    caption.setColour (juce::Label::textColourId, colours::muted);
+    caption.setJustificationType (juce::Justification::centredRight);
+    caption.setTooltip ("Life: the sound slowly wanders as it plays and nudges with every note. Off is the preset exactly.");
+    if (! compact) addAndMakeVisible (caption);
+    const int count = compact ? 1 : Life::kLevels + 1;
+    for (int i = 0; i < count; ++i)
+    {
+        auto b = std::make_unique<juce::TextButton> (compact ? "Life" : i == 0 ? "Off" : juce::String (i));
+        b->setClickingTogglesState (false);
+        b->setWantsKeyboardFocus (false);
+        b->setMouseClickGrabsKeyboardFocus (false);
+        b->setColour (juce::TextButton::buttonOnColourId, colours::accent);
+        b->setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+        b->setTooltip (compact ? "Life on or off. Pick the amount (1 to 5) on the Home screen or the Voice card."
+                               : i == 0 ? "Off: the preset exactly" : "Life " + juce::String (i) + (i == 1 ? ": barely there" : i == 5 ? ": a lot" : ""));
+        if (compact)
+        {
+            styleAsTab (*b);                         // the header's quiet look; lit when Life is on
+            b->getProperties().set ("bright", true);
+            b->onClick = [this] { setLevel (level() > 0 ? 0 : lastLevel); };
+        }
+        else b->onClick = [this, i] { setLevel (i); };
+        addAndMakeVisible (*b);
+        buttons.push_back (std::move (b));
+    }
+    apvts.addParameterListener ("life", this);
+    handleAsyncUpdate();
+}
+
+LifeSwitch::~LifeSwitch()
+{
+    apvts.removeParameterListener ("life", this);
+    cancelPendingUpdate();
+}
+
+int LifeSwitch::level() const
+{
+    if (auto* raw = apvts.getRawParameterValue ("life")) return juce::jlimit (0, Life::kLevels, (int) std::lround (raw->load()));
+    return 0;
+}
+
+void LifeSwitch::setLevel (int newLevel)
+{
+    if (auto* param = apvts.getParameter ("life"))
+    {
+        param->beginChangeGesture();
+        param->setValueNotifyingHost (param->convertTo0to1 ((float) newLevel));
+        param->endChangeGesture();
+    }
+}
+
+void LifeSwitch::handleAsyncUpdate()
+{
+    const int l = level();
+    if (l > 0) lastLevel = l;
+    if (compact)
+    {
+        buttons[0]->setToggleState (l > 0, juce::dontSendNotification);
+        buttons[0]->setButtonText (l > 0 ? "Life " + juce::String (l) : "Life");
+    }
+    else
+        for (int i = 0; i < (int) buttons.size(); ++i)
+            buttons[(size_t) i]->setToggleState (i == l, juce::dontSendNotification);
+}
+
+void LifeSwitch::resized()
+{
+    auto r = getLocalBounds();
+    if (compact) { buttons[0]->setBounds (r); return; }
+    caption.setBounds (r.removeFromLeft (34));
+    r.removeFromLeft (6);
+    const int w = r.getWidth() / (int) buttons.size();
+    for (auto& b : buttons) b->setBounds (r.removeFromLeft (w).reduced (1, 0));
 }
 
 } // namespace stacks

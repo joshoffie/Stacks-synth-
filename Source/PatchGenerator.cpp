@@ -1,4 +1,5 @@
 #include "PatchGenerator.h"
+#include <set>
 
 #include <cmath>
 #include <cstring>
@@ -419,7 +420,7 @@ namespace
         for (int i = 0; i < kNumParams; ++i)
         {
             const auto& s = specs[(size_t) i];
-            if (std::strcmp (s.id, "master_gain") == 0 || std::strcmp (s.group, "MACROS") == 0 || std::strcmp (s.group, "ARP") == 0
+            if (std::strcmp (s.id, "master_gain") == 0 || std::strcmp (s.id, "life") == 0 || std::strcmp (s.group, "MACROS") == 0 || std::strcmp (s.group, "ARP") == 0
                 || std::strcmp (s.group, "SAMPLE") == 0 || std::strcmp (s.group, "GRAIN") == 0 || std::strcmp (s.group, "FXROUTE") == 0)   // the player picks the sample and the chain
                 continue;
 
@@ -635,7 +636,7 @@ int countAudibleDifferences (const Patch& a, const Patch& b)
     {
         const juce::String id (specs[(size_t) i].id);
         const juce::String group (specs[(size_t) i].group);
-        if (id == "master_gain" || id == "bend_range" || id.startsWith ("mod") || group == "MACROS" || group == "ARP" || group == "SAMPLE" || group == "GRAIN" || group == "FXROUTE")
+        if (id == "master_gain" || id == "bend_range" || id == "life" || id.startsWith ("mod") || group == "MACROS" || group == "ARP" || group == "SAMPLE" || group == "GRAIN" || group == "FXROUTE")
             continue;
         if (specs[(size_t) i].kind == ParamKind::Choice)
         {
@@ -823,6 +824,405 @@ std::vector<Patch> RandomPatchGenerator::generate (const GenerationRequest& req,
     }
 
     return out;
+}
+
+//==============================================================================
+// Structure, identity and ideas: what "a new sound that is still related" means in code.
+
+namespace
+{
+    bool fxActive (const Patch& p, int e)
+    {
+        if ((int) p.get (fxOnParam (e)) == 0) return false;
+        switch (e)
+        {
+            case 0: return p.get (P::dist_mix) > 0.02f;
+            case 1: return std::abs (p.get (P::eq_low_gain)) > 1.0f || std::abs (p.get (P::eq_mid_gain)) > 1.0f || std::abs (p.get (P::eq_high_gain)) > 1.0f;
+            case 2: return p.get (P::chorus_mix) > 0.02f;
+            case 3: return p.get (P::hyper_amount) > 0.02f;
+            case 4: return p.get (P::tape_amount) > 0.02f;
+            case 5: return p.get (P::delay_mix) > 0.02f;
+            case 6: return p.get (P::reverb_mix) > 0.02f;
+            default: return p.get (P::comp_mix) > 0.02f && p.get (P::comp_threshold) < -3.0f;
+        }
+    }
+
+    std::vector<int> activeChain (const Patch& p)
+    {
+        std::vector<int> order;
+        for (int e = 0; e < kNumFx; ++e) if (fxActive (p, e)) order.push_back (e);
+        std::stable_sort (order.begin(), order.end(), [&] (int a, int b) { return p.get (fxPosParam (a)) < p.get (fxPosParam (b)); });
+        return order;
+    }
+
+    // (source, target) pairs of the connections a player would hear.
+    std::set<std::pair<int, int>> connections (const Patch& p)
+    {
+        std::set<std::pair<int, int>> out;
+        for (int i = 0; i < kNumModSlots; ++i)
+        {
+            const int src = (int) p.get (modSourceParam (i));
+            const int dest = (int) p.get (modDestParam (i));
+            const float least = dest == TargetPitch || dest == TargetPitchB ? 0.01f : 0.05f;   // a vibrato is small by nature
+            if (src == SrcOff || isMacroSource (src) || std::abs (p.get (modAmountParam (i))) < least) continue;
+            out.insert ({ src, dest });
+        }
+        return out;
+    }
+
+    int bucket (float v, std::initializer_list<float> edges)
+    {
+        int b = 0;
+        for (float e : edges) if (v >= e) ++b;
+        return b;
+    }
+
+    float waveDistance (const WaveSpec& a, const WaveSpec& b)
+    {
+        if (a.isEmpty() || b.isEmpty()) return a.isEmpty() == b.isEmpty() ? 0.0f : 1.0f;
+        float d = 0.0f;
+        for (int k = 0; k < WaveSpec::kHarmonics; ++k)
+            d += std::abs (a.frames[0][(size_t) k] - b.frames[0][(size_t) k]);
+        return d / (float) WaveSpec::kHarmonics;
+    }
+
+    int filterEnvClass (const Patch& p) { const float e = p.get (P::filter_env); return e < -1.5f ? 0 : e > 1.5f ? 2 : 1; }
+}
+
+juce::String envelopeClass (const Patch& p)
+{
+    const float a = p.get (P::aenv_attack), d = p.get (P::aenv_decay), s = p.get (P::aenv_sustain), r = p.get (P::aenv_release);
+    if (a > 0.25f)              return "swelling pad";
+    if (s < 0.15f && d < 0.5f)  return "short pluck";
+    if (s < 0.15f)              return "percussive";
+    if (r > 1.0f)               return "sustained, long tail";
+    return "sustained";
+}
+
+int countStructuralDifferences (const Patch& a, const Patch& b)
+{
+    int d = 0;
+    auto choiceDiff = [&] (P param) { return (int) a.get (param) != (int) b.get (param); };
+
+    // Sources
+    for (int osc = 0; osc < kNumOscs; ++osc)
+    {
+        const bool aOn = osc == 0 || a.get (oscLevelParam (osc)) > 0.05f, bOn = osc == 0 || b.get (oscLevelParam (osc)) > 0.05f;
+        if (aOn != bOn) { ++d; continue; }
+        if (! aOn) continue;
+        const int wa = (int) a.get (oscWaveParam (osc)), wb = (int) b.get (oscWaveParam (osc));
+        if (wa != wb) ++d;
+        else if (wa == kCustomWave && waveDistance (a.waves[(size_t) osc], b.waves[(size_t) osc]) > 0.15f) ++d;
+        const bool warpA = a.get (oscWarpAmtParam (osc)) > 0.05f && (int) a.get (oscWarpParam (osc)) > 0;
+        const bool warpB = b.get (oscWarpAmtParam (osc)) > 0.05f && (int) b.get (oscWarpParam (osc)) > 0;
+        if (warpA != warpB || (warpA && choiceDiff (oscWarpParam (osc)))) ++d;
+        if (osc > 0 && std::abs (a.get (oscCoarseParam (osc)) - b.get (oscCoarseParam (osc))) >= 5.0f) ++d;   // another interval
+    }
+    if (bucket (a.get (P::fm_amount), { 0.05f, 0.3f }) != bucket (b.get (P::fm_amount), { 0.05f, 0.3f })) ++d;
+    if ((a.get (P::sub_level) > 0.2f) != (b.get (P::sub_level) > 0.2f)) ++d;
+    if ((a.get (P::noise_level) > 0.1f) != (b.get (P::noise_level) > 0.1f)) ++d;
+    if (bucket (a.get (P::unison_voices), { 1.5f, 4.5f }) != bucket (b.get (P::unison_voices), { 1.5f, 4.5f })) ++d;
+    if (choiceDiff (P::smp_mode)) ++d;
+
+    // Filter
+    if (choiceDiff (P::filter_type)) ++d;
+    if (choiceDiff (P::filter_routing)) ++d;
+    else if ((int) a.get (P::filter_routing) > 0 && choiceDiff (P::filter2_type)) ++d;
+    if (choiceDiff (P::filter_model)) ++d;
+    if (std::abs (std::log2 (juce::jmax (20.0f, a.get (P::filter_cutoff)) / juce::jmax (20.0f, b.get (P::filter_cutoff)))) >= 1.0f) ++d;
+    if (filterEnvClass (a) != filterEnvClass (b)) ++d;
+
+    // Envelope class
+    if (envelopeClass (a) != envelopeClass (b)) ++d;
+
+    // Movement: connections as a set, plus the shapes of the LFOs in use
+    const auto ca = connections (a), cb = connections (b);
+    int conn = 0;
+    for (const auto& c : ca) if (! cb.count (c)) ++conn;
+    for (const auto& c : cb) if (! ca.count (c)) ++conn;
+    d += juce::jmin (4, conn);
+    for (int k = 0; k < kNumLfos; ++k)
+    {
+        bool usedA = false, usedB = false;
+        for (const auto& c : ca) usedA = usedA || c.first == SrcLfo1 + k;
+        for (const auto& c : cb) usedB = usedB || c.first == SrcLfo1 + k;
+        if (usedA && usedB && (choiceDiff (lfoShapeParam (k)) || ((int) a.get (lfoSyncParam (k)) > 0) != ((int) b.get (lfoSyncParam (k)) > 0))) ++d;
+    }
+
+    // Space: which effects are on, their modes, the order
+    for (int e = 0; e < kNumFx; ++e)
+    {
+        const bool onA = fxActive (a, e), onB = fxActive (b, e);
+        if (onA != onB) { ++d; continue; }
+        if (! onA) continue;
+        switch (e)
+        {
+            case 0: if (choiceDiff (P::dist_mode)) ++d; break;
+            case 2: if (choiceDiff (P::chorus_mode)) ++d; break;
+            case 5: if (choiceDiff (P::delay_mode) || choiceDiff (P::delay_sync)) ++d; break;
+            case 6: if (choiceDiff (P::reverb_type)) ++d; break;
+            default: break;
+        }
+    }
+    if (activeChain (a) != activeChain (b) && ! activeChain (a).empty() && ! activeChain (b).empty())
+    {
+        // the same set in a different order is one more idea; a different set was already counted
+        std::vector<int> sa = activeChain (a), sb = activeChain (b);
+        std::sort (sa.begin(), sa.end()); std::sort (sb.begin(), sb.end());
+        if (sa == sb) ++d;
+    }
+    if (((int) a.get (P::arp_mode) > 0) != ((int) b.get (P::arp_mode) > 0)) ++d;
+    return d;
+}
+
+GrowMode growModeFor (float v) noexcept
+{
+    return v < 0.33f ? GrowMode::Close : v < 0.66f ? GrowMode::Medium : GrowMode::Far;
+}
+
+juce::StringArray identityTraits (const Patch& p)
+{
+    juce::StringArray t;
+    // Source
+    {
+        auto waveWords = [&] (int osc)
+        {
+            const int w = (int) p.get (oscWaveParam (osc));
+            if (w == kCustomWave) return p.waves[(size_t) osc].isEmpty() ? juce::String ("a designed wavetable") : "a designed wavetable (" + p.waves[(size_t) osc].name.toLowerCase() + ")";
+            if (w >= WavetableBank::kNumBuiltIn) return juce::String ("an imported wavetable");
+            return "a " + waveNames()[w] + " wavetable";
+        };
+        juce::String src = waveWords (0);
+        if (p.get (P::fm_amount) > 0.3f)        src << " with heavy FM";
+        else if (p.get (P::fm_amount) > 0.05f)  src << " with light FM";
+        if (p.get (P::oscB_level) > 0.05f && p.get (P::fm_amount) <= 0.05f)
+        {
+            const int c = juce::roundToInt (p.get (P::oscB_coarse));
+            src << " layered with " << waveWords (1) << (c == 12 ? " an octave up" : c == -12 ? " an octave down" : c == 7 || c == -5 ? " a fifth away" : c != 0 ? " at another interval" : "");
+        }
+        if (p.get (P::sub_level) > 0.2f)   src << ", a sub underneath";
+        if (p.get (P::noise_level) > 0.1f) src << ", a breath of noise";
+        t.add (src);
+    }
+    t.add (envelopeClass (p) + " envelope");
+    // Filter
+    {
+        const float c = p.get (P::filter_cutoff);
+        juce::String f = c < 500.0f ? "a dark " : c < 2000.0f ? "a half-open " : "an open ";
+        f << filterTypeNames()[juce::jlimit (0, filterTypeNames().size() - 1, (int) p.get (P::filter_type))] << " filter";
+        if (p.get (P::filter_res) > 0.5f) f << ", resonant";
+        if (p.get (P::filter_env) > 1.5f) f << ", sweeping down as the note plays";
+        else if (p.get (P::filter_env) < -1.5f) f << ", opening as the note plays";
+        t.add (f);
+    }
+    // Movement
+    {
+        juce::StringArray moves;
+        for (const auto& c : connections (p))
+        {
+            juce::String who = c.first >= SrcLfo1 && c.first < SrcLfo1 + kNumLfos ? "an LFO" : c.first == SrcModEnv ? "the mod envelope" : c.first == SrcSeq ? "the step sequencer" : c.first == SrcFilterEnv ? "the filter envelope" : juce::String();
+            if (who.isEmpty()) continue;
+            if (c.first >= SrcLfo1 && c.first < SrcLfo1 + kNumLfos)
+            {
+                const int k = c.first - SrcLfo1;
+                const float rate = p.get (lfoRateParam (k));
+                who = ((int) p.get (lfoSyncParam (k)) > 0 ? "a tempo-synced LFO" : rate < 0.5f ? "a slow LFO" : rate < 3.0f ? "a steady LFO" : "a fast LFO");
+            }
+            const auto& names = modTargetNames();
+            const juce::String target = c.second >= 0 && c.second < names.size() ? names[c.second] : "a knob";
+            moves.add (who + " on " + target);
+            if (moves.size() == 2) break;
+        }
+        t.add (moves.isEmpty() ? juce::String ("no modulation, a still sound") : "movement: " + moves.joinIntoString (" and "));
+    }
+    // Space
+    {
+        juce::StringArray fx;
+        static const char* const names[kNumFx] = { "distortion", "EQ", "chorus", "hyper width", "tape", "delay", "reverb", "compression" };
+        for (int e : activeChain (p)) fx.add (names[e]);
+        t.add (fx.isEmpty() ? juce::String ("dry, no effects") : "space: " + fx.joinIntoString (", "));
+    }
+    // Character
+    {
+        juce::StringArray ch;
+        const int uni = (int) p.get (P::unison_voices);
+        if (uni > 1) ch.add (juce::String (uni) + "-voice unison, wide");
+        if (p.get (P::glide) > 0.02f) ch.add ("glide between notes");
+        if ((int) p.get (P::arp_mode) > 0) ch.add ("arpeggiated");
+        if (p.get (P::char_drift) > 0.4f) ch.add ("drifting, analog");
+        if (! ch.isEmpty()) t.add (ch.joinIntoString (", "));
+    }
+    return t;
+}
+
+void applyIdeaMove (Patch& p, int move, juce::int64 seed)
+{
+    juce::Random rng (seed * 31 + move);
+    auto uni = [&] (float a, float b) { return a + (b - a) * rng.nextFloat(); };
+    auto pick = [&] (std::initializer_list<int> xs) { auto it = xs.begin(); std::advance (it, rng.nextInt ((int) xs.size())); return *it; };
+    switch (((move % kNumIdeaMoves) + kNumIdeaMoves) % kNumIdeaMoves)
+    {
+        case 0:   // another wavetable family on A, its own morph, no designed table
+        {
+            const int current = (int) p.get (P::oscA_wave);
+            int w = current;
+            for (int tries = 0; tries < 8 && (w == current); ++tries) w = rng.nextInt (WavetableBank::kNumBuiltIn);
+            p.set (P::oscA_wave, (float) w);
+            p.set (P::oscA_morph, uni (0.1f, 0.9f));
+            p.waves[0] = WaveSpec();
+            if (rng.nextFloat() < 0.4f) { p.set (P::oscA_warp, (float) pick ({ 1, 2, 3, 5 })); p.set (P::oscA_warp_amt, uni (0.2f, 0.6f)); }
+            else p.set (P::oscA_warp_amt, 0.0f);
+            break;
+        }
+        case 1:   // rethink the filter: type, an octave or two away, the envelope's direction
+        {
+            const int current = (int) p.get (P::filter_type);
+            int t = current;
+            for (int tries = 0; tries < 8 && t == current; ++tries) t = rng.nextInt (filterTypeNames().size());
+            p.set (P::filter_type, (float) t);
+            const float octaves = (rng.nextBool() ? 1.0f : -1.0f) * uni (1.0f, 2.0f);
+            p.set (P::filter_cutoff, juce::jlimit (60.0f, 16000.0f, p.get (P::filter_cutoff) * std::exp2 (octaves)));
+            const int cls = filterEnvClass (p);
+            p.set (P::filter_env, cls == 1 ? (rng.nextBool() ? uni (2.0f, 4.0f) : uni (-4.0f, -2.0f)) : cls == 2 ? uni (-3.0f, -2.0f) : uni (2.0f, 3.5f));
+            p.set (P::fenv_decay, uni (0.15f, 1.2f));
+            p.set (P::filter_res, uni (0.1f, 0.6f));
+            break;
+        }
+        case 2:   // new movement: a free LFO on a target the sound does not move yet
+        {
+            int slot = -1;
+            for (int i = 0; i < kNumModSlots && slot < 0; ++i) if ((int) p.get (modSourceParam (i)) == SrcOff) slot = i;
+            if (slot < 0) slot = kNumModSlots - 1;   // every slot taken: the last one is rewritten
+            int lfo = 0;
+            const auto used = connections (p);
+            for (int k = 0; k < kNumLfos; ++k) { bool u = false; for (const auto& c : used) u = u || c.first == SrcLfo1 + k; if (! u) { lfo = k; break; } }
+            p.set (lfoShapeParam (lfo), (float) pick ({ ShapeSine, ShapeTriangle, ShapeSaw, ShapeSquare, ShapeRandom }));
+            const bool synced = rng.nextFloat() < 0.4f;
+            p.set (lfoSyncParam (lfo), synced ? (float) pick ({ 2, 3, 4, 5 }) : 0.0f);
+            p.set (lfoRateParam (lfo), std::exp (uni (std::log (0.08f), std::log (6.0f))));
+            static const char* const knobTargets[] = { "oscA_morph", "filter_cutoff", "chorus_mix", "reverb_mix", "oscB_level", "unison_detune", "filter_res", "delay_mix" };
+            int target = TargetOff; float amount = 0.5f;
+            switch (rng.nextInt (4))
+            {
+                case 0: target = TargetPan; amount = uni (0.3f, 0.7f); break;
+                case 1: target = TargetAmp; amount = uni (0.2f, 0.5f); break;
+                case 2: target = TargetPitch; amount = uni (0.02f, 0.05f); break;
+                default:
+                {
+                    const int idx = paramIndexForId (knobTargets[rng.nextInt ((int) std::size (knobTargets))]);
+                    target = idx >= 0 ? modTargetForParam (idx) : TargetAmp;
+                    amount = uni (0.3f, 0.7f) * (rng.nextBool() ? 1.0f : -1.0f);
+                    break;
+                }
+            }
+            if (target <= TargetOff) target = TargetAmp;
+            p.set (modSourceParam (slot), (float) (SrcLfo1 + lfo));
+            p.set (modDestParam (slot), (float) target);
+            p.set (modAmountParam (slot), amount);
+            break;
+        }
+        case 3:   // the filter envelope does the shaping: a sweep up or down with its own decay
+        {
+            const bool down = rng.nextBool();
+            p.set (P::filter_env, down ? uni (2.5f, 4.0f) : uni (-4.0f, -2.5f));
+            p.set (P::fenv_attack, down ? uni (0.0f, 0.02f) : uni (0.2f, 1.5f));
+            p.set (P::fenv_decay, uni (0.2f, 1.5f));
+            p.set (P::fenv_sustain, uni (0.0f, 0.4f));
+            if (down) p.set (P::filter_cutoff, juce::jlimit (60.0f, 4000.0f, p.get (P::filter_cutoff) * 0.5f));
+            break;
+        }
+        case 4:   // a different space: flip one effect, change a mode, sometimes reorder
+        {
+            int e = pick ({ 0, 2, 4, 5, 6, 3 });
+            const int active = (int) activeChain (p).size();
+            if (fxActive (p, e) && active <= 1)   // the only effect: bring another one in instead of switching it off
+                for (int candidate : { 6, 5, 2, 4, 3, 0 }) if (! fxActive (p, candidate)) { e = candidate; break; }
+            const bool on = fxActive (p, e);
+            if (on && active > 1)
+                p.set (fxOnParam (e), 0.0f);
+            else
+            {
+                p.set (fxOnParam (e), 1.0f);
+                switch (e)
+                {
+                    case 0: p.set (P::dist_mix, uni (0.3f, 0.7f)); p.set (P::dist_drive, uni (6.0f, 18.0f)); p.set (P::dist_mode, (float) rng.nextInt (5)); break;
+                    case 2: p.set (P::chorus_mix, uni (0.25f, 0.5f)); p.set (P::chorus_mode, (float) rng.nextInt (4)); break;
+                    case 3: p.set (P::hyper_amount, uni (0.3f, 0.7f)); break;
+                    case 4: p.set (P::tape_amount, uni (0.3f, 0.8f)); p.set (P::tape_wow, uni (0.1f, 0.5f)); break;
+                    case 5: p.set (P::delay_mix, uni (0.2f, 0.45f)); p.set (P::delay_feedback, uni (0.3f, 0.65f)); p.set (P::delay_mode, (float) rng.nextInt (3)); p.set (P::delay_sync, (float) pick ({ 0, 2, 3 })); break;
+                    default: p.set (P::reverb_mix, uni (0.25f, 0.55f)); p.set (P::reverb_type, (float) rng.nextInt (reverbTypeNames().size())); p.set (P::reverb_size, uni (0.3f, 0.9f)); break;
+                }
+            }
+            if (rng.nextFloat() < 0.5f)   // swap two positions in the chain
+            {
+                const int x = rng.nextInt (kNumFx), y = rng.nextInt (kNumFx);
+                const float px = p.get (fxPosParam (x)), py = p.get (fxPosParam (y));
+                p.set (fxPosParam (x), py); p.set (fxPosParam (y), px);
+            }
+            break;
+        }
+        case 5:   // FM in or out
+        {
+            if (p.get (P::fm_amount) < 0.05f)
+            {
+                p.set (P::fm_amount, uni (0.3f, 0.6f));
+                p.set (P::oscB_level, juce::jmax (0.3f, p.get (P::oscB_level)));
+                p.set (P::oscB_coarse, (float) pick ({ 7, 12, 19, 24, -12 }));
+                p.set (P::oscB_wave, 0.0f);   // a sine modulator
+            }
+            else
+            {
+                p.set (P::fm_amount, 0.0f);
+                p.set (P::oscB_coarse, (float) pick ({ 0, 12, -12 }));
+                p.set (P::oscB_wave, (float) rng.nextInt (WavetableBank::kNumBuiltIn));
+            }
+            break;
+        }
+        case 6:   // unison in or out
+        {
+            if (p.get (P::unison_voices) < 1.5f)
+            {
+                p.set (P::unison_voices, (float) pick ({ 3, 4, 5, 6 }));
+                p.set (P::unison_detune, uni (10.0f, 30.0f));
+                p.set (P::unison_spread, uni (0.5f, 1.0f));
+            }
+            else
+            {
+                p.set (P::unison_voices, 1.0f);
+                if (rng.nextBool()) { p.set (P::chorus_mix, uni (0.3f, 0.5f)); p.set (fxOnParam (2), 1.0f); }
+            }
+            break;
+        }
+        default:  // oscillator B rethought: present or not, another wave, another interval
+        {
+            if (p.get (P::oscB_level) > 0.05f && rng.nextFloat() < 0.35f)
+                p.set (P::oscB_level, 0.0f);
+            else
+            {
+                const int wave = (int) p.get (P::oscB_wave), coarse = juce::roundToInt (p.get (P::oscB_coarse));
+                p.set (P::oscB_level, uni (0.4f, 0.8f));
+                int w = wave;
+                for (int tries = 0; tries < 8 && w == wave; ++tries) w = rng.nextInt (WavetableBank::kNumBuiltIn);
+                p.set (P::oscB_wave, (float) w);
+                int c = coarse;
+                for (int tries = 0; tries < 8 && std::abs (c - coarse) < 5; ++tries) c = pick ({ -12, -5, 0, 7, 12, 19 });
+                p.set (P::oscB_coarse, (float) c);
+                p.set (P::oscB_fine, uni (-8.0f, 8.0f));
+                p.waves[1] = WaveSpec();
+            }
+            break;
+        }
+    }
+}
+
+void keepIdentity (Patch& child, const Patch& parent)
+{
+    const auto cls = envelopeClass (parent);
+    if (cls == "swelling pad")
+        child.set (P::aenv_attack, juce::jmax (child.get (P::aenv_attack), juce::jmax (0.12f, 0.4f * parent.get (P::aenv_attack))));
+    else if (cls == "short pluck" || cls == "percussive")
+        child.set (P::aenv_sustain, juce::jmin (child.get (P::aenv_sustain), 0.3f));
+    if (child.category.isEmpty()) child.category = parent.category;
 }
 
 } // namespace stacks

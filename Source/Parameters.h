@@ -32,6 +32,7 @@ const juce::StringArray& filterModelNames();     // Clean, Warm, Diode, Smooth
 const juce::StringArray& fxOrderNames();         // effect chain orders
 const juce::StringArray& arpChordNames();        // chord mode: Off, Minor, Major, Minor 7, Major 7, Sus4, Power, Octaves
 const juce::StringArray& onOffNames();
+const juce::StringArray& lifeNames();   // Off, 1 .. 5
 const juce::StringArray& distModeNames();
 const juce::StringArray& warpNames();     // oscillator warps: Off, Sync, Bend, PWM, Mirror, Fold, Quantize
 const juce::StringArray& arpModeNames();
@@ -220,6 +221,7 @@ inline bool isBipolarSource (int src) noexcept
  X(unison_spread,  "Spread",       "VOICE",      Float,   0,     1,     0.5,   0,     "",   nullptr,            "unison stereo width") \
  X(unison_morph,   "Uni Morph",    "VOICE",      Float,   0,     1,     0,     0,     "",   nullptr,            "spreads the unison copies across the wavetable position, so each copy has a slightly different timbre") \
  X(glide,          "Glide",        "VOICE",      Float,   0,     2,     0,     0,     "s",  nullptr,            "portamento time in seconds") \
+ X(life,           "Life",         "VOICE",      Choice,  0,     5,     0,     0,     "",   lifeNames,          "Life: the sound slowly wanders as it plays and nudges with every note; Off = the preset exactly, 1 subtle, 5 a lot") \
  X(bend_range,     "Bend Range",   "VOICE",      Int,     1,     48,    2,     0,     "st", nullptr,            "pitch-wheel range in semitones (advanced)") \
  X(macro1,         "Brightness",   "MACROS",     Float,   0,     1,     0,     0,     "",   nullptr,            "macro: opens the sound up (wired to Cutoff by default)") \
  X(macro2,         "Movement",     "MACROS",     Float,   0,     1,     0,     0,     "",   nullptr,            "macro: more motion (A Morph and Chorus Mix by default)") \

@@ -92,7 +92,7 @@ std::unique_ptr<juce::AccessibilityHandler> HomeView::Tile::createAccessibilityH
 }
 
 //==============================================================================
-HomeView::HomeView (StacksAudioProcessor& p) : processor (p)
+HomeView::HomeView (StacksAudioProcessor& p) : processor (p), lifeSwitch (p.apvts, false)
 {
     for (const auto& k : kKinds)
     {
@@ -114,6 +114,7 @@ HomeView::HomeView (StacksAudioProcessor& p) : processor (p)
         stage = Stage::pick; note.clear(); refresh();
     };
     addChildComponent (backButton);
+    addChildComponent (lifeSwitch);
 
     saveButton.setTooltip ("Save the sound you are hearing: pick a folder and a name");
     saveButton.onClick = [this] { if (onSave) onSave(); };
@@ -307,6 +308,7 @@ void HomeView::refresh()
     backButton.setTooltip (lab.generating ? "Stop growing; the sounds that have landed stay" : "Back to the kinds of sound");
     openSynthButton.setVisible (results);
     for (auto* b : { &closeButton, &mediumButton, &farButton }) b->setVisible (results);
+    lifeSwitch.setVisible (results);
 
     placeBlocks();
     bool moving = stage == Stage::growing;
@@ -480,6 +482,7 @@ void HomeView::resized()
         closeButton.setBounds (bottom.removeFromRight (70));
         bottom.removeFromRight (16);
         growButton.setBounds (bottom.removeFromRight (190));
+        lifeSwitch.setBounds (bottom.removeFromLeft (juce::jmin (290, bottom.getWidth() - 10)).reduced (0, 7));
     }
     placeBlocks();
 }

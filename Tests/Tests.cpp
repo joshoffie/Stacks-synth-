@@ -11,6 +11,7 @@
 #include "Wavetable.h"
 #include "Patch.h"
 #include "PatchGenerator.h"
+#include "Life.h"
 #include "QuickTweak.h"
 #include "ai/LlmPatchGenerator.h"
 #include "ai/LlamaBackend.h"
@@ -739,6 +740,8 @@ namespace bench
         int distinctCategories = 0, rawViolations = 0;
         double hintAdherence = -1.0;        // -1 = not applicable
         double meanDiffFromParent = -1.0, meanDiffBetweenSiblings = -1.0;
+        double meanStructFromParent = -1.0, meanStructBetweenSiblings = -1.0;   // new-idea distance (countStructuralDifferences)
+        float variation = 0.5f;
         double waveDiversity = 0.0;
     };
 
@@ -845,16 +848,20 @@ namespace bench
             }
         s.waveDiversity = wavePairs > 0 ? waveDist / wavePairs / WaveSpec::kHarmonics : 0.0;
 
+        s.variation = req.variation;
         if (! req.parents.empty())
         {
-            double fromParent = 0.0, between = 0.0; int pairs = 0;
+            double fromParent = 0.0, between = 0.0, sFrom = 0.0, sBetween = 0.0; int pairs = 0;
             for (size_t i = 0; i < out.size(); ++i)
             {
                 fromParent += countAudibleDifferences (out[i], req.parents.front());
-                for (size_t j = i + 1; j < out.size(); ++j) { between += countAudibleDifferences (out[i], out[j]); ++pairs; }
+                sFrom += countStructuralDifferences (out[i], req.parents.front());
+                for (size_t j = i + 1; j < out.size(); ++j) { between += countAudibleDifferences (out[i], out[j]); sBetween += countStructuralDifferences (out[i], out[j]); ++pairs; }
             }
             s.meanDiffFromParent = fromParent / n;
             s.meanDiffBetweenSiblings = pairs > 0 ? between / pairs : 0.0;
+            s.meanStructFromParent = sFrom / n;
+            s.meanStructBetweenSiblings = pairs > 0 ? sBetween / pairs : 0.0;
         }
         return s;
     }
@@ -873,7 +880,11 @@ namespace bench
             add (s.delivered > 0 ? 1.0 - (double) s.rawViolations / s.delivered : 0.0, 14);
             if (s.hintAdherence >= 0.0) add (s.hintAdherence, 10);
             if (s.mode == "fresh" && s.hintAdherence < 0.0) add (s.delivered > 0 ? (double) s.distinctCategories / s.delivered : 0.0, 6);
-            if (s.mode == "evolve") { add (s.meanDiffFromParent / 6.0, 12); add (s.meanDiffBetweenSiblings / 5.0, 6); }
+            if (s.mode == "evolve")
+            {
+                if (s.variation >= 0.66f) { add (s.meanStructFromParent / 6.0, 12); add (s.meanStructBetweenSiblings / 4.0, 6); }   // Far: new ideas
+                else                      { add (s.meanDiffFromParent / 6.0, 12); add (s.meanDiffBetweenSiblings / 5.0, 6); }     // Close: audible moves
+            }
             add (s.seconds > 0.0 ? juce::jlimit (0.0, 1.0, 25.0 * s.delivered / s.seconds) : 0.0, 6);   // 25 s per patch = full marks
         }
         return weight > 0.0 ? 100.0 * total / weight : 0.0;
@@ -890,6 +901,8 @@ namespace bench
         o->setProperty ("sanity", s.sanity);             o->setProperty ("distinctCategories", s.distinctCategories);
         o->setProperty ("rawViolations", s.rawViolations); o->setProperty ("hintAdherence", s.hintAdherence);
         o->setProperty ("meanDiffFromParent", s.meanDiffFromParent); o->setProperty ("meanDiffBetweenSiblings", s.meanDiffBetweenSiblings);
+        o->setProperty ("meanStructFromParent", s.meanStructFromParent); o->setProperty ("meanStructBetweenSiblings", s.meanStructBetweenSiblings);
+        o->setProperty ("variation", s.variation);
         o->setProperty ("waveDiversity", s.waveDiversity);
         return juce::var (o);
     }
@@ -925,19 +938,26 @@ static int benchmark (const juce::String& label)
         std::fflush (stdout);
         if (! out.empty()) firstResults.push_back (out.front());
     }
-    for (size_t i = 0; i < juce::jmin ((size_t) 2, firstResults.size()); ++i)
+    // Evolve: Close on the first result (knob moves), Far on the first two (new ideas around the same identity).
+    struct EvolveCase { size_t parent; float variation; const char* label; };
+    std::vector<EvolveCase> evolves;
+    if (! firstResults.empty()) evolves.push_back ({ 0, 0.3f, "close" });
+    for (size_t i = 0; i < juce::jmin ((size_t) 2, firstResults.size()); ++i) evolves.push_back ({ i, 0.8f, "far" });
+    for (const auto& c : evolves)
     {
         GenerationRequest e;
         e.count = 3;
-        e.parents = { firstResults[i] };
+        e.parents = { firstResults[c.parent] };
+        e.variation = c.variation;
         e.designWaves = true;
         const auto t0 = juce::Time::getMillisecondCounterHiRes();
         auto out = gen.generate (e, quiet);
         const double sec = (juce::Time::getMillisecondCounterHiRes() - t0) / 1000.0;
         scores.push_back (bench::score (out, e, sec));
-        scores.back().prompt = "evolve: " + firstResults[i].name;
-        std::printf ("evolve %-26s %d/%d in %3.0f s  diff from parent %.1f  between %.1f  violations %d\n", firstResults[i].name.toRawUTF8(),
-                     (int) out.size(), e.count, sec, scores.back().meanDiffFromParent, scores.back().meanDiffBetweenSiblings, scores.back().rawViolations);
+        scores.back().prompt = juce::String (c.label) + ": " + firstResults[c.parent].name;
+        std::printf ("%-6s %-26s %d/%d in %3.0f s  knobs from parent %.1f  between %.1f  ideas from parent %.1f  between %.1f  violations %d\n", c.label, firstResults[c.parent].name.toRawUTF8(),
+                     (int) out.size(), e.count, sec, scores.back().meanDiffFromParent, scores.back().meanDiffBetweenSiblings,
+                     scores.back().meanStructFromParent, scores.back().meanStructBetweenSiblings, scores.back().rawViolations);
         std::fflush (stdout);
     }
 
@@ -1286,6 +1306,112 @@ static int audioMode (const juce::String& mode, const juce::File& file, bool noM
 
 // Character and the signature effects: Hyper widens a mono signal, Tape wobbles
 // and saturates it, the Lush reverb stays finite, the filter models exist.
+// The live ticker reads finished settings out of a half-written patch.
+// New ideas, measured: the structural metric, the identity traits, the idea moves.
+// Life: an offset layer. Off is the preset exactly; level 5 moves, stays in range, and follows notes.
+static void testLife()
+{
+    std::printf ("life\n");
+    CHECK (lifeNames().size() == Life::kLevels + 1 && lifeNames()[0] == "Off");
+    CHECK (! LlmPatchGenerator::grammar (1, true).contains ("\"life\""));   // the designer never sets it
+    Patch a; Patch b = a; b.set (P::life, 5.0f);
+    CHECK (countAudibleDifferences (a, b) == 0);
+
+    Life life;
+    life.prepare (48000.0);
+    SynthParams base;
+    for (int i = 0; i < kNumParams; ++i) base.v[i] = paramSpecs()[(size_t) i].def;
+    SynthParams p = base;
+    for (int block = 0; block < 2000; ++block) life.apply (p, 0, 512);   // Off
+    bool same = true;
+    for (int i = 0; i < kNumParams; ++i) same = same && p.v[i] == base.v[i];
+    CHECK (same);
+
+    float minCutoff = 1e9f, maxCutoff = -1e9f;
+    bool inRange = true;
+    for (int block = 0; block < 60000; ++block)   // ten minutes at level 5 with a note every second
+    {
+        p = base;
+        if (block % 94 == 0) life.noteOn();
+        life.apply (p, 5, 512);
+        for (int i = 0; i < kNumParams; ++i)
+        {
+            const auto& r = paramRange (i);
+            inRange = inRange && p.v[i] >= r.start - 1.0e-4f && p.v[i] <= r.end + 1.0e-4f;
+        }
+        minCutoff = juce::jmin (minCutoff, p.get (P::filter_cutoff));
+        maxCutoff = juce::jmax (maxCutoff, p.get (P::filter_cutoff));
+    }
+    CHECK (inRange);
+    CHECK (maxCutoff / minCutoff > 1.5f && maxCutoff / minCutoff < 40.0f);   // it moves, within reason
+    CHECK (p.v[(int) P::oscA_wave] == base.v[(int) P::oscA_wave]);            // choices never move
+}
+
+static void testIdeas()
+{
+    std::printf ("ideas and identity\n");
+    Patch a;   // defaults: a plain saw, open low-pass, no effects
+    CHECK (countStructuralDifferences (a, a) == 0);
+    Patch b = a;
+    b.set (P::filter_res, a.get (P::filter_res) + 0.3f);         // a knob nudge is audible but not an idea
+    CHECK (countStructuralDifferences (a, b) == 0 && countAudibleDifferences (a, b) >= 1);
+    b.set (P::oscA_wave, a.get (P::oscA_wave) == 6.0f ? 7.0f : 6.0f);   // another wavetable family
+    b.set (P::filter_type, (float) (((int) a.get (P::filter_type) + 1) % filterTypeNames().size()));
+    b.set (P::reverb_mix, a.get (P::reverb_mix) > 0.02f ? 0.0f : 0.4f); b.set (P::fx_on_reverb, 1.0f);   // reverb in or out
+    const int three = countStructuralDifferences (a, b);
+    CHECK (three == 3);
+    if (three != 3) std::printf ("  structural differences were %d\n", three);
+    CHECK (growModeFor (0.3f) == GrowMode::Close && growModeFor (0.55f) == GrowMode::Medium && growModeFor (0.8f) == GrowMode::Far);
+
+    Patch pad; pad.set (P::aenv_attack, 0.8f); pad.set (P::aenv_release, 2.0f); pad.set (P::oscA_wave, 7.0f); pad.set (P::chorus_mix, 0.4f);
+    pad.set (P::mod1_source, (float) SrcLfo1); pad.set (P::mod1_dest, (float) modTargetForParam (paramIndexForId ("oscA_morph"))); pad.set (P::mod1_amount, 0.5f);
+    pad.set (P::lfo1_rate, 0.2f);
+    CHECK (envelopeClass (pad) == "swelling pad");
+    const auto traits = identityTraits (pad);
+    CHECK (traits.size() >= 4 && traits.joinIntoString ("|").contains ("Glass") && traits.joinIntoString ("|").contains ("swelling pad")
+           && traits.joinIntoString ("|").contains ("slow LFO on A Morph") && traits.joinIntoString ("|").contains ("chorus"));
+    // the identity list never carries settings the model could copy (type names like LP24 are fine)
+    CHECK (! traits.joinIntoString ("|").containsAnyOf (".") && ! traits.joinIntoString ("|").contains (" Hz"));
+
+    // every idea move changes structure, and a run of them gets far from the parent
+    int moved = 0;
+    for (int m = 0; m < kNumIdeaMoves; ++m)
+    {
+        Patch c = pad; applyIdeaMove (c, m, 1234 + m);
+        const int d = countStructuralDifferences (c, pad);
+        if (d >= 1) ++moved; else std::printf ("  idea move %d changed nothing structural\n", m);
+    }
+    CHECK (moved == kNumIdeaMoves);
+    Patch far = pad;
+    for (int m = 0; m < 6; ++m) applyIdeaMove (far, m, 99 + m);
+    CHECK (countStructuralDifferences (far, pad) >= 5);
+    keepIdentity (far, pad);
+    CHECK (envelopeClass (far) == "swelling pad");   // Far keeps the envelope class
+
+    // the Far prompt shows no parent numbers; Close shows them
+    GenerationRequest r; r.parents = { pad }; r.count = 3;
+    r.variation = 0.8f;
+    const auto farPrompt = LlmPatchGenerator::userPrompt (r);
+    CHECK (! farPrompt.contains ("params:") && farPrompt.contains ("Its identity") && farPrompt.contains ("from scratch"));
+    r.variation = 0.3f;
+    CHECK (LlmPatchGenerator::userPrompt (r).contains ("params:"));
+    r.variation = 0.55f;
+    CHECK (LlmPatchGenerator::userPrompt (r).contains ("rebuild the"));
+}
+
+static void testLiveWrites()
+{
+    std::printf ("live writes\n");
+    std::set<std::string> seen;
+    auto w = LlmPatchGenerator::extractWrites ("{\"name\":\"Warm Glass\",\"category\":\"Pad\",\"filter_cutoff\": 820,\"oscA_wave\":3,\"chorus_mix\":0.4", seen);
+    // the last value has no comma yet, so it may still be streaming: two so far
+    CHECK (w.size() == 2 && w[0] == "filter_cutoff\t820" && w[1] == "oscA_wave\t3");
+    w = LlmPatchGenerator::extractWrites ("{\"name\":\"Warm Glass\",\"category\":\"Pad\",\"filter_cutoff\": 820,\"oscA_wave\":3,\"chorus_mix\":0.4,\"reverb_mix\":0.", seen);
+    CHECK (w.size() == 1 && w[0] == "chorus_mix\t0.4");   // finished now; the earlier two are not repeated
+    w = LlmPatchGenerator::extractWrites ("{\"name\":\"Warm Glass\",\"filter_cutoff\": 820,\"oscA_wave\":3,\"chorus_mix\":0.4,\"reverb_mix\":0.5,\"waveA\":{\"name\":\"glassy bell\",\"spectra\":[[1,0,0.5]]},\"delay_mode\":1}", seen);
+    CHECK (w.size() == 3 && w[0] == "reverb_mix\t0.5" && w[1] == "wave\tGlassy Bell" && w[2] == "delay_mode\t1");
+}
+
 static void testCharacterAndEffects()
 {
     std::printf ("character and effects\n");
@@ -1660,6 +1786,9 @@ int main (int argc, char** argv)
     testSampler();
     testSampleAnalyser();
     testSongAnalyser();
+    testLife();
+    testIdeas();
+    testLiveWrites();
     testCharacterAndEffects();
     testRandomGenerator();
     testLlmGenerator();

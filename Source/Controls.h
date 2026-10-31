@@ -147,6 +147,31 @@ private:
 
 // The on-screen keyboard: all 88 keys, drawn flat, filling whatever width it
 // is given.
+// The Life switch: Off and levels 1 to 5 as one row of small buttons (the full
+// form), or a single button that toggles Off and the last level (the compact
+// form for the header). Bound to the "life" parameter.
+class LifeSwitch : public juce::Component,
+                   private juce::AudioProcessorValueTreeState::Listener,
+                   private juce::AsyncUpdater
+{
+public:
+    LifeSwitch (juce::AudioProcessorValueTreeState&, bool compact);
+    ~LifeSwitch() override;
+    void resized() override;
+
+private:
+    void parameterChanged (const juce::String&, float) override { triggerAsyncUpdate(); }
+    void handleAsyncUpdate() override;
+    void setLevel (int level);
+    int level() const;
+
+    juce::AudioProcessorValueTreeState& apvts;
+    bool compact;
+    int lastLevel = 2;
+    juce::Label caption;
+    std::vector<std::unique_ptr<juce::TextButton>> buttons;   // compact: one button
+};
+
 class StacksKeyboard : public juce::MidiKeyboardComponent
 {
 public:

@@ -1,5 +1,8 @@
 #pragma once
 
+#include <set>
+#include <string>
+
 #include <memory>
 
 #include "../PatchGenerator.h"
@@ -23,6 +26,8 @@ public:
     // Exposed so the prompt can be inspected / tuned.
     static juce::String systemPrompt (bool designWaves = true);
     static juce::String userPrompt (const GenerationRequest&);
+    // Finished "key": value pairs in a half-written patch object, each once; see the .cpp.
+    static juce::StringArray extractWrites (const std::string& partialObject, std::set<std::string>& alreadyReported);
     static juce::String grammar (int patchCount, bool designWaves = true); // GBNF for {"patches":[exactly patchCount]} built from the parameter table
 
 private:

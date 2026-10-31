@@ -139,6 +139,7 @@ void StacksAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
     synth.setCurrentPlaybackSampleRate (sampleRate);
 
     arp.prepare (sampleRate);
+    life.prepare (sampleRate);
     distortion.prepare (sampleRate, samplesPerBlock);
     eq.prepare (sampleRate, samplesPerBlock);
     compressor.prepare (sampleRate, samplesPerBlock);
@@ -208,6 +209,10 @@ void StacksAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
     for (int i = 0; i < kNumParams; ++i)
         params.v[i] = rawParams[(size_t) i]->load();
+    // Life: slow wandering plus a nudge per note, on top of the preset's values; Off changes nothing.
+    for (const auto meta : midi)
+        if (meta.getMessage().isNoteOn()) life.noteOn();
+    life.apply (params, params.geti (P::life), numSamples);
 
     std::optional<double> ppq;
     bool hostPlaying = false;
@@ -1709,6 +1714,7 @@ static juce::String describeWrite (const juce::String& id, const juce::String& r
 
 void StacksAudioProcessor::addLiveWrites (int token, const juce::StringArray& writes)
 {
+    std::fprintf (stderr, "[trace] addLiveWrites token=%d current=%d generating=%d n=%d\n", token, generationToken.load(), (int) labState.generating, writes.size());
     if (token != generationToken || ! labState.generating)
         return;
     labState.tweakedParams.clear();

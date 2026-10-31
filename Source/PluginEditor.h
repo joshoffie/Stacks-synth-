@@ -46,6 +46,7 @@ private:
     ScopeView scope;
     TunerView tuner;
     juce::TextButton settingsButton, undoButton, redoButton;
+    LifeSwitch lifeButton;   // compact: Life on and off from any screen
     juce::Component::SafePointer<juce::DialogWindow> settingsWindow;   // one at a time; closed with the editor
     SynthPanel synthPanel;
     LabPanel labPanel;
