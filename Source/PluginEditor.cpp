@@ -358,6 +358,8 @@ void StacksAudioProcessorEditor::drawAnnotations (juce::Image& image, float scal
     pieces.emplace_back ("key-white.png", content.getLocalArea (&keyboard, keyboard.getRectangleForKey (48).toNearestInt()));
     pieces.emplace_back ("key-black.png", content.getLocalArea (&keyboard, keyboard.getRectangleForKey (49).toNearestInt()));
 
+    if (juce::SystemStats::getEnvironmentVariable ("STACKS_DEBUG_PIECES", {}).isNotEmpty())
+        for (const auto& p : pieces) std::fprintf (stderr, "piece %s %d,%d %dx%d\n", p.first.toRawUTF8(), p.second.getX(), p.second.getY(), p.second.getWidth(), p.second.getHeight());
     juce::Graphics g (image);
     g.addTransform (juce::AffineTransform::scale (scale));
     const juce::Colour ink (0xffffd166);
@@ -419,6 +421,8 @@ void StacksAudioProcessorEditor::drawAnnotations (juce::Image& image, float scal
 
 void StacksAudioProcessorEditor::renderScreens (const juce::File& directory, float scale, bool annotate)
 {
+    layingOut = true;                 // tools render the design size, whatever scale the user remembered
+    setSize (kDesignW, kDesignH);
     directory.createDirectory();
     int shot = 0;
     auto shoot = [&] (const juce::String& name)

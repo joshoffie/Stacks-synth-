@@ -323,6 +323,7 @@ int main (int argc, char** argv)
         std::printf ("usage: StacksUiKit <output directory> [scale] [preset.json]   (screens labelled with skin file names)\n"
                      "       StacksUiKit --export-skin <output directory> [scale]\n"
                      "       StacksUiKit --plain <output directory> [scale]  (screens without the file-name labels)\n"
+                     "       StacksUiKit --tree-shot <output directory> [--fake] [--annotate]   (screens with a grown family tree)\n"
                      "       StacksUiKit --smoke                              (first-launch test: grow five pads, play, save)\n");
         return 2;
     }
@@ -411,7 +412,9 @@ int main (int argc, char** argv)
             e->setSize (1500, 860);
             e->showHomeResults();
             juce::MessageManager::getInstance()->runDispatchLoopUntil (1500);   // let the blocks drop in
-            e->renderScreens (out, 2.0f, false);
+            bool annotate = false;
+            for (int i = 3; i < argc; ++i) annotate = annotate || juce::String (argv[i]) == "--annotate";
+            e->renderScreens (out, 2.0f, annotate);
             std::printf ("screens written to %s\n", out.getFullPathName().toRawUTF8());
         }
         editor.reset();
