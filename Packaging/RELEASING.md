@@ -34,6 +34,15 @@ Everything here runs on your Mac. Friends only ever receive the `.pkg` file.
    `--update-only` builds just the update (no engine file needed).
    `--skip-build` reuses the binaries already in `build.nosync`.
 
+   If notarising fails with "No Keychain password item found for profile",
+   the stored credential is gone (a keychain clean-up, a new Mac). Store it
+   again with the `store-credentials` command further down, then notarise the
+   packages that were already built:
+
+   ```bash
+   Packaging/notarize.sh dist/Stacks-<version>.pkg dist/Stacks-<version>-update.pkg
+   ```
+
 3. **Send the right file.** First-timers get the full installer; everyone who
    already has Stacks gets the update. Upload to Drive, Dropbox or similar and
    share the link.
