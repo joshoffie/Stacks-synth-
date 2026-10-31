@@ -190,7 +190,7 @@ void ProgressStrip::paint (juce::Graphics& g)
 }
 
 //==============================================================================
-LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garden (p), tree (p), explain (p)
+LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garden (p), canvas (p, 0.72f), tree (p), explain (p)
 {
     header.setText ("LAB", juce::dontSendNotification);
     header.setFont (StacksLookAndFeel::font (10.0f, true).withExtraKerningFactor (0.18f));
@@ -292,6 +292,7 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
     evolveButton.onClick = [this]
     {
         if (processor.lab().generating) processor.cancelGeneration();   // "Stop"
+        else if (! canvas.selection().empty()) { processor.requestGrowFrom (canvas.selection(), (float) variation.getValue()); canvas.clearSelection(); }
         else processor.requestEvolve (hint.getText(), (float) variation.getValue());
     };
     addAndMakeVisible (evolveButton);
@@ -336,7 +337,10 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
         tab->setColour (juce::TextButton::buttonOnColourId, colours::accent);
         addAndMakeVisible (*tab);
     }
-    gardenTab.setTooltip ("Stacks: your sound is the slab at the bottom, the new ideas pile up on it, each block shaped like its sound. Click a block to hear it, drag it up to exaggerate it or down to blend it with the seed, right-click to plant or save it.");
+    gardenTab.setButtonText ("TREE");
+    gardenTab.setTooltip ("Every generation as a family tree. Drag to look around, click a block to hear it, add blocks to the mix with + and Evolve grows from all of them.");
+    addAndMakeVisible (canvas);
+    canvas.onSelectionChanged = [this] { refresh(); };
     gardenTab.onClick = [this] { showView (View::garden); };
     ideasTab.setTooltip ("The same candidates as a list with descriptions");
     ideasTab.onClick = [this] { showView (View::ideas); };
@@ -455,9 +459,9 @@ void LabPanel::resized()
     r.removeFromTop (2);
 
     auto tabs = r.removeFromTop (22);
-    const int tabW = tabs.getWidth() / 5;
+    const int tabW = tabs.getWidth() / 3;   // TREE, LIST, LIBRARY
     gardenTab.setBounds (tabs.removeFromLeft (tabW));
-    treeTab.setBounds (tabs.removeFromLeft (tabW));
+    treeTab.setVisible (false);   // History lives in the tree now
     ideasTab.setBounds (tabs.removeFromLeft (tabW));
     libraryTab.setBounds (tabs.removeFromLeft (tabW));
     explainTab.setBounds (tabs);
@@ -467,6 +471,7 @@ void LabPanel::resized()
     viewport.setBounds (r);
     library.setBounds (r);
     garden.setBounds (r);
+    canvas.setBounds (r);
     treeViewport.setBounds (r);
     tree.setSize (juce::jmax (tree.preferredWidth(), r.getWidth()), juce::jmax (tree.getHeight(), r.getHeight()));
     explain.setBounds (r);
@@ -582,7 +587,7 @@ void LabPanel::refresh()
     const bool busy = processor.isBusy();
     evolveButton.setTooltip (lab.generating ? "Stop growing; the sounds that have landed stay"
                                             : "Five descendants of \"" + processor.currentPatchName() + "\", the sound you're playing now; Variation sets how far they stray");
-    evolveButton.setButtonText (lab.generating ? "Stop" : "Evolve");
+    evolveButton.setButtonText (lab.generating ? "Stop" : canvas.selection().size() > 1 ? "Evolve " + juce::String ((int) canvas.selection().size()) : "Evolve");
     evolveButton.setEnabled (! processor.isDownloading());
     newBatchButton.setButtonText (busy ? "Stop" : "Generate");
     newBatchButton.setTooltip (lab.generating ? "Stop generating; keep what has arrived"
@@ -632,6 +637,7 @@ void LabPanel::refresh()
     }
     if (view == View::library) library.refresh();
     garden.refresh();
+    if (canvas.isVisible()) canvas.refresh();
 
     // A new batch starts at the top of the list.
     if (lab.generation != shownGeneration)
@@ -710,9 +716,9 @@ std::vector<std::pair<juce::String, juce::Rectangle<int>>> LabPanel::skinPieces(
 {
     std::vector<std::pair<juce::String, juce::Rectangle<int>>> out;
     out.emplace_back ("lab.png", getLocalBounds());
-    if (garden.isVisible())
-        for (const auto& p : garden.skinPieces())
-            out.emplace_back (p.first, getLocalArea (&garden, p.second));
+    if (canvas.isVisible())
+        for (const auto& p : canvas.skinPieces())
+            out.emplace_back (p.first, getLocalArea (&canvas, p.second));
     return out;
 }
 
@@ -722,17 +728,18 @@ void LabPanel::showView (View v)
     gardenTab.setToggleState (v == View::garden, juce::dontSendNotification);
     ideasTab.setToggleState (v == View::ideas, juce::dontSendNotification);
     libraryTab.setToggleState (v == View::library, juce::dontSendNotification);
-    garden.setVisible (v == View::garden);
+    garden.setVisible (false);
+    canvas.setVisible (v == View::garden || v == View::tree);
     viewport.setVisible (v == View::ideas);
     library.setVisible (v == View::library);
     treeTab.setToggleState (v == View::tree, juce::dontSendNotification);
     explainTab.setToggleState (v == View::explain, juce::dontSendNotification);
-    treeViewport.setVisible (v == View::tree);
+    treeViewport.setVisible (false);
     explain.setVisible (v == View::explain);
     if (v == View::tree) { treeGeneration = processor.lab().generation; scrollTreeToNewest(); }
     if (v == View::explain && processor.lab().explanationKey != processor.currentExplanationKey()) processor.explainCurrentPatch();
     if (v == View::library) library.refresh();
-    if (v == View::garden)  garden.refresh();
+    if (v == View::garden || v == View::tree) canvas.refresh();
 }
 
 } // namespace stacks

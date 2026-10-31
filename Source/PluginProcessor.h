@@ -24,7 +24,8 @@ struct LabState
 {
     int generation = 0;
     std::vector<Patch> candidates;              // the current batch
-    struct Generation { std::vector<Patch> candidates; Patch seed; bool seedIsPatch = false; int generation = 0; };
+    struct Generation { std::vector<Patch> candidates; Patch seed; bool seedIsPatch = false; int generation = 0; std::vector<std::pair<int, int>> parents; };
+    std::vector<std::pair<int, int>> currentParents;   // the tree nodes the batch in progress grew from (generation index, candidate)
     std::vector<Generation> history;            // earlier batches, for "back"
     Patch seed;                                 // what this generation grew from (the Garden's centre)
     bool seedIsPatch = false;                   // a real sound you can hear again, not just a "fresh ideas" label
@@ -100,6 +101,8 @@ public:
     void requestFromKind (const juce::String& kind);   // home screen: "Pad", "Keys", "Bass"... becomes a brief of its own
     void requestEvolve (const juce::String& hint, float variation);
     void requestEvolveFrom (const Patch& parent, const juce::String& hint, float variation); // "plant" one candidate
+    void requestGrowFrom (const std::vector<std::pair<int, int>>& treeNodes, float variation);   // one or several tree nodes as parents
+    const Patch* patchAt (int generation, int candidate) const;   // a tree node's patch (candidate -1 = that generation's seed), null if gone
     void cancelGeneration();
     void goBackGeneration();
     void audition (int candidateIndex);

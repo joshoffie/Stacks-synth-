@@ -152,6 +152,7 @@ set(STACKS_SOURCES
     Source/Skin.cpp
     Source/TourOverlay.cpp
     Source/Life.cpp
+    Source/TreeCanvas.cpp
     Source/Displays.cpp
     Source/SettingsPanel.cpp
     Source/TreeView.cpp

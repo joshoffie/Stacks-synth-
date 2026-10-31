@@ -1496,6 +1496,42 @@ void StacksAudioProcessor::requestEvolve (const juce::String& hint, float variat
     req.count = kAiPatchesPerBatch;   // five, all grown; no random filler
     req.generation = labState.generation + 1;
     req.parents = { currentPatch() }; // Evolve grows from the sound you're hearing
+    if (labState.auditioned >= 0 && labState.auditioned < (int) labState.candidates.size())
+        req.parentRefs = { { (int) labState.history.size(), labState.auditioned } };
+    startGeneration (std::move (req));
+}
+
+const Patch* StacksAudioProcessor::patchAt (int generation, int candidate) const
+{
+    const bool current = generation == (int) labState.history.size();
+    if (generation < 0 || generation > (int) labState.history.size()) return nullptr;
+    const auto& cands = current ? labState.candidates : labState.history[(size_t) generation].candidates;
+    if (candidate < 0)
+    {
+        const bool seedIsPatch = current ? labState.seedIsPatch : labState.history[(size_t) generation].seedIsPatch;
+        return seedIsPatch ? (current ? &labState.seed : &labState.history[(size_t) generation].seed) : nullptr;
+    }
+    return candidate < (int) cands.size() ? &cands[(size_t) candidate] : nullptr;
+}
+
+// Grow from one or several nodes of the tree. A single node that is the sound
+// being heard grows from the knobs as they are now (edits included).
+void StacksAudioProcessor::requestGrowFrom (const std::vector<std::pair<int, int>>& treeNodes, float variation)
+{
+    if (labState.generating) return;
+    GenerationRequest req;
+    req.variation = variation;
+    req.count = kAiPatchesPerBatch;
+    req.generation = labState.generation + 1;
+    for (const auto& ref : treeNodes)
+        if (auto* p = patchAt (ref.first, ref.second))
+        {
+            const bool hearing = ref.first == (int) labState.history.size() && ref.second == labState.auditioned && ref.second >= 0;
+            req.parents.push_back (hearing ? currentPatch() : *p);
+            req.parentRefs.push_back (ref);
+        }
+    if (req.parents.empty()) return;
+    if (req.parents.size() == 1) applyPatch (req.parents.front());   // the one parent becomes the sound you hear
     startGeneration (std::move (req));
 }
 
@@ -1558,10 +1594,15 @@ void StacksAudioProcessor::startGeneration (GenerationRequest req)
     // somewhere to land. The sound that is loaded stays exactly as it is.
     if (! labState.candidates.empty())
     {
-        labState.history.push_back ({ std::move (labState.candidates), labState.seed, labState.seedIsPatch, labState.generation });
+        labState.history.push_back ({ std::move (labState.candidates), labState.seed, labState.seedIsPatch, labState.generation, labState.currentParents });
         if (labState.history.size() > 20)
+        {
             labState.history.erase (labState.history.begin());
+            for (auto& gen : labState.history) for (auto& p : gen.parents) --p.first;   // the tree lost its first column
+            for (auto& p : req.parentRefs) --p.first;
+        }
     }
+    labState.currentParents = req.parentRefs;
     labState.candidates.clear();
     labState.auditioned = -1;
     labState.generation = req.generation;
@@ -1694,9 +1735,14 @@ static juce::String describeWrite (const juce::String& id, const juce::String& r
     juce::String value;
     if (spec.kind == ParamKind::Choice && spec.choices != nullptr)
     {
-        const int i = raw.getIntValue();
         const auto& names = spec.choices();
-        value = i >= 0 && i < names.size() ? names[i] : raw;
+        if (raw.isNotEmpty() && ! juce::CharacterFunctions::isDigit (raw[0]) && raw[0] != '-')
+            value = raw;   // the engine writes choices by name
+        else
+        {
+            const int i = raw.getIntValue();
+            value = i >= 0 && i < names.size() ? names[i] : raw;
+        }
     }
     else
     {
@@ -1714,7 +1760,6 @@ static juce::String describeWrite (const juce::String& id, const juce::String& r
 
 void StacksAudioProcessor::addLiveWrites (int token, const juce::StringArray& writes)
 {
-    std::fprintf (stderr, "[trace] addLiveWrites token=%d current=%d generating=%d n=%d\n", token, generationToken.load(), (int) labState.generating, writes.size());
     if (token != generationToken || ! labState.generating)
         return;
     labState.tweakedParams.clear();
@@ -1780,6 +1825,7 @@ void StacksAudioProcessor::goBackGeneration()
     labState.candidates = std::move (previous.candidates);
     labState.seed = std::move (previous.seed);
     labState.seedIsPatch = previous.seedIsPatch;
+    labState.currentParents = previous.parents;
     labState.generation = juce::jmax (1, previous.generation > 0 ? previous.generation : labState.generation - 1);
     labState.history.pop_back();
     labState.status = "Generation " + juce::String (labState.generation) + "  (restored)";
@@ -2255,6 +2301,13 @@ juce::String StacksAudioProcessor::labToJson() const
     obj->setProperty ("candidates", toArray (labState.candidates));
     obj->setProperty ("seed", labState.seed.toVar());
     obj->setProperty ("seedIsPatch", labState.seedIsPatch);
+    auto refsToVar = [] (const std::vector<std::pair<int, int>>& refs)
+    {
+        juce::Array<juce::var> arr;
+        for (const auto& r : refs) { juce::Array<juce::var> pair; pair.add (r.first); pair.add (r.second); arr.add (juce::var (pair)); }
+        return juce::var (arr);
+    };
+    obj->setProperty ("parents", refsToVar (labState.currentParents));
     juce::Array<juce::var> tagArr;
     for (const auto& t : patchTags) tagArr.add (t);
     obj->setProperty ("patchTags", juce::var (tagArr));
@@ -2267,6 +2320,7 @@ juce::String StacksAudioProcessor::labToJson() const
         h->setProperty ("seed", gen.seed.toVar());
         h->setProperty ("seedIsPatch", gen.seedIsPatch);
         h->setProperty ("generation", gen.generation);
+        h->setProperty ("parents", refsToVar (gen.parents));
         hist.add (juce::var (h));
     }
     obj->setProperty ("history", juce::var (hist));
@@ -2308,6 +2362,15 @@ void StacksAudioProcessor::labFromJson (const juce::String& json)
     if (auto* t = obj->getProperty ("patchTags").getArray()) for (const auto& v : *t) patchTags.add (v.toString());
     patchFile = obj->getProperty ("patchFile").toString();
     patchFavourite = (bool) obj->getProperty ("patchFavourite");
+    auto refsFromVar = [] (const juce::var& v)
+    {
+        std::vector<std::pair<int, int>> refs;
+        if (auto* arr = v.getArray())
+            for (const auto& pv : *arr)
+                if (auto* pair = pv.getArray(); pair != nullptr && pair->size() == 2) refs.emplace_back ((int) (*pair)[0], (int) (*pair)[1]);
+        return refs;
+    };
+    labState.currentParents = refsFromVar (obj->getProperty ("parents"));
     labState.history.clear();
     if (auto* hist = obj->getProperty ("history").getArray())
         for (const auto& hv : *hist)
@@ -2318,6 +2381,7 @@ void StacksAudioProcessor::labFromJson (const juce::String& json)
                 if (auto seed = Patch::fromVar (h->getProperty ("seed"))) gen.seed = *seed;
                 gen.seedIsPatch = (bool) h->getProperty ("seedIsPatch");
                 gen.generation = (int) h->getProperty ("generation");
+                gen.parents = refsFromVar (h->getProperty ("parents"));
                 labState.history.push_back (std::move (gen));
             }
     labState.generating = false;

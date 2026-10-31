@@ -5,6 +5,7 @@
 #include "PluginProcessor.h"
 #include "LibraryPanel.h"
 #include "GardenView.h"
+#include "TreeCanvas.h"
 #include "TreeView.h"
 #include "ExplainView.h"
 
@@ -141,7 +142,8 @@ private:
     juce::TextButton gardenTab { "STACKS" }, treeTab { "HISTORY" }, ideasTab { "LIST" }, libraryTab { "LIBRARY" }, explainTab { "EXPLAIN" };
     View view = View::garden;
     LibraryPanel library;
-    GardenView garden;
+    GardenView garden;          // kept for its block painter; not shown
+    TreeCanvas canvas;          // the family tree, replaces the garden and the history tab
     FamilyTree tree;
     juce::Viewport treeViewport;
     ExplainView explain;

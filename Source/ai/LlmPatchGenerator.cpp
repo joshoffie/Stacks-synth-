@@ -736,6 +736,11 @@ juce::StringArray LlmPatchGenerator::extractWrites (const std::string& obj, std:
             value = obj.substr (v + 1, close - v - 1);
             pos = close + 1;
         }
+        else if (obj[v] == '{' && key != "waveA" && key != "waveB" && key != "waveC")
+        {
+            pos = v + 1;   // "params": { ... } and the like: read the pairs inside as they arrive
+            continue;
+        }
         else if (obj[v] == '{' || obj[v] == '[')
         {
             int depth = 0; size_t e = v;
@@ -760,7 +765,7 @@ juce::StringArray LlmPatchGenerator::extractWrites (const std::string& obj, std:
             value = obj.substr (v, end - v);
             pos = end;
         }
-        if (key == "name" || key == "description" || key == "category" || key == "parent" || key == "patches") continue;
+        if (key == "name" || key == "description" || key == "category" || key == "parent" || key == "patches" || key == "params" || key == "tail") continue;
         if (reported.count (key)) continue;
         reported.insert (key);
         fresh.add (juce::String::fromUTF8 (key.c_str()) + "\t" + juce::String::fromUTF8 (value.c_str()).trim());
@@ -978,10 +983,7 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
     auto reportWrites = [&] (const std::string& obj)
     {
         if (reportedForPatch != out.size()) { reportedKeys.clear(); reportedForPatch = out.size(); }
-        const auto fresh = extractWrites (obj, reportedKeys);
-        static int traced = 0;
-        if (traced++ < 6) std::fprintf (stderr, "[trace] extractWrites -> %d from %d chars; onWrites=%d\n", fresh.size(), (int) obj.size(), (int) (bool) progress.onWrites);
-        progress.writes (fresh);
+        progress.writes (extractWrites (obj, reportedKeys));
     };
     auto reportProgress = [&] (bool force)
     {

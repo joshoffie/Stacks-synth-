@@ -88,15 +88,19 @@ StacksAudioProcessorEditor::StacksAudioProcessorEditor (StacksAudioProcessor& p)
     });
 
     addAndMakeVisible (content);
+    layingOut = true;   // the limits below resize us to the minimum first; that must not be remembered as the user's choice
     setResizable (true, true);
-    getConstrainer()->setFixedAspectRatio ((double) kDesignW / (double) kDesignH);
+    // No fixed aspect ratio: a host wraps the editor in its own chrome and would fight it.
+    // The picture keeps its shape by letterboxing inside whatever size it is given.
     setResizeLimits (juce::roundToInt (kDesignW * 0.6f), juce::roundToInt (kDesignH * 0.6f), juce::roundToInt (kDesignW * 1.5f), juce::roundToInt (kDesignH * 1.5f));
     applyStoredScale();
+    layingOut = false;
 }
 
 float StacksAudioProcessorEditor::uiScale() const
 {
-    return getWidth() > 0 ? (float) getWidth() / (float) kDesignW : 1.0f;
+    if (getWidth() <= 0 || getHeight() <= 0) return 1.0f;
+    return juce::jmin ((float) getWidth() / (float) kDesignW, (float) getHeight() / (float) kDesignH);
 }
 
 // The remembered scale, or one that fits the screen this window is on (a 13 inch
@@ -214,7 +218,7 @@ bool StacksAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
 void StacksAudioProcessorEditor::paint (juce::Graphics& g)
 {
     g.fillAll (colours::background);
-    g.addTransform (juce::AffineTransform::scale (uiScale()));
+    g.addTransform (content.getTransform());
     if (skin::has ("background")) skin::drawStretched (g, "background", juce::Rectangle<float> ((float) kDesignW, (float) kDesignH));
     if (skin::has ("header"))     skin::drawStretched (g, "header", headerBounds.toFloat());
 
@@ -235,15 +239,21 @@ void StacksAudioProcessorEditor::paint (juce::Graphics& g)
 
 void StacksAudioProcessorEditor::resized()
 {
-    // The window is a scaled picture of the 1500 x 860 design.
+    // The window is a scaled picture of the 1500 x 860 design, centred when the host's shape differs.
     const float k = uiScale();
     content.setBounds (0, 0, kDesignW, kDesignH);
-    content.setTransform (juce::AffineTransform::scale (k));
+    content.setTransform (juce::AffineTransform::scale (k).translated (std::floor (((float) getWidth() - kDesignW * k) * 0.5f),
+                                                                       std::floor (((float) getHeight() - kDesignH * k) * 0.5f)));
     if (! layingOut && std::abs (synthProcessor.uiScale() - k) > 0.005f && synthProcessor.uiScale() > 0.0f)
     {
-        layingOut = true;
-        synthProcessor.setUiScale (k);   // a dragged corner is remembered
-        layingOut = false;
+        // A dragged corner is remembered, once the size has settled; hosts resize us a few times on the way in.
+        juce::Timer::callAfterDelay (900, [safe = juce::Component::SafePointer<StacksAudioProcessorEditor> (this), k]
+        {
+            if (safe == nullptr || std::abs (safe->uiScale() - k) > 0.005f || safe->layingOut) return;
+            safe->layingOut = true;
+            safe->synthProcessor.setUiScale (k);
+            safe->layingOut = false;
+        });
     }
     auto r = juce::Rectangle<int> (kDesignW, kDesignH);
 

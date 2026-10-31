@@ -92,7 +92,7 @@ std::unique_ptr<juce::AccessibilityHandler> HomeView::Tile::createAccessibilityH
 }
 
 //==============================================================================
-HomeView::HomeView (StacksAudioProcessor& p) : processor (p), lifeSwitch (p.apvts, false)
+HomeView::HomeView (StacksAudioProcessor& p) : processor (p), lifeSwitch (p.apvts, false), tree (p, 1.1f)
 {
     for (const auto& k : kKinds)
     {
@@ -115,6 +115,8 @@ HomeView::HomeView (StacksAudioProcessor& p) : processor (p), lifeSwitch (p.apvt
     };
     addChildComponent (backButton);
     addChildComponent (lifeSwitch);
+    addChildComponent (tree);
+    tree.onSelectionChanged = [this] { refresh(); };
 
     saveButton.setTooltip ("Save the sound you are hearing: pick a folder and a name");
     saveButton.onClick = [this] { if (onSave) onSave(); };
@@ -219,7 +221,7 @@ juce::Rectangle<int> HomeView::tourArea (const juce::String& what) const
     juce::Rectangle<int> r;
     auto unite = [&r] (juce::Rectangle<int> b) { r = r.isEmpty() ? b : r.getUnion (b); };
     if (what == "tiles")          for (const auto& t : tiles) unite (t->getBounds());
-    else if (what == "blocks")    r = stackArea().toNearestInt();
+    else if (what == "blocks")    r = getLocalArea (&tree, tree.blocksArea());
     else if (what == "variation") { unite (closeButton.getBounds()); unite (mediumButton.getBounds()); unite (farButton.getBounds()); }
     else if (what == "grow")      r = growButton.getBounds();
     else if (what == "save")      r = saveButton.getBounds();
@@ -239,7 +241,7 @@ std::vector<std::pair<juce::String, juce::Rectangle<int>>> HomeView::skinPieces(
     const float bw = juce::jmin (150.0f, (area.getWidth() - 40.0f) / 4.6f);
     const float rowW = 4.0f * bw + 3.0f * 14.0f;
     out.emplace_back ("slab.png", juce::Rectangle<float> (area.getCentreX() - rowW * 0.5f - 8.0f, area.getBottom() - 50.0f, rowW + 26.0f, 44.0f).toNearestInt());
-    if (! blockComps.empty() && blockComps.front()->isVisible()) out.emplace_back ("block.png", blockComps.front()->getBounds());
+    for (const auto& p : tree.skinPieces()) out.emplace_back (p.first, getLocalArea (&tree, p.second));
     return out;
 }
 
@@ -264,16 +266,18 @@ void HomeView::pick (const juce::String& kind)
 
 void HomeView::grow()
 {
-    if (processor.isBusy() || processor.lab().auditioned < 0)
+    const auto mix = tree.selection();
+    if (processor.isBusy() || (processor.lab().auditioned < 0 && mix.empty()))
         return;
     note.clear();
     growthSeed = (int) (juce::Time::getMillisecondCounter() & 0x7fff) + 1;
     anim = 0.0f;
-    falling.clear();
     seedName = processor.currentPatchName();
     seedStyle = GardenView::styleFor (processor.currentPatch(), processor.builtInWavetables(), true);
     stage = Stage::growing;
-    processor.requestEvolve ("", variation);
+    if (mix.empty()) processor.requestEvolve ("", variation);
+    else             processor.requestGrowFrom (mix, variation);
+    tree.clearSelection();
     refresh();
 }
 
@@ -296,11 +300,15 @@ void HomeView::refresh()
         stage = Stage::pick;
 
     for (auto& t : tiles) t->setVisible (stage == Stage::pick);
-    if (stage == Stage::pick) falling.clear();
-    else syncBlocks (stage == Stage::results && falling.empty());   // a restored batch sits; a live one falls in
+    tree.setVisible (stage != Stage::pick);
+    if (stage != Stage::pick) tree.refresh();
     const bool results = stage == Stage::results;
+    const int mixed = (int) tree.selection().size();
     growButton.setVisible (results);
-    growButton.setEnabled (results && lab.auditioned >= 0);
+    growButton.setEnabled (results && (lab.auditioned >= 0 || mixed > 0));
+    growButton.setButtonText (mixed > 1 ? "Grow from these " + juce::String (mixed) : "Grow from this one");
+    growButton.setTooltip (mixed > 1 ? "Five new sounds that take something from each of the sounds you added with +"
+                                     : "Five new sounds based on the one you're hearing. Add more parents with the + on a block.");
     saveButton.setVisible (results);
     saveButton.setEnabled (results && lab.auditioned >= 0);
     backButton.setVisible (stage != Stage::pick);
@@ -310,10 +318,7 @@ void HomeView::refresh()
     for (auto* b : { &closeButton, &mediumButton, &farButton }) b->setVisible (results);
     lifeSwitch.setVisible (results);
 
-    placeBlocks();
-    bool moving = stage == Stage::growing;
-    for (const auto& f : falling) moving = moving || ! f.landed || f.scale < 0.995f;
-    if (moving) { if (! isTimerRunning()) startTimerHz (30); }
+    if (stage == Stage::growing) { if (! isTimerRunning()) startTimerHz (30); }
     else stopTimer();
     resized();
     repaint();
@@ -394,19 +399,12 @@ void HomeView::timerCallback()
     constexpr float dt = 1.0f / 30.0f;
     anim += dt;
     const auto& lab = processor.lab();
-    syncBlocks (false);
-    stepPhysics (dt);
-    placeBlocks();
     const float p = lab.progress;
     const int done = (int) lab.candidates.size();
     const char* words = p < 0.0f ? "listening" : p < 0.3f ? "listening" : p < 0.6f ? "sketching" : p < 0.85f ? "shaping" : "tuning";
     stageText = lab.generating ? juce::String (words) + "   " + juce::String (done) + " of " + juce::String (StacksAudioProcessor::kAiPatchesPerBatch) : juce::String();
     if (! lab.generating)
-    {
-        bool moving = false;
-        for (const auto& f : falling) moving = moving || ! f.landed || f.scale < 0.995f;
-        if (! moving) stopTimer();
-    }
+        stopTimer();
     repaint();
 }
 
@@ -484,7 +482,7 @@ void HomeView::resized()
         growButton.setBounds (bottom.removeFromRight (190));
         lifeSwitch.setBounds (bottom.removeFromLeft (juce::jmin (290, bottom.getWidth() - 10)).reduced (0, 7));
     }
-    placeBlocks();
+    tree.setBounds (stackArea().toNearestInt());
 }
 
 void HomeView::paint (juce::Graphics& g)
@@ -510,9 +508,12 @@ void HomeView::paint (juce::Graphics& g)
     const auto& lab = processor.lab();
     const bool fromSeed = lab.seedIsPatch;
     const bool preparing = processor.isDownloading() && ! lab.generating;
+    juce::StringArray mixNames;
+    for (const auto& ref : lab.currentParents) if (auto* p = processor.patchAt (ref.first, ref.second)) mixNames.add (p->name);
+    const juce::String mixText = mixNames.size() > 1 ? mixNames.joinIntoString (" + ") : juce::String();
     const juce::String heading = preparing ? juce::String ("Getting Stacks ready")
-                               : stage == Stage::growing ? (fromSeed ? "Growing from \"" + lab.seed.name + "\"" : "Growing " + category.toLowerCase() + " sounds")
-                                                         : (fromSeed ? "Grown from \"" + lab.seed.name + "\"" : "Five " + category.toLowerCase() + " sounds");
+                               : stage == Stage::growing ? (mixText.isNotEmpty() ? "Growing from " + mixText : fromSeed ? "Growing from \"" + lab.seed.name + "\"" : "Growing " + category.toLowerCase() + " sounds")
+                                                         : (mixText.isNotEmpty() ? "Grown from " + mixText : fromSeed ? "Grown from \"" + lab.seed.name + "\"" : "Five " + category.toLowerCase() + " sounds");
     g.drawText (heading, r.removeFromTop (34), juce::Justification::centredLeft);
     if (preparing)
     {
@@ -537,7 +538,13 @@ void HomeView::paint (juce::Graphics& g)
             : juce::String ("Click a block to hear it, even while the rest are still growing. Play the keyboard. Then grow from it, save it, or open the synth.");
         g.drawText (line, r.removeFromTop (18), juce::Justification::centredLeft);
     }
-    paintGrowth (g, stackArea());
+    // the stage words and the live ticker sit above the tree while a batch grows
+    if (stage == Stage::growing)
+    {
+        g.setColour (colours::muted);
+        g.setFont (StacksLookAndFeel::font (13.0f));
+        if (stageText.isNotEmpty()) g.drawText (stageText, r.removeFromTop (22), juce::Justification::centredLeft);
+    }
 }
 
 // The slab is the seed; the five sounds fall onto it as they land, growing in

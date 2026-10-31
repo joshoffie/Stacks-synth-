@@ -5,6 +5,7 @@
 #include "Controls.h"
 #include "PluginProcessor.h"
 #include "GardenView.h"
+#include "TreeCanvas.h"
 
 namespace stacks
 {
@@ -71,6 +72,7 @@ private:
     juce::TextButton growButton { "Grow from this one" }, backButton { "Start over" }, saveButton { "Save preset" }, openSynthButton { "Open the synth" };
     juce::TextButton closeButton { "Close" }, mediumButton { "Medium" }, farButton { "Far" };
     LifeSwitch lifeSwitch;
+    TreeCanvas tree;   // every generation as a pannable family tree; the newest batch drops in at the right
     float variation = 0.55f;
     float anim = 0.0f;
     int growthSeed = 1;
