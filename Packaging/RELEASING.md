@@ -35,9 +35,15 @@ Everything here runs on your Mac. Friends only ever receive the `.pkg` file.
    `--skip-build` reuses the binaries already in `build.nosync`.
 
    If notarizing fails with "No Keychain password item found for profile",
-   the stored credential is gone (a keychain clean-up, a new Mac). Store it
-   again with the `store-credentials` command further down, then notarize the
-   packages that were already built:
+   first check whether the shell can see the keychain at all: run
+   `xcrun notarytool history --keychain-profile stacks` from the Terminal (or
+   from an unsandboxed shell). notarytool keeps the profile in the data
+   protection keychain, which `security find-generic-password` does not
+   search and which a sandboxed helper shell cannot reach, so the error can
+   appear while the credential is perfectly fine (this happened 2026-10-31).
+   Only if that command fails too is the credential really gone (a keychain
+   reset, a new Mac): store it again with the `store-credentials` command
+   further down, then notarize the packages with `Packaging/notarize.sh`.
 
    ```bash
    Packaging/notarize.sh dist/Stacks-<version>.pkg dist/Stacks-<version>-update.pkg
