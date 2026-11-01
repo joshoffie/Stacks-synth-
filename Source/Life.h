@@ -22,10 +22,11 @@ public:
 
     static constexpr int kLevels = 5;
     static float levelAmount (int level) noexcept;   // how far level 1..5 reaches, 0..1 of each target's excursion
+    static bool isTarget (int paramIndex) noexcept;  // one of the knobs Life moves
 
 private:
     struct Target { P param; float excursion; };    // excursion: fraction of the knob's range at level 5
-    static constexpr int kTargets = 18;
+    static constexpr int kTargets = 19;
     static const Target targets[kTargets];
     float phase[kTargets][3] {}, rate[kTargets][3] {};
     float kick[kTargets] {};

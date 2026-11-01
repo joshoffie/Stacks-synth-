@@ -1,4 +1,5 @@
 #include "SynthPanel.h"
+#include "Life.h"
 #include "Skin.h"
 #include <algorithm>
 #include "Displays.h"
@@ -105,7 +106,9 @@ WaveDisplay::~WaveDisplay()
 void WaveDisplay::timerCallback()
 {
     const int wave = (int) processor.apvts.getRawParameterValue (paramId (oscWaveParam (osc)))->load();
-    const float morph = processor.apvts.getRawParameterValue (paramId (oscMorphParam (osc)))->load();
+    float morph = processor.apvts.getRawParameterValue (paramId (oscMorphParam (osc)))->load();
+    if ((int) processor.apvts.getRawParameterValue (paramId (P::life))->load() > 0 && processor.audioRunning())
+        morph = processor.liveValue ((int) oscMorphParam (osc));   // Life is moving the table: draw where it is
     const int warp = (int) processor.apvts.getRawParameterValue (paramId (oscWarpParam (osc)))->load();
     const float warpAmt = processor.apvts.getRawParameterValue (paramId (oscWarpAmtParam (osc)))->load();
     const int slot = wave >= kCustomWave ? UserWavetables::customSlot (osc) : wave - WavetableBank::kNumBuiltIn;
@@ -808,8 +811,12 @@ void SynthPanel::timerCallback()
         for (auto* knob : knobs) knob->clearLiveValue();
         return;
     }
+    const bool lifeOn = (int) apvts.getRawParameterValue (paramId (P::life))->load() > 0 && processor.audioRunning();
     for (auto* knob : knobs)
+    {
+        knob->setShowsLiveAlways (lifeOn && Life::isTarget (knob->parameterIndex()));   // Life moves these: show where they are
         knob->setLiveValue (processor.liveValue (knob->parameterIndex()));
+    }
 }
 
 void SynthPanel::changeListenerCallback (juce::ChangeBroadcaster*)

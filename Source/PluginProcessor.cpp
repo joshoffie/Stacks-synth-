@@ -214,6 +214,7 @@ void StacksAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     for (const auto meta : midi)
         if (meta.getMessage().isNoteOn()) life.noteOn();
     life.apply (params, params.geti (P::life), numSamples);
+    lastBlockMs.store (juce::Time::getMillisecondCounter(), std::memory_order_relaxed);
 
     std::optional<double> ppq;
     bool hostPlaying = false;
@@ -942,6 +943,12 @@ void StacksAudioProcessor::setSynthRowsMask (int mask)
     settings().setValue ("synthRows", mask);
     settings().saveIfNeeded();
 }
+bool StacksAudioProcessor::helpTips() const { return settings().getBoolValue ("helpTips", false); }
+void StacksAudioProcessor::setHelpTips (bool on)
+{
+    settings().setValue ("helpTips", on);
+    settings().saveIfNeeded();
+}
 
 bool StacksAudioProcessor::tourSeen (const juce::String& screen) const { return settings().getBoolValue ("tour_" + screen, false); }
 void StacksAudioProcessor::markTourSeen (const juce::String& screen)
@@ -1468,6 +1475,7 @@ void StacksAudioProcessor::refreshOllamaModels()
 //==============================================================================
 void StacksAudioProcessor::requestNewBatch (const juce::String& hint, float variation, const juce::String& displayName)
 {
+    startFreshTree();   // a batch from nothing in the tree is a new sound: its tree starts here
     GenerationRequest req;
     req.hint = hint;
     req.displayName = displayName;
@@ -2470,6 +2478,37 @@ void StacksAudioProcessor::treeFromVar (const juce::var& parsed)
     labState.status = labState.generation > 0 ? "Generation " + juce::String (labState.generation) : juce::String();
     if (labState.auditioned >= (int) labState.candidates.size())
         labState.auditioned = -1;
+    pruneTreeToLastRoot();
+}
+
+// The tree shows one sound's line of work. A generation that grew from nothing in the
+// tree (a kind of sound, a loaded preset, fresh ideas) is a root, and anything before
+// the last root belongs to an earlier sound.
+void StacksAudioProcessor::pruneTreeToLastRoot()
+{
+    const int stored = (int) labState.history.size();
+    const int gens = stored + (labState.candidates.empty() ? 0 : 1);
+    auto isRoot = [this, stored] (int g)
+    {
+        const auto& parents = g < stored ? labState.history[(size_t) g].parents : labState.currentParents;
+        for (const auto& ref : parents)
+            if (ref.first >= 0 && ref.first < g) return false;
+        const bool seedIsPatch = g < stored ? labState.history[(size_t) g].seedIsPatch : labState.seedIsPatch;
+        const auto& seed = g < stored ? labState.history[(size_t) g].seed : labState.seed;
+        if (seedIsPatch)   // the tree hangs it under an earlier block of the same name
+            for (int e = 0; e < g; ++e)
+                for (const auto& c : labState.history[(size_t) e].candidates)
+                    if (c.name == seed.name) return false;
+        return true;
+    };
+    int root = 0;
+    for (int g = gens - 1; g >= 0; --g)
+        if (isRoot (g)) { root = g; break; }
+    if (root <= 0)
+        return;
+    labState.history.erase (labState.history.begin(), labState.history.begin() + root);
+    for (auto& gen : labState.history) for (auto& p : gen.parents) p.first -= root;
+    for (auto& p : labState.currentParents) p.first -= root;
 }
 
 } // namespace stacks

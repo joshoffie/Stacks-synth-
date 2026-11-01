@@ -56,12 +56,18 @@ StacksAudioProcessorEditor::StacksAudioProcessorEditor (StacksAudioProcessor& p)
     redoButton.setTooltip ("Redo (Shift+Cmd+Z)");
     redoButton.onClick = [this] { synthProcessor.redo(); };
     content.addAndMakeVisible (redoButton);
+    helpButton.setButtonText ("?");
+    helpButton.setTooltip ("Help is on: point at anything to see what it does. Click to turn it off.");
+    helpButton.setClickingTogglesState (false);
+    helpButton.onClick = [this] { synthProcessor.setHelpTips (! synthProcessor.helpTips()); applyHelpTips(); };
+    content.addAndMakeVisible (helpButton);
     content.addAndMakeVisible (lifeButton);
-    for (auto* b : { &settingsButton, &undoButton, &redoButton })
+    for (auto* b : { &settingsButton, &undoButton, &redoButton, &helpButton })
     {
         styleAsTab (*b);
         b->getProperties().set ("bright", true);
     }
+    applyHelpTips();
     // Keys reach the editor itself (undo/redo shortcuts) and otherwise pass on to
     // the host, so Logic's musical typing keeps working; no child is focused
     // until it is clicked.
@@ -162,7 +168,8 @@ void StacksAudioProcessorEditor::maybeStartTour()
         steps = { { in (homeView, homeView.tourArea ("tiles")), "Pick a kind of sound. Stacks makes five new ones just for you." },
                   { whole (keyboard), "Play notes here, or use your own MIDI keyboard." },
                   { whole (modeButton), "Synth opens every knob. Home always brings you back here." },
-                  { [this] { return undoButton.getBounds().getUnion (redoButton.getBounds()); }, "Undo and redo any change." } };
+                  { [this] { return undoButton.getBounds().getUnion (redoButton.getBounds()); }, "Undo and redo any change." },
+                  { whole (helpButton), "? turns on help. With it on, point at anything to see what it does." } };
     }
     else if (showingHome && homeView.showingResults() && ! synthProcessor.tourSeen ("results"))
     {
@@ -271,6 +278,7 @@ void StacksAudioProcessorEditor::resized()
     settingsButton.setBounds (header.removeFromRight (28).withSizeKeepingCentre (26, 26));
     redoButton.setBounds (header.removeFromRight (26).withSizeKeepingCentre (24, 26));
     undoButton.setBounds (header.removeFromRight (26).withSizeKeepingCentre (24, 26));
+    helpButton.setBounds (header.removeFromRight (26).withSizeKeepingCentre (24, 26));
     header.removeFromRight (10);
     tuner.setBounds (header.removeFromRight (230).reduced (0, 8));
     header.removeFromRight (8);
@@ -482,4 +490,14 @@ void StacksAudioProcessorEditor::setHome (bool home)
     });
 }
 
+} // namespace stacks
+
+namespace stacks {
+void StacksAudioProcessorEditor::applyHelpTips()
+{
+    const bool on = synthProcessor.helpTips();
+    helpButton.setToggleState (on, juce::dontSendNotification);
+    if (on && tooltips == nullptr) tooltips = std::make_unique<juce::TooltipWindow> (this, 600);
+    else if (! on) tooltips.reset();
+}
 } // namespace stacks

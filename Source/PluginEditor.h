@@ -46,7 +46,8 @@ private:
     ParamKnob masterKnob;
     ScopeView scope;
     TunerView tuner;
-    juce::TextButton settingsButton, undoButton, redoButton;
+    juce::TextButton settingsButton, undoButton, redoButton, helpButton;   // ? = tips on hover
+    void applyHelpTips();
     LifeSwitch lifeButton;   // compact: Life on and off from any screen
     juce::Component::SafePointer<juce::DialogWindow> settingsWindow;   // one at a time; closed with the editor
     SynthPanel synthPanel;
@@ -65,7 +66,7 @@ private:
     void drawAnnotations (juce::Image&, float scale);
     StacksKeyboard keyboard;
     juce::Rectangle<int> headerBounds;
-    juce::TooltipWindow tooltips { this, 600 };
+    std::unique_ptr<juce::TooltipWindow> tooltips;   // only while the ? is on
 };
 
 } // namespace stacks

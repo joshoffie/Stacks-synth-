@@ -5,13 +5,20 @@ namespace stacks
 {
 
 const Life::Target Life::targets[Life::kTargets] = {
-    { P::oscA_morph, 0.35f }, { P::oscB_morph, 0.30f }, { P::oscA_warp_amt, 0.20f }, { P::fm_amount, 0.08f },
+    // the wavetables themselves move most: a whisper at level 1, a long slow sweep at 5
+    { P::oscA_morph, 0.65f }, { P::oscB_morph, 0.55f }, { P::oscC_morph, 0.55f }, { P::oscA_warp_amt, 0.30f }, { P::fm_amount, 0.08f },
     { P::filter_cutoff, 0.30f }, { P::filter_res, 0.20f }, { P::filter_env, 0.15f },
     { P::unison_detune, 0.25f }, { P::unison_spread, 0.30f },
     { P::lfo1_rate, 0.25f }, { P::lfo2_rate, 0.20f },
     { P::chorus_mix, 0.25f }, { P::delay_mix, 0.20f }, { P::reverb_mix, 0.25f }, { P::dist_drive, 0.15f }, { P::char_sat, 0.20f },
     { P::aenv_attack, 0.20f }, { P::aenv_release, 0.30f },
 };
+
+bool Life::isTarget (int paramIndex) noexcept
+{
+    for (const auto& t : targets) if ((int) t.param == paramIndex) return true;
+    return false;
+}
 
 float Life::levelAmount (int level) noexcept
 {

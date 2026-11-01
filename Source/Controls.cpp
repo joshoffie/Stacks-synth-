@@ -301,9 +301,16 @@ void ParamKnob::showModulationMenu()
     });
 }
 
+void ParamKnob::setShowsLiveAlways (bool on)
+{
+    if (showLiveAlways == on) return;
+    showLiveAlways = on;
+    if (! on && modulations.empty()) clearLiveValue();
+}
+
 void ParamKnob::setLiveValue (float realValue)
 {
-    if (modulations.empty() || paramIndex < 0)
+    if ((modulations.empty() && ! showLiveAlways) || paramIndex < 0)
         return;
     const float norm = (float) slider.valueToProportionOfLength (juce::jlimit (slider.getMinimum(), slider.getMaximum(), (double) realValue));
     if (std::abs (norm - liveNorm) > 0.002f)
@@ -541,7 +548,7 @@ void ParamKnob::paint (juce::Graphics& g)
     // Live marker: where the modulation has the value right now.
     if (liveNorm >= 0.0f && isEnabled())
     {
-        const float outer = ringRadiusFor ((int) modulations.size() - 1);
+        const float outer = ringRadiusFor (juce::jmax (0, (int) modulations.size() - 1));
         const float a0 = rotary.startAngleRadians + v0 * span;
         const float a1 = rotary.startAngleRadians + juce::jlimit (0.0f, 1.0f, liveNorm) * span;
         juce::Path sweep;

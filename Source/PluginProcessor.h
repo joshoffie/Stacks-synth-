@@ -178,6 +178,9 @@ public:
     float uiScale() const;
     void setUiScale (float scaleOrZero);
 
+    bool helpTips() const;                  // the ? in the header: tips on hover
+    void setHelpTips (bool);
+    bool audioRunning() const               { return juce::Time::getMillisecondCounter() - lastBlockMs.load (std::memory_order_relaxed) < 400; }
     int synthRowsMask() const;              // which Synth sections are on show (bit per row); 0 = all
     void setSynthRowsMask (int mask);
 
@@ -303,6 +306,7 @@ private:
     juce::String labToJson() const;
     juce::var treeToVar() const;                 // the family tree alone: generations, parents, the current batch
     void treeFromVar (const juce::var&);
+    void pruneTreeToLastRoot();                  // only the current line of work stays
     void labFromJson (const juce::String&);
     void processEffects (juce::AudioBuffer<float>&);
 
@@ -323,6 +327,7 @@ private:
     Life life;                                            // the Life layer's offsets go into `params` each block
     SynthParams fxParams;                                 // base + global modulation, read by the effects
     std::array<std::atomic<float>, kNumParams> liveValues {};
+    std::atomic<juce::uint32> lastBlockMs { 0 };   // when audio last ran, so the UI knows the live values are fresh
     VoiceContext voiceContext;
     LfoTableBank lfoTables;
     float lfoPhase[kNumLfos] {}, lfoHeld[kNumLfos] {};
