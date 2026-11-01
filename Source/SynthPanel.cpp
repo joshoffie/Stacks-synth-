@@ -753,8 +753,23 @@ SynthPanel::SynthPanel (StacksAudioProcessor& p) : processor (p), apvts (p.apvts
     };
     addViewButton ("MACROS", -2, colours::rowMacro);
     addViewButton ("ALL", -1, colours::accent);
-    for (int i = 0; i < (int) rows.size(); ++i)
-        addViewButton (rows[(size_t) i].caption, i, rows[(size_t) i].colour);
+    sectionsButton.setTooltip ("Choose which sections ALL shows. The ones on grow to fill the space.");
+    sectionsButton.onClick = [this]
+    {
+        juce::PopupMenu menu;
+        menu.addSectionHeader ("Sections on show");
+        for (int i = 0; i < (int) rows.size(); ++i)
+            menu.addItem (i + 1, rows[(size_t) i].caption.toLowerCase().substring (0, 1).toUpperCase() + rows[(size_t) i].caption.toLowerCase().substring (1), true, isRowShown (i));
+        menu.addSeparator();
+        menu.addItem (100, "All sections");
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&sectionsButton),
+                            [safe = juce::Component::SafePointer<SynthPanel> (this)] (int r)
+                            {
+                                if (safe == nullptr || r == 0) return;
+                                if (r == 100) safe->setView (-1); else safe->toggleRow (r - 1);
+                            });
+    };
+    addAndMakeVisible (sectionsButton);
     rowOn.assign (rows.size(), true);
     if (const int mask = processor.synthRowsMask(); mask > 0)   // the sections left on last time
         for (int i = 0; i < (int) rows.size(); ++i) rowOn[(size_t) i] = (mask >> i) & 1;
@@ -800,12 +815,19 @@ void SynthPanel::timerCallback()
 void SynthPanel::changeListenerCallback (juce::ChangeBroadcaster*)
 {
     const auto& lab = processor.lab();
+    if (sawGenerating && ! lab.generating)   // the batch is done: the knobs are the player's again
+        for (auto* knob : knobs) knob->clearWritten();
+    sawGenerating = lab.generating;
     if (lab.tweakSerial == seenTweakSerial)
         return;
     seenTweakSerial = lab.tweakSerial;
     for (auto* knob : knobs)
         if (std::find (lab.tweakedParams.begin(), lab.tweakedParams.end(), knob->parameterIndex()) != lab.tweakedParams.end())
-            knob->flash();
+        {
+            const auto written = lab.writtenValues.find (knob->parameterIndex());
+            if (lab.generating && written != lab.writtenValues.end()) knob->showWritten (written->second);   // the engine is writing: the knob travels there
+            else knob->flash();
+        }
 }
 
 SynthPanel::~SynthPanel()
@@ -843,7 +865,10 @@ juce::Rectangle<int> SynthPanel::tourArea (const juce::String& what) const
 {
     juce::Rectangle<int> r;
     if (what == "tabs")
+    {
         for (const auto& b : viewButtons) r = r.isEmpty() ? b->getBounds() : r.getUnion (b->getBounds());
+        r = r.getUnion (sectionsButton.getBounds());
+    }
     else if (what == "knob")
         for (auto* k : knobs)
             if (k->isVisible() && k->getParentComponent() != nullptr && k->getParentComponent()->isVisible())
@@ -1064,8 +1089,13 @@ void SynthPanel::applyRows()
     for (int i = 0; i < (int) viewButtons.size(); ++i)
     {
         const int mode = i - 2;
-        viewButtons[(size_t) i]->setToggleState (mode == -2 ? viewMode == -2 : mode == -1 ? (viewMode != -2 && all) : isRowShown (mode), juce::dontSendNotification);
+        viewButtons[(size_t) i]->setToggleState (mode == -2 ? viewMode == -2 : (viewMode != -2), juce::dontSendNotification);
     }
+    int shownCount = 0;
+    for (int i = 0; i < (int) rows.size(); ++i) shownCount += isRowShown (i) ? 1 : 0;
+    const juce::String arrow (juce::CharPointer_UTF8 ("\xe2\x96\xbe"));   // a small menu arrow
+    sectionsButton.setButtonText ((all || viewMode == -2 ? "Sections" : "Sections " + juce::String (shownCount) + "/" + juce::String ((int) rows.size())) + " " + arrow);
+    sectionsButton.setEnabled (viewMode != -2);
     for (int i = 0; i < (int) rows.size(); ++i)
         rows[(size_t) i].container->setVisible (isRowShown (i));
     macroPage->setVisible (viewMode == -2);
@@ -1153,9 +1183,11 @@ void SynthPanel::resized()
     auto area = getLocalBounds();
     auto tabs = area.removeFromTop (22);
     tabs.removeFromLeft (kBand);
-    const int tabW = juce::jmin (96, tabs.getWidth() / juce::jmax (1, (int) viewButtons.size()));
+    const int tabW = juce::jmin (96, tabs.getWidth() / 4);
     for (auto& b : viewButtons)
         b->setBounds (tabs.removeFromLeft (tabW));
+    tabs.removeFromLeft (14);
+    sectionsButton.setBounds (tabs.removeFromLeft (112).reduced (0, 1));
     area.removeFromTop (6);
     macroPage->setBounds (area);
 

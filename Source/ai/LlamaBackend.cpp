@@ -103,7 +103,7 @@ bool LlamaBackend::ensureLoaded (juce::String& error, const std::function<bool()
     model = llama_model_load_from_file (modelFile.getFullPathName().toRawUTF8(), modelParams);
     if (model == nullptr)
     {
-        error = cancelled && cancelled() ? juce::String ("cancelled") : "could not load " + modelFile.getFileName();
+        error = cancelled && cancelled() ? juce::String ("canceled") : "could not load " + modelFile.getFileName();
         return false;
     }
 
@@ -240,7 +240,7 @@ bool LlamaBackend::chat (const juce::String& systemPrompt, const juce::String& u
     auto forgetCache = [&] { llama_memory_clear (memory, true); kvTokens.clear(); };
     for (int i = common; i < count; i += kBatchTokens)
     {
-        if (cancelled()) { error = "cancelled"; forgetCache(); return false; }
+        if (cancelled()) { error = "canceled"; forgetCache(); return false; }
         const int len = juce::jmin (kBatchTokens, count - i);
         if (llama_decode (ctx, llama_batch_get_one (tokens.data() + i, len)) != 0)
         {
@@ -279,7 +279,7 @@ bool LlamaBackend::chat (const juce::String& systemPrompt, const juce::String& u
 
     for (int produced = 0; produced < kMaxNewTokens; ++produced)
     {
-        if (cancelled()) { error = "cancelled"; ok = false; break; }
+        if (cancelled()) { error = "canceled"; ok = false; break; }
 
         const llama_token token = llama_sampler_sample (sampler, ctx, -1);
         if (llama_vocab_is_eog (vocab, token))

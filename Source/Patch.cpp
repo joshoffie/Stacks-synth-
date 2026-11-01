@@ -554,7 +554,7 @@ juce::String patchTips (const Patch& p)
     // The source of the tone
     const int waveA = (int) p.get (P::oscA_wave);
     if (waveA == kCustomWave && ! p.waves[0].isEmpty())
-        lines.add ("Oscillator A plays a designed wavetable, \"" + p.waves[0].name + "\". A Morph (" + num (p.get (P::oscA_morph)) + ") slides through its frames: move it to change the colour of the tone without changing anything else.");
+        lines.add ("Oscillator A plays a designed wavetable, \"" + p.waves[0].name + "\". A Morph (" + num (p.get (P::oscA_morph)) + ") slides through its frames: move it to change the color of the tone without changing anything else.");
     else
         lines.add ("Oscillator A is a " + waveNames()[juce::jlimit (0, waveNames().size() - 1, waveA)] + " table at A Morph " + num (p.get (P::oscA_morph)) + ". Try other waves in the A Wave menu for a different base character; Morph fine-tunes it.");
     const float fm = p.get (P::fm_amount);
@@ -606,7 +606,7 @@ juce::String patchTips (const Patch& p)
     const float detune = p.get (P::unison_detune);
     if (unison <= 1)        lines.add ("Unison is off. 3 voices with Detune around 15 makes it wide and thick; Spread puts the copies left and right.");
     else if (detune < 3.0f) lines.add ("Unison has " + juce::String (unison) + " voices but Detune is " + juce::String ((int) detune) + ", so the copies are identical and you hear no width yet. Raise Detune to 10-20 to hear it open up.");
-    else                    lines.add ("Unison (" + juce::String (unison) + " voices, Detune " + juce::String ((int) detune) + ") is what makes it wide. Pull Detune down for a cleaner, more in-tune centre; Spread (" + num (p.get (P::unison_spread)) + ") sets how far left and right.");
+    else                    lines.add ("Unison (" + juce::String (unison) + " voices, Detune " + juce::String ((int) detune) + ") is what makes it wide. Pull Detune down for a cleaner, more in-tune center; Spread (" + num (p.get (P::unison_spread)) + ") sets how far left and right.");
 
     // Space
     const float rev = p.get (P::reverb_mix), del = p.get (P::delay_mix);

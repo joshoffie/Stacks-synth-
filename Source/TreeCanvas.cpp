@@ -55,7 +55,7 @@ public:
             g.setColour (colours::accent);
             g.drawRoundedRectangle (face.expanded (3.0f), 6.0f, 2.0f);
         }
-        if ((hovered || selected) && n.cand >= 0)
+        if ((hovered || selected) && n.cand >= 0 && ! owner.processor.lab().generating)   // no mixing while a batch grows
         {
             const auto r = plusRect();
             g.setColour (selected ? colours::accent : juce::Colours::black.withAlpha (0.55f));
@@ -70,7 +70,7 @@ public:
     {
         if (node < 0 || node >= (int) owner.nodes.size()) return;
         const auto& n = owner.nodes[(size_t) node];
-        if (n.cand >= 0 && (e.mods.isCommandDown() || e.mods.isShiftDown() || plusRect().expanded (3.0f).contains (e.position)))
+        if (n.cand >= 0 && ! owner.processor.lab().generating && (e.mods.isCommandDown() || e.mods.isShiftDown() || plusRect().expanded (3.0f).contains (e.position)))
             owner.toggleSelected (n);
         else
             owner.hear (n);
@@ -283,7 +283,12 @@ void TreeCanvas::placeNodes()
         c.setBounds (ib);
         c.face = face.translated (-(float) ib.getX(), -(float) ib.getY());
         c.node = (int) i;
-        if (c.getTitle() != "Hear " + n.name) { c.setTitle ("Hear " + n.name); c.setTooltip (n.description.isNotEmpty() ? n.name + ": " + n.description : n.name); c.invalidateAccessibilityHandler(); }
+        if (c.getTitle() != "Hear " + n.name)
+        {
+            c.setTitle ("Hear " + n.name);
+            c.setTooltip ((n.description.isNotEmpty() ? n.name + ": " + n.description : n.name) + (n.cand >= 0 ? "\nClick to hear it. The + in the corner adds it to the mix for the next Grow." : juce::String()));
+            c.invalidateAccessibilityHandler();
+        }
         c.setVisible (ib.intersects (getLocalBounds().expanded (40)));
         c.repaint();
     }

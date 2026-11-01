@@ -34,9 +34,9 @@ Everything here runs on your Mac. Friends only ever receive the `.pkg` file.
    `--update-only` builds just the update (no engine file needed).
    `--skip-build` reuses the binaries already in `build.nosync`.
 
-   If notarising fails with "No Keychain password item found for profile",
+   If notarizing fails with "No Keychain password item found for profile",
    the stored credential is gone (a keychain clean-up, a new Mac). Store it
-   again with the `store-credentials` command further down, then notarise the
+   again with the `store-credentials` command further down, then notarize the
    packages that were already built:
 
    ```bash
@@ -81,7 +81,7 @@ every update; the new version replaces the old one. The update package only
 works on a Mac that has had the full installer once (it has no engine data). Then restart the DAW (or
 in Logic: Plug-in Manager → Reset & Rescan). Stacks appears under Hoffman Audio.
 
-Because the package is notarised and stapled, Gatekeeper opens it with a
+Because the package is notarized and stapled, Gatekeeper opens it with a
 double click; no right-click → Open, no "Open Anyway".
 
 ## What the parts mean

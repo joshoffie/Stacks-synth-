@@ -21,7 +21,7 @@ TunerView::TunerView (StacksAudioProcessor& p) : processor (p)
 {
     window.assign ((size_t) kWindow, 0.0f);
     autoTuneButton.setButtonText ("Auto-tune");
-    autoTuneButton.setTooltip ("Puts this patch in tune without changing its character: oscillators snap to octaves, fine tune is centred, "
+    autoTuneButton.setTooltip ("Puts this patch in tune without changing its character: oscillators snap to octaves, fine tune is centered, "
                                "pitch modulation is capped, and whatever the tuner still hears off is compensated.");
     autoTuneButton.onClick = [this]
     {

@@ -147,13 +147,15 @@ private:
     std::vector<std::unique_ptr<Section>> sections;
     std::vector<Row> rows;
     std::unique_ptr<ModulatorsPanel> modulators;
-    std::vector<std::unique_ptr<juce::TextButton>> viewButtons;
+    std::vector<std::unique_ptr<juce::TextButton>> viewButtons;   // MACROS and ALL
+    juce::TextButton sectionsButton { "Sections " + juce::String (juce::CharPointer_UTF8 ("\xe2\x96\xbe")) };               // which sections ALL shows
     std::unique_ptr<MacroPage> macroPage;
     int viewMode = -1;                                        // -2 = the macros page, otherwise the rows in `rowOn` share the space
     std::vector<bool> rowOn;                                  // one flag per row
     void applyRows();                                         // visibility, chips and layout from `rowOn`
     int assigningSource = -1;
     int seenTweakSerial = 0;
+    bool sawGenerating = false;   // written markers are cleared when a batch ends
     ParamKnob* delayTimeKnob = nullptr;                      // dims while the delay is tempo-synced
 };
 

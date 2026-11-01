@@ -120,7 +120,7 @@ inline bool isBipolarSource (int src) noexcept
  X(filter2_res,    "Res 2",        "FILTER 2",   Float,   0,     1,     0.1,   0,     "",   nullptr,            "second filter's resonance") \
  X(filter2_env,    "Env 2",        "FILTER 2",   Float,  -5,     5,     0,     0,     "oct",nullptr,            "filter envelope depth on cutoff 2, in octaves") \
  X(filter2_drive,  "Drive 2",      "FILTER 2",   Float,   1,     10,    1,     0,     "",   nullptr,            "second filter's input saturation (advanced)") \
- X(filter_model,   "Model",        "CHARACTER",  Choice,  0,     3,     0,     0,     "",   filterModelNames,   "filter character for both filters: Clean = exact; Warm = gentle input saturation; Diode = hot, resonant and aggressive; Smooth = soft state-variable") \
+ X(filter_model,   "Circuit",      "CHARACTER",  Choice,  0,     3,     0,     0,     "",   filterModelNames,   "filter character for both filters: Clean = exact; Warm = gentle input saturation; Diode = hot, resonant and aggressive; Smooth = soft state-variable") \
  X(char_drift,     "Drift",        "CHARACTER",  Float,   0,     1,     0.15,  0,     "",   nullptr,            "analog drift: each voice slowly wanders a few cents and the filter breathes, so chords shimmer like old hardware") \
  X(char_sat,       "Warmth",       "CHARACTER",  Float,   0,     1,     0.1,   0,     "",   nullptr,            "oscillator saturation before the filter: 0 clean, 0.3 warm, 0.7 thick") \
  X(char_env_var,   "Env Var",      "CHARACTER",  Float,   0,     1,     0.1,   0,     "",   nullptr,            "envelope times vary a little from note to note, like real circuits (advanced)") \

@@ -29,8 +29,8 @@ public:
                 tags = p->tags;
             }
             heartButton.setButtonText (heart());
-            heartButton.setTitle ("Favourite " + name);
-            heartButton.setTooltip ("Favourite");
+            heartButton.setTitle ("Favorite " + name);
+            heartButton.setTooltip ("Favorite");
             heartButton.onClick = [this] { if (onHeart) onHeart(); };
             addAndMakeVisible (heartButton);
             menuButton.setButtonText ("...");
@@ -153,7 +153,7 @@ LibraryPanel::LibraryPanel (StacksAudioProcessor& p) : processor (p)
     addAndMakeVisible (saveHereButton);
 
     favouritesOnly.setButtonText (heart());
-    favouritesOnly.setTooltip ("Show favourites only");
+    favouritesOnly.setTooltip ("Show favorites only");
     favouritesOnly.setClickingTogglesState (true);
     favouritesOnly.setColour (juce::TextButton::buttonOnColourId, colours::accent);
     favouritesOnly.onClick = [this] { showFavouritesOnly = favouritesOnly.getToggleState(); refresh(); };

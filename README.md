@@ -43,7 +43,7 @@ Every build copies the plug-in into `~/Library/Audio/Plug-Ins/Components`
 ## The panel
 
 Controls sit in fixed rows that follow the signal path, each row captioned and
-colour-coded (knob colour = row). The tabs above them switch between
+colour-coded (knob color = row). The tabs above them switch between
 **MACROS** (six big knobs every sound answers: Brightness, Movement, Grit,
 Space, Width, Length, each wired per patch by the model or by sensible
 defaults), **ALL** (every row at once, scaled to fit) and one row at a time,
@@ -89,7 +89,7 @@ enlarged to fill the panel:
      types; more: pre-delay, low cut, high cut, tail modulation, octave-up
      shimmer amount, width.
 
-Knobs that a modulator drives show a ring in the modulator's colour and a live
+Knobs that a modulator drives show a ring in the modulator's color and a live
 marker that follows the most recently played note, so you can see an LFO
 moving a parameter while you hold a key.
 
@@ -113,7 +113,7 @@ sources (velocity, key, mod wheel, aftertouch, per-note random). Each LFO has a
 display you can draw in (click adds a point, drag moves, double-click removes;
 right-click resets), shape presets, rate or tempo sync, phase, and Free /
 Note (retrigger) mode. To route a modulator: press **Assign >**, then click any
-knob - including effect knobs. The knob shows a ring in the modulator's colour;
+knob - including effect knobs. The knob shows a ring in the modulator's color;
 the modulator's tab lists its targets with depth sliders and an × to remove.
 "Pitch / Amp / Pan" adds the targets that aren't knobs. You can also drag a
 modulator's tab straight onto a knob, and drag a knob's ring up or down to
@@ -177,8 +177,8 @@ offset layer. Off is the preset exactly. It saves with the preset.
 The **STACKS** tab shows the loop as a plant: the sound you're playing is the
 seed in the middle; AI ideas grow above it, random variations below. Click a
 leaf to hear it, drag it outward for wilder children, right-click it to plant
-it (it becomes the seed and a new generation grows) or to favourite it.
-Right-click the seed for fresh ideas or to favourite what you're hearing.
+it (it becomes the seed and a new generation grows) or to favorite it.
+Right-click the seed for fresh ideas or to favorite what you're hearing.
 The **LIST** tab is the same batch with full descriptions. Every finished
 generation is also saved under `~/Library/Application Support/Stacks/history`.
 
@@ -199,7 +199,7 @@ written so far; the Garden draws the same progress as a ring around the seed.
 2. Click a leaf or card to load it and play. **Save** (the button, or a
    right-click on a leaf, the seed or a card) stores what you're hearing into a
    library folder of your choice. Hearts live in the library: the ♥ on a saved
-   preset marks it a favourite, and the library's ♥ filter shows only those.
+   preset marks it a favorite, and the library's ♥ filter shows only those.
 3. The direction text also steers Evolve. With an AI engine, the model first
    writes itself a short *sound brief* about what the direction should sound
    like, then designs from it.
@@ -243,7 +243,7 @@ the Lab) works two ways. A short recording (a one-shot, a note from another
 synth, a voice) is *recreated*: Stacks measures its pitch, envelope, spectrum
 over time, noise, width and vibrato, loads an imitation patch at once (the
 measured spectrum becomes the Custom table) and evolves it with the model. A
-whole track (over 20 seconds) is analysed for tempo, key, where the mix has
+whole track (over 20 seconds) is analyzed for tempo, key, where the mix has
 room, brightness, density and dynamics; the resulting brief goes into the
 prompt box and a fresh batch is designed to fit the song, with auditions in
 its key. The model never hears audio; the analysis is the ears, the model the
@@ -265,8 +265,8 @@ missing files are added, so edits and deletions stick); `StacksTests
 --factory` rebuilds it and `--retouch` re-applies the prompt cues. **Save** asks for a folder and a name
 and stores the sound exactly as it is; if you edited a preset you loaded, it
 offers *Save as new* or *Overwrite*. The ♥ on a library row is the only
-favourite: a flag on that saved preset, which the ♥ filter shows. To grow from
-a favourite, load it and press Evolve. A patch's "..." moves it to another
+favorite: a flag on that saved preset, which the ♥ filter shows. To grow from
+a favorite, load it and press Evolve. A patch's "..." moves it to another
 folder, edits its tags or trashes it.
 
 The engine choice is stored in `~/Library/Application Support/Stacks/`, next to
@@ -332,8 +332,8 @@ mentions what runs underneath.
 Packaging/build-installer.sh --model ~/path/to/Qwen3-4B-Q4_K_M.gguf
 ```
 
-Without notarisation a downloaded package opens only through System Settings >
-Privacy & Security > Open Anyway. To notarise, store an app-specific password
+Without notarization a downloaded package opens only through System Settings >
+Privacy & Security > Open Anyway. To notarize, store an app-specific password
 once (`xcrun notarytool store-credentials stacks --apple-id ... --team-id
 P6PE9BPQ2R`) and pass `--notary-profile stacks`; the script submits, waits and
 staples, after which the package opens with a double click on any Mac.
@@ -355,7 +355,7 @@ Source/
   PatchGenerator.* generators: Random (archetypes + crossover/mutation)
   ai/LlmBackend.h  interface for "a model that streams a chat reply"; OllamaBackend.cpp speaks HTTP to Ollama
   ai/LlamaBackend.* the same interface on top of llama.cpp (Metal), loads a GGUF inside the plug-in
-  ai/ModelManager.* model catalogue, Ollama-copy detection, background downloads
+  ai/ModelManager.* model catalog, Ollama-copy detection, background downloads
   ai/LlmPatchGenerator.* prompt + GBNF grammar built from the parameter table, streaming JSON parser, fallback to Random
   PluginProcessor.* audio engine, master FX, lab state, engine selection, background generation
   PluginEditor.*   window: header, knob panel, AI lab, keyboard

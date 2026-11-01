@@ -116,6 +116,12 @@ HomeView::HomeView (StacksAudioProcessor& p) : processor (p), lifeSwitch (p.apvt
     addChildComponent (backButton);
     addChildComponent (lifeSwitch);
     addChildComponent (tree);
+    mixLabel.setFont (StacksLookAndFeel::font (12.5f));
+    mixLabel.setColour (juce::Label::textColourId, colours::text);
+    addChildComponent (mixLabel);
+    clearMixButton.setTooltip ("Empty the mix");
+    clearMixButton.onClick = [this] { tree.clearSelection(); };
+    addChildComponent (clearMixButton);
     tree.onSelectionChanged = [this] { refresh(); };
 
     saveButton.setTooltip ("Save the sound you are hearing: pick a folder and a name");
@@ -249,6 +255,7 @@ void HomeView::pick (const juce::String& kind)
     category = kind;
     note.clear();
     pickNote.clear();
+    processor.startFreshTree();   // a new sound: its tree starts here
     growthSeed = (int) (juce::Time::getMillisecondCounter() & 0x7fff) + 1;
     anim = 0.0f;
     falling.clear();
@@ -287,11 +294,17 @@ void HomeView::refresh()
 {
     const auto& lab = processor.lab();
     if (lab.generating || processor.isDownloading())
+    {
         stage = Stage::growing;   // a download before the first batch shows as growing, with its progress
+        pickNote.clear();
+    }
     else if (stage == Stage::growing)
     {
         stage = lab.candidates.empty() ? Stage::pick : Stage::results;
-        if (stage == Stage::pick) pickNote = lab.status;   // nothing came: say what happened
+        // nothing came: say why, if the status says something useful
+        const auto status = lab.status.toLowerCase();
+        pickNote = stage == Stage::pick && (status.contains ("fail") || status.contains ("couldn't") || status.contains ("cancel") || status.contains ("stopp") || status.contains ("didn't"))
+                 ? lab.status : juce::String();
     }
     else if (stage == Stage::results && lab.candidates.empty())
         stage = Stage::pick;
@@ -301,6 +314,12 @@ void HomeView::refresh()
     if (stage != Stage::pick) tree.refresh();
     const bool results = stage == Stage::results;
     const int mixed = (int) tree.selection().size();
+    juce::StringArray mixNames;
+    for (const auto& ref : tree.selection()) if (auto* p = processor.patchAt (ref.first, ref.second)) mixNames.add (p->name);
+    mixLabel.setText (mixed == 1 ? "In the mix: " + mixNames.joinIntoString (" + ") + ".  Add another with the + on a block, then Grow makes five sounds that take something from each."
+                                 : "In the mix: " + mixNames.joinIntoString (" + ") + ".  Grow makes five sounds that take something from each of them.", juce::dontSendNotification);
+    mixLabel.setVisible (results && mixed > 0);
+    clearMixButton.setVisible (results && mixed > 0);
     growButton.setVisible (results);
     growButton.setEnabled (results && (lab.auditioned >= 0 || mixed > 0));
     growButton.setButtonText (mixed > 1 ? "Grow from these " + juce::String (mixed) : "Grow from this one");
@@ -454,6 +473,7 @@ void HomeView::resized()
 
     if (stage == Stage::pick)
     {
+        if (pickNote.isNotEmpty()) r.removeFromTop (24);   // the note under the heading has its own line
         const int cols = r.getWidth() > 900 ? 4 : 2, rows = ((int) tiles.size() + cols - 1) / cols;
         const int gap = 14;
         const int tileW = (r.getWidth() - gap * (cols - 1)) / cols;
@@ -468,6 +488,13 @@ void HomeView::resized()
     if (stage == Stage::results)
     {
         auto bottom = r.removeFromBottom (40);
+        if (mixLabel.isVisible())
+        {
+            auto tray = r.removeFromBottom (26);
+            clearMixButton.setBounds (tray.removeFromRight (64).reduced (0, 2));
+            tray.removeFromRight (8);
+            mixLabel.setBounds (tray);
+        }
         openSynthButton.setBounds (bottom.removeFromRight (150));
         bottom.removeFromRight (10);
         saveButton.setBounds (bottom.removeFromRight (110));

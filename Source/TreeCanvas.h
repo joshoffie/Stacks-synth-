@@ -77,7 +77,7 @@ private:
     float anim = 0.0f;
     int knownGenerations = -1, knownCandidates = -1;
     bool centredWithSize = false;   // the first centring happens once the canvas has a size
-    juce::TextButton centreButton { "Centre" };
+    juce::TextButton centreButton { "Center" };
 };
 
 } // namespace stacks

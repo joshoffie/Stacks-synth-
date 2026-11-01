@@ -11,7 +11,7 @@
 #
 # Signing uses the Developer ID certificates in the login keychain. Pass
 # --notary-profile with a profile made by `xcrun notarytool store-credentials`
-# to notarise and staple the package so it opens on another Mac with no
+# to notarize and staple the package so it opens on another Mac with no
 # Gatekeeper detour. Without it the package is signed but not notarised.
 set -eu
 
@@ -107,12 +107,12 @@ build_product() {   # $1 distribution file, $2 output name
                  --sign "$PKG_ID" --timestamp "$pkg" >/dev/null
     pkgutil --check-signature "$pkg" | sed -n 2p
     if [ -n "$PROFILE" ]; then
-        echo "   notarising (a few minutes)"
+        echo "   notarizing (a few minutes)"
         xcrun notarytool submit "$pkg" --keychain-profile "$PROFILE" --wait | grep -E "status:|id:" | tail -2
         xcrun stapler staple "$pkg" >/dev/null
         spctl -a -vv -t install "$pkg" 2>&1 | sed -n 2p
     else
-        echo "   not notarised: pass --notary-profile NAME to notarise and staple"
+        echo "   not notarized: pass --notary-profile NAME to notarize and staple"
     fi
     mv -f "$pkg" "$OUT/$2"
     echo "   $OUT/$2 ($(du -h "$OUT/$2" | cut -f1))"

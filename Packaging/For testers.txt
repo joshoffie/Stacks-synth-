@@ -39,13 +39,19 @@ NEW IN 0.1.2 (from your notes)
 - Close, Medium and Far are different now. Far designs new sounds around what
   made the original itself instead of nudging its knobs. Tell us if Far feels
   like new ideas that are still related.
-- Life (Off to 5) on the Home screen and in the header lets the sound slowly
-  wander as you play. Off is the preset exactly.
+- Life lets the sound slowly wander as you play. Click Life in the header
+  for Off to 5 and a line on what it does; it's on the Home screen too, and
+  it saves with the preset. Off is the preset exactly.
 - The window scales. Drag a corner, or pick a size in the gear menu.
 - Stop ends a batch early. Esc or the cross closes the guide.
-- On the Synth page the sections are switches: turn some off and the rest
-  grow to fill the space.
-- You can watch the settings being written while a sound grows.
+- The Synth page has MACROS and ALL. Next to them, Sections picks which
+  parts of ALL show; the ones left on grow to fill the space.
+- While a sound grows, the knobs on the Synth page travel to each setting as
+  the engine writes it, so you can watch it being built.
+- A saved preset carries its tree. Open it later and every run that led to it
+  is back. Picking a new kind of sound on Home starts a fresh tree.
+- While blocks are in the mix, a line under the tree says which ones and
+  what Grow will do with them.
 
 PLEASE TELL US
 - Did the installer open with a double-click, with no warning beyond the

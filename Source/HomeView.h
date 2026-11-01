@@ -74,6 +74,8 @@ private:
     juce::TextButton closeButton { "Close" }, mediumButton { "Medium" }, farButton { "Far" };
     LifeSwitch lifeSwitch;
     TreeCanvas tree;   // every generation as a pannable family tree; the newest batch drops in at the right
+    juce::Label mixLabel;                               // "In the mix: A + B" while blocks are selected
+    juce::TextButton clearMixButton { "Clear" };
     float variation = 0.55f;
     float anim = 0.0f;
     int growthSeed = 1;

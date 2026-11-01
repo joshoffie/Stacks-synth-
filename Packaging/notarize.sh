@@ -1,5 +1,5 @@
 #!/bin/sh
-# Notarises and staples packages that were built without --notary-profile
+# Notarizes and staples packages that were built without --notary-profile
 # (for instance while the keychain was locked):
 #   Packaging/notarize.sh dist/Stacks-0.1.2.pkg dist/Stacks-0.1.2-update.pkg
 set -eu

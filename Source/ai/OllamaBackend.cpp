@@ -257,7 +257,7 @@ bool OllamaBackend::chat (const juce::String& systemPrompt, const juce::String& 
         {
             if (shouldCancel && shouldCancel())
             {
-                streamError = "cancelled";
+                streamError = "canceled";
                 return false;
             }
             if (n > 0)

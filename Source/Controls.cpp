@@ -361,7 +361,7 @@ void ParamKnob::updateCaption()
     juce::Colour colour;
     if (showingValue || flashing)
     {
-        auto text = slider.getTextFromValue (slider.getValue());
+        auto text = slider.getTextFromValue (flashing && writtenNorm >= 0.0f && ! showingValue ? (double) writtenReal : slider.getValue());
         const juce::String unit (s.unit);
         if (unit.isNotEmpty() && ! text.endsWith (unit) && ! text.endsWithChar ('k') && ! text.endsWith ("ms"))
             text << " " << unit;
@@ -384,8 +384,42 @@ void ParamKnob::flash()
     startTimer (2200);
 }
 
+void ParamKnob::showWritten (float realValue)
+{
+    writtenReal = juce::jlimit ((float) slider.getMinimum(), (float) slider.getMaximum(), realValue);
+    const float target = (float) slider.valueToProportionOfLength ((double) writtenReal);
+    writtenFromNorm = writtenNorm >= 0.0f ? writtenNorm : (float) slider.valueToProportionOfLength (slider.getValue());
+    writtenNorm = target;
+    writtenStartMs = juce::Time::getMillisecondCounterHiRes();
+    flashing = true;
+    updateCaption();
+    startTimerHz (30);
+    repaint();
+}
+
+void ParamKnob::clearWritten()
+{
+    if (writtenNorm < 0.0f) return;
+    writtenNorm = -1.0f;
+    flashing = false;
+    stopTimer();
+    updateCaption();
+    repaint();
+}
+
 void ParamKnob::timerCallback()
 {
+    if (writtenNorm >= 0.0f)
+    {
+        const double age = juce::Time::getMillisecondCounterHiRes() - writtenStartMs;
+        if (age < 420.0) { repaint(); return; }          // the marker is still travelling
+        if (age < 2200.0) return;                         // the caption holds the new value for a moment
+        flashing = false;
+        updateCaption();
+        stopTimer();
+        repaint();
+        return;
+    }
     stopTimer();
     flashing = false;
     updateCaption();
@@ -481,6 +515,27 @@ void ParamKnob::paint (juce::Graphics& g)
         // a dot at the knob's own value, so the ring reads as "around here"
         const float a = rotary.startAngleRadians + v0 * span;
         g.fillEllipse (centre.x + ringRadius * std::sin (a) - 1.6f, centre.y - ringRadius * std::cos (a) - 1.6f, 3.2f, 3.2f);
+    }
+
+    // The engine's value in progress: a bright arc from the knob's value to the written one,
+    // its dot travelling there, held until the batch is done.
+    if (writtenNorm >= 0.0f)
+    {
+        const float t = juce::jlimit (0.0f, 1.0f, (float) ((juce::Time::getMillisecondCounterHiRes() - writtenStartMs) / 420.0));
+        const float eased = 1.0f - (1.0f - t) * (1.0f - t);
+        const float at = writtenFromNorm + (writtenNorm - writtenFromNorm) * eased;
+        const float outer = ringRadiusFor (juce::jmax (0, (int) modulations.size() - 1)) + (modulations.empty() ? 0.0f : 3.0f);
+        const float a0 = rotary.startAngleRadians + v0 * span;
+        const float a1 = rotary.startAngleRadians + juce::jlimit (0.0f, 1.0f, at) * span;
+        juce::Path sweep;
+        sweep.addCentredArc (centre.x, centre.y, outer, outer, 0.0f, juce::jmin (a0, a1), juce::jmax (a0, a1), true);
+        g.setColour (colours::accent.withAlpha (0.9f));
+        g.strokePath (sweep, juce::PathStrokeType (2.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        const float glow = 1.0f + 2.0f * (1.0f - t);
+        g.setColour (colours::accent.withAlpha (0.35f));
+        g.fillEllipse (centre.x + outer * std::sin (a1) - 3.2f * glow, centre.y - outer * std::cos (a1) - 3.2f * glow, 6.4f * glow, 6.4f * glow);
+        g.setColour (colours::accent);
+        g.fillEllipse (centre.x + outer * std::sin (a1) - 3.0f, centre.y - outer * std::cos (a1) - 3.0f, 6.0f, 6.0f);
     }
 
     // Live marker: where the modulation has the value right now.
@@ -608,7 +663,7 @@ LifeSwitch::LifeSwitch (juce::AudioProcessorValueTreeState& state, bool isCompac
     caption.setFont (StacksLookAndFeel::font (11.0f, true));
     caption.setColour (juce::Label::textColourId, colours::muted);
     caption.setJustificationType (juce::Justification::centredRight);
-    caption.setTooltip ("Life: the sound slowly wanders as it plays and nudges with every note. Off is the preset exactly.");
+    caption.setTooltip ("Life: the sound slowly wanders as you play and nudges a little with every note, so no two bars are quite the same. Off is the preset exactly; 1 is barely there, 5 is a lot.");
     if (! compact) addAndMakeVisible (caption);
     const int count = compact ? 1 : Life::kLevels + 1;
     for (int i = 0; i < count; ++i)
@@ -619,13 +674,22 @@ LifeSwitch::LifeSwitch (juce::AudioProcessorValueTreeState& state, bool isCompac
         b->setMouseClickGrabsKeyboardFocus (false);
         b->setColour (juce::TextButton::buttonOnColourId, colours::accent);
         b->setColour (juce::TextButton::textColourOnId, juce::Colours::black);
-        b->setTooltip (compact ? "Life on or off. Pick the amount (1 to 5) on the Home screen or the Voice card."
+        b->setTooltip (compact ? "Life: the sound slowly wanders as you play and nudges a little with every note, so no two bars are quite the same. Off is the preset exactly. Click to pick an amount, 1 (barely there) to 5 (a lot)."
                                : i == 0 ? "Off: the preset exactly" : "Life " + juce::String (i) + (i == 1 ? ": barely there" : i == 5 ? ": a lot" : ""));
         if (compact)
         {
             styleAsTab (*b);                         // the header's quiet look; lit when Life is on
             b->getProperties().set ("bright", true);
-            b->onClick = [this] { setLevel (level() > 0 ? 0 : lastLevel); };
+            b->onClick = [this]
+            {
+                juce::PopupMenu menu;
+                menu.addSectionHeader ("Life: the sound slowly wanders as you play");
+                menu.addItem (1, "Off: the preset exactly", true, level() == 0);
+                static const char* const names[] = { "1  barely there", "2  gentle", "3  noticeable", "4  restless", "5  a lot" };
+                for (int l = 1; l <= Life::kLevels; ++l) menu.addItem (l + 1, names[l - 1], true, level() == l);
+                menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (buttons[0].get()),
+                                    [safe = juce::Component::SafePointer<LifeSwitch> (this)] (int r) { if (safe != nullptr && r > 0) safe->setLevel (r - 1); });
+            };
         }
         else b->onClick = [this, i] { setLevel (i); };
         addAndMakeVisible (*b);

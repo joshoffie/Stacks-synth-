@@ -178,7 +178,7 @@ void StacksAudioProcessorEditor::maybeStartTour()
     else if (! showingHome && ! synthProcessor.tourSeen ("synth"))
     {
         screen = "synth";
-        steps = { { in (synthPanel, synthPanel.tourArea ("tabs")), "Switch sections on and off. The ones on share the space. All shows everything." },
+        steps = { { in (synthPanel, synthPanel.tourArea ("tabs")), "All shows every section. Sections hides the ones you don't need; the rest grow to fill the space." },
                   { in (synthPanel, synthPanel.tourArea ("knob")), "Drag a knob up or down. Hover over it to see its value." },
                   { in (labPanel, labPanel.tourArea ("evolve")), "Evolve makes five new sounds from the one you hear now." },
                   { in (labPanel, labPanel.tourArea ("library")), "Library holds every preset and the sounds you save." },
@@ -446,7 +446,7 @@ void StacksAudioProcessorEditor::renderScreens (const juce::File& directory, flo
     for (int r = 0; r < synthPanel.numRows(); ++r)
     {
         synthPanel.setView (r);
-        shoot ("synth - " + juce::String (r < 4 ? rowNames[r] : "row " + juce::String (r)));
+        shoot ("synth - only " + juce::String (r < 4 ? rowNames[r] : "row " + juce::String (r)));   // ALL with one section left on
     }
     if (auto* mods = synthPanel.modulatorsPanel())
     {
@@ -460,8 +460,7 @@ void StacksAudioProcessorEditor::renderScreens (const juce::File& directory, flo
         mods->showTab (0);
     }
     synthPanel.setView (-1);
-    labPanel.showView (LabPanel::View::garden);  shoot ("lab - stacks");
-    labPanel.showView (LabPanel::View::tree);    shoot ("lab - history");
+    labPanel.showView (LabPanel::View::tree);    shoot ("lab - tree");
     labPanel.showView (LabPanel::View::ideas);   shoot ("lab - list");
     labPanel.showView (LabPanel::View::library); shoot ("lab - library");
     labPanel.showView (LabPanel::View::garden);

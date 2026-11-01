@@ -41,6 +41,7 @@ struct LabState
     std::vector<int> tweakedParams;             // what the last tweak moved
     juce::String progressDetail;                // what the model is doing right now
     juce::StringArray liveWrites;               // the last settings written for the sound in progress, as shown text ("Cutoff 1.2 kHz")
+    std::map<int, float> writtenValues;         // parameter index -> value the engine just wrote, so knobs can move to it
 };
 
 enum class EngineKind { Random, Ollama, Builtin };
@@ -140,7 +141,7 @@ public:
     static juce::File historyRoot();                       // auto-saved generations, outside the library
     juce::File libraryFolder() const                       { return currentFolder; }
     void setLibraryFolder (const juce::File&);
-    juce::File savePatchToLibrary (Patch&, const juce::File& folder); // sets patch.filePath, returns the file
+    juce::File savePatchToLibrary (Patch&, const juce::File& folder, const juce::var& tree = juce::var()); // sets patch.filePath, returns the file; the tree is saved inside the preset
     juce::File savePreset (const juce::String& name, const juce::File& folder, bool asNewFile = false); // the playing sound, exactly as it is
     bool currentIsEdited() const;                          // knobs differ from the loaded preset file
     std::vector<juce::File> libraryFolders() const;        // root first, then every subfolder
@@ -148,7 +149,8 @@ public:
     void favouriteCurrent();                               // flip the heart on the playing sound
     bool currentIsFavourite() const                        { return patchFavourite; }
     void toggleFavouriteFile (const juce::File&);          // a saved patch: flip the heart in its file
-    bool loadLibraryPatch (const juce::File&);             // audition a saved patch
+    bool loadLibraryPatch (const juce::File&);             // audition a saved patch; its tree (the runs that made it) comes with it
+    void startFreshTree();                                 // a new sound starts with an empty tree
 
     Patch currentPatch() const;                            // what is loaded right now, including knob tweaks
     void applyPatch (const Patch&);
@@ -299,6 +301,8 @@ private:
     void attachStateListeners();
     void applyGlobalModulation();                          // modulated copy of the params for the effects
     juce::String labToJson() const;
+    juce::var treeToVar() const;                 // the family tree alone: generations, parents, the current batch
+    void treeFromVar (const juce::var&);
     void labFromJson (const juce::String&);
     void processEffects (juce::AudioBuffer<float>&);
 

@@ -297,7 +297,7 @@ LabPanel::LabPanel (StacksAudioProcessor& p) : processor (p), library (p), garde
     };
     addAndMakeVisible (evolveButton);
 
-    fromAudioButton.setTooltip ("Pick an audio file (or drop one anywhere on this panel). A short recording is recreated: Stacks measures its pitch, envelope, spectrum, noise, width and vibrato, loads an imitation at once and evolves it. A whole track (over 20 s) is analysed for tempo, key and where the mix has room, and a fresh batch is designed to fit it.");
+    fromAudioButton.setTooltip ("Pick an audio file (or drop one anywhere on this panel). A short recording is recreated: Stacks measures its pitch, envelope, spectrum, noise, width and vibrato, loads an imitation at once and evolves it. A whole track (over 20 s) is analyzed for tempo, key and where the mix has room, and a fresh batch is designed to fit it.");
     fromAudioButton.onClick = [this]
     {
         audioChooser = std::make_unique<juce::FileChooser> ("Recreate a recording", juce::File::getSpecialLocation (juce::File::userHomeDirectory),

@@ -77,6 +77,8 @@ public:
     void clearLiveValue();
     void setAssignMode (bool on, juce::Colour sourceColour);
     void flash();                                      // show the value in the accent colour for a moment (a tweak moved it)
+    void showWritten (float realValue);                // the engine just wrote this value: the marker travels to it and the caption shows it
+    void clearWritten();
     int parameterIndex() const { return paramIndex; }
 
     void resized() override;
@@ -129,6 +131,8 @@ private:
     int paramIndex = -1;
     bool compact = false, large = false, assignMode = false, dragOver = false, showingValue = false, flashing = false;
     float liveNorm = -1.0f;                          // -1 = none
+    float writtenNorm = -1.0f, writtenFromNorm = 0.0f, writtenReal = 0.0f;   // the engine's value in progress; -1 = none
+    double writtenStartMs = 0.0;
     juce::Colour assignColour, dragColour;
 };
 

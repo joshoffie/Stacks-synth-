@@ -8,10 +8,10 @@ STACKS UI KIT
    and SAME SIZE, and put it back in the folder.
 3. "Skin spec.md" lists every file with its size, how knobs (filmstrips) and
    stretchable pieces (nine-slice) work, and which pieces are painted white
-   because the app colours them.
+   because the app colors them.
 4. Send the whole "skin" folder back when you're done, or a few files at a
    time: anything missing keeps the current look.
 
-The knobs: every knob is the same grey body (knob.png). The coloured ring and
-pointer colour come from the app, per section. That is why there is one knob
+The knobs: every knob is the same gray body (knob.png). The colored ring and
+pointer color come from the app, per section. That is why there is one knob
 file and it is grey. Want a different body per section? See "Skin spec.md".

@@ -308,6 +308,7 @@ namespace
             const auto saved = processor->savePreset ("Smoke Test", mine, true);
             check (saved.existsAsFile(), "saved to " + saved.getFullPathName());
             check (saved.existsAsFile() && processor->loadLibraryPatch (saved), "loaded back");
+            check (saved.loadFileAsString().contains ("\"tree\"") && processor->lab().candidates.size() == 5, "its tree came back with it (" + juce::String ((int) processor->lab().candidates.size()) + " in the last run)");
             saved.deleteFile();
         }
         processor.reset();
@@ -320,7 +321,7 @@ int main (int argc, char** argv)
 {
     if (argc < 2 || (argc == 2 && juce::String (argv[1]) != "--smoke"))
     {
-        std::printf ("usage: StacksUiKit <output directory> [scale] [preset.json]   (screens labelled with skin file names)\n"
+        std::printf ("usage: StacksUiKit <output directory> [scale] [preset.json]   (screens labeled with skin file names)\n"
                      "       StacksUiKit --export-skin <output directory> [scale]\n"
                      "       StacksUiKit --plain <output directory> [scale]  (screens without the file-name labels)\n"
                      "       StacksUiKit --tree-shot <output directory> [--fake] [--annotate]   (screens with a grown family tree)\n"
