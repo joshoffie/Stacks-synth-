@@ -21,6 +21,7 @@ namespace
     // Structural distance a grown child must keep, by mode (tuned with `StacksTests --bench`).
     constexpr int kMediumFromParent = 3, kMediumBetweenSiblings = 2;
     constexpr int kFarFromParent = 6,    kFarBetweenSiblings = 4;
+    constexpr int kFreshBetweenSiblings = 3;   // a fresh batch: different engines, not one design with other numbers
 
     // The parent a child is closest to (Far mode has no named parent).
     const Patch* parentFor (const GenerationRequest& req, const Patch& child, const Patch* fallback)
@@ -199,6 +200,39 @@ namespace
                 break;
             }
         }
+        return s;
+    }
+
+    // One engine per patch in a fresh batch. Asked for five plucks with nothing
+    // more than "pluck" to go on, a small model writes the same pluck five
+    // times; handed a different recipe per patch it does not.
+    juce::String freshDirections (const GenerationRequest& req)
+    {
+        static const char* const engines[] = {
+            "two Saw-family tables an octave apart: oscB_coarse -12 with oscB_level 0.5-0.7 and oscB_fine 4-9, unison_voices 3-5 with unison_detune 12-25, Velocity > Cutoff",
+            "FM: oscB_wave Sine as a silent modulator (oscB_level 0.3-0.5, oscB_coarse 7, 12 or 19), fm_amount 0.3-0.7, Mod Env > FM B>A 0.4-0.6 with menv_decay 0.1-0.4, no unison",
+            "a Pulse table with PWM: oscA_warp PWM with oscA_warp_amt 0.5, LFO 1 Triangle at 0.2-0.5 Hz > A Warp Amt 0.4, sub_level 0.3-0.5, oscB_level 0",
+            "Formant or Glass table with LFO 1 slow on A Morph (0.05-0.2 Hz, 0.3-0.5), filter_type Notch or BP12 with filter_res 0.3-0.5, chorus_mode Ensemble",
+            "three layers: A, oscB a different family at oscB_coarse 12 (oscB_level 0.3-0.5), sub_level 0.4-0.7; a resonant low-pass (filter_res 0.4-0.6) with a long filter envelope",
+            "noise and body: noise_level 0.2-0.4 with Mod Env > Noise 0.6-0.8 (menv_decay 0.03-0.08), a Sine or Triangle A, filter_type BP12 or BP24",
+            "Organ or a hollow table through Tube distortion (dist_mode Tube, dist_mix 0.3-0.5) and tape_amount 0.3-0.6, dry (reverb_mix under 0.15), Key > Cutoff 0.3",
+            "wavefolded: Fold table or oscA_warp Fold with oscA_warp_amt 0.4-0.7, filter_drive 2-4, Mod Env > A Warp Amt 0.4-0.6, reverb_type Plate",
+            "rhythmic: LFO 1 Square or Random with lfo1_sync 1/8 or 1/16 on Cutoff or Amp 0.4-0.6, delay_mode Ping-Pong with delay_sync 1/8D and delay_mix 0.25-0.4",
+            "wide and glassy: unison_voices 6 with unison_detune 20-30, hyper_amount 0.4-0.6, reverb_type Shimmer with reverb_shimmer 0.4-0.6, a Glass or sparse designed table",
+            "hard sync: oscA_wave Sync, or oscA_warp Sync with oscA_warp_amt 0.3-0.6 swept by Filter Env > A Warp Amt 0.5, filter_type LP24, filter_env 3-4",
+            "a vocal reading: Formant table with oscA_morph swept by Mod Wheel 0.6 and LFO 2 at 0.1 Hz (0.2), filter_type Formant with filter_res 0.4, chorus_mode Dimension",
+        };
+        static const char* const kinds[] = { "Pad", "Pluck", "Bass", "Keys", "Lead", "Bell", "Texture", "Drone" };
+        juce::Random rng ((juce::int64) juce::Time::getHighResolutionTicks());
+        std::vector<const char*> order (std::begin (engines), std::end (engines));
+        for (int i = (int) order.size() - 1; i > 0; --i)
+            std::swap (order[(size_t) i], order[(size_t) rng.nextInt (i + 1)]);
+        const bool hinted = req.hint.trim().isNotEmpty();
+        const int kindOffset = rng.nextInt (8);
+        juce::String s;
+        for (int i = 0; i < req.count; ++i)
+            s << "  Patch " << (i + 1) << (hinted ? juce::String() : juce::String (" (a ") + kinds[(kindOffset + i) % 8] + ")")
+              << ": " << order[(size_t) i % order.size()] << (hinted ? " - still the kind of sound the direction asks for" : "") << ".\n";
         return s;
     }
 
@@ -444,12 +478,18 @@ juce::String LlmPatchGenerator::systemPrompt (bool designWaves)
       << "Effects: reverb_type Shimmer with reverb_shimmer 0.3-0.7 gives a glowing octave-up halo (pads, textures); Hall for long tails, Room for short; "
       << "chorus_mode Ensemble is a lush string-machine, Dimension is wide and subtle, Flanger needs chorus_feedback 0.4-0.8; "
       << "delay_mode Ping-Pong with delay_sync 1/8 or 1/8D suits plucks and leads, Tape is dark and wobbly.\n"
-      << "Musical guidance: pads want aenv_attack 0.3-2, long release, unison 3-4, chorus and reverb; "
-      << "plucks want aenv_decay 0.1-0.6, aenv_sustain near 0, filter_env 2-4 with fenv_decay 0.05-0.4; "
-      << "basses want sub_level, filter_cutoff 80-800, oscA_coarse -12; "
-      << "bells want fm_amount 0.3-0.8 with oscB_coarse 7, 12, 19 or 24 (B as a silent modulator) and aenv_sustain 0; "
-      << "leads want glide 0.03-0.15 and vibrato; "
-      << "textures want Grit, Formant or Fold, some noise, LFOs routed to Morph A or FM, and long delay feedback.\n"
+      << "What makes a sound finished rather than a sketch: at least two sources (oscB at an octave or a fifth with oscB_level 0.3-0.7, or FM, sub_level or noise_level beside A) - one bare oscillator is thin; "
+      << "pads and leads want unison_voices 3-6 with unison_detune 12-30 and unison_spread 0.5-0.9; every sound a Velocity connection (Cutoff 0.2-0.5, or Amp 0.3-0.5) so playing it matters; "
+      << "the filter envelope positive and decisive on plucks, keys and basses (filter_env 2-4, fenv_decay 0.1-0.5, fenv_sustain 0-0.3), gentle or negative only on pads; "
+      << "glide only on leads and basses; char_drift 0.1-0.3 and char_sat 0.1-0.3 for analog life; and a space that fits: plucks, keys and leads a synced delay (delay_mode Ping-Pong, delay_sync 1/8 or 1/8D, delay_mix 0.2-0.35) with a short reverb (0.1-0.25), "
+      << "pads a long reverb (reverb_mix 0.35-0.5, reverb_size 0.6-0.9) with chorus or hyper_amount, basses nearly dry.\n"
+      << "By kind: pads aenv_attack 0.3-2 and aenv_release 1.5-4, unison 3-5, a slow LFO on A Morph or Cutoff; "
+      << "plucks aenv_decay 0.1-0.5, aenv_sustain 0-0.1, aenv_release 0.1-0.4, filter_env 2-4 with fenv_decay 0.05-0.4, a transient (noise_level 0.1-0.3 with Mod Env > Noise, or Mod Env > Pitch 0.2 with menv_decay 0.05); "
+      << "basses sub_level 0.4-0.8, filter_cutoff 80-800, oscA_coarse -12, unison 1, a short filter envelope, dry; "
+      << "keys aenv_decay 0.6-2 with aenv_sustain 0.2-0.4, Velocity > Cutoff and Velocity > Amp, filter_env 1-2; "
+      << "bells fm_amount 0.3-0.8 with oscB_coarse 7, 12, 19 or 24 (B as a silent modulator), aenv_sustain 0 and a long release, Plate or Shimmer reverb; "
+      << "leads glide 0.03-0.15 and vibrato, unison 2-3, a Ping-Pong delay; "
+      << "textures and drones Grit, Formant or Fold, some noise, two slow LFOs (A Morph, FM B>A or Cutoff), long delay feedback and a big reverb.\n"
       << "Stay in tune with the played note: oscA_coarse only -24, -12, 0, 12 or 24; oscB_coarse at octaves when oscB_level is above 0.05, "
       << "or 7, 19 or 24 only when B is a silent FM modulator; keep oscA_fine within -12..12 and oscB_fine within -20..20 cents; "
       << "Pitch is only modulated for vibrato (Sine LFO, amount up to 0.03) or an attack pitch drop (Mod Env with menv_sustain 0, amount up to 0.35); never Velocity, Key or Random to Pitch.\n"
@@ -460,7 +500,7 @@ juce::String LlmPatchGenerator::systemPrompt (bool designWaves)
       << "\"oscB_wave\":\"<wave>\",\"oscB_coarse\":<semitones>,\"oscB_level\":<0-1>,\"fm_amount\":<0-1>,\"sub_level\":<0-1>,"
       << "\"filter_type\":\"<type>\",\"filter_cutoff\":<Hz>,\"filter_res\":<0-1>,\"filter_env\":<-5..5>,\"fenv_decay\":<seconds>,\"fenv_sustain\":<0-1>,"
       << "\"aenv_attack\":<seconds>,\"aenv_decay\":<seconds>,\"aenv_sustain\":<0-1>,\"aenv_release\":<seconds>,"
-      << "\"unison_voices\":<1-4>,\"reverb_mix\":<0-1>,"
+      << "\"unison_voices\":<1-6>,\"reverb_mix\":<0-1>,"
       << "\"mod1_source\":\"<Velocity|Key|Mod Wheel|Aftertouch|Filter Env|Mod Env|Random>\",\"mod1_dest\":\"<a target that suits it>\",\"mod1_amount\":<-1..1>,"
       << "\"lfo1_shape\":\"<shape>\",\"lfo1_rate\":<Hz>,\"lfo1_sync\":\"<Free or a note value>\",\"mod2_source\":\"LFO 1\",\"mod2_dest\":\"<a target from the LFO list>\",\"mod2_amount\":<-1..1>,"
       << "<any extra settings and connections>}";
@@ -482,7 +522,8 @@ juce::String LlmPatchGenerator::systemPrompt (bool designWaves)
           << "\"waveB\" and \"waveC\" (same format) are optional and design oscillator B or C instead of a built-in.\n";
     s
       << "Use plain numbers without units and the exact option names for choice parameters. "
-      << "Make every patch in a batch clearly different from the others. "
+      << "Make every patch in a batch clearly different from the others: another oscillator pairing, another filter type, another set of effects, its own movement - never the same design with other numbers. "
+      << "Each description names what is special about that patch (its sources, its movement, its space) in its own words; never reuse a sentence between patches. "
       << "Write compact JSON on a single line with no indentation, no newlines, no markdown fences and nothing before or after it.";
     return s;
 }
@@ -495,9 +536,12 @@ juce::String LlmPatchGenerator::userPrompt (const GenerationRequest& req)
     {
         s << "Create " << req.count << " patches. Anything you omit keeps its default (a plain saw into an open low-pass with a quick envelope, no effects, no modulation).\n";
         if (req.hint.trim().isNotEmpty())
-            s << "Direction from the user: \"" << req.hint.trim() << "\". Follow it closely.\n";
+            s << "Direction from the user: \"" << req.hint.trim() << "\". Every patch answers it, each with its own engine - follow the line it is given:\n";
         else
-            s << "Cover a range of categories: pads, plucks, basses, keys, leads, bells, textures.\n";
+            s << "Cover a range of kinds, each with its own engine - follow the line each patch is given:\n";
+        s << freshDirections (req)
+          << "No two patches may share the same oscillator pairing, filter type and effect set. Every patch has at least two sound sources beside each other (B, sub, noise or FM with A). "
+          << "Each description says what is special about that patch - its engine, its movement, its space - in its own words, never a sentence used for another patch.\n";
         if (req.brief.isNotEmpty())
             s << "Sound brief (your own notes on that direction - turn it into settings): " << req.brief << "\n";
         s << variationPhrase (req.variation, false) << "\n";
@@ -753,7 +797,8 @@ juce::StringArray LlmPatchGenerator::extractWrites (const std::string& obj, std:
                 if (n != std::string::npos) { const auto ne = inner.find ('"', n + 8); if (ne != std::string::npos) value = inner.substr (n + 8, ne - n - 8); }
                 if (value.empty()) value = "new table";
                 reported.insert (key);
-                fresh.add ("wave\t" + titleCase (spaceOutCamelCase (juce::String::fromUTF8 (value.c_str()))));
+                fresh.add (juce::String::fromUTF8 (key.c_str()) + "\t" + titleCase (spaceOutCamelCase (juce::String::fromUTF8 (value.c_str())))
+                           + "\t" + juce::String::fromUTF8 (inner.c_str()));   // "waveA<TAB>name<TAB>{json}": the table itself, for the displays
             }
             pos = e + 1;
             continue;
@@ -812,9 +857,9 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
     progress.status ("Writing...");
     switch (growModeFor (req.variation))   // careful when nudging, adventurous when reimagining
     {
-        case GrowMode::Close:  backend->setTemperature (req.parents.empty() ? 0.8f : 0.6f); break;
-        case GrowMode::Medium: backend->setTemperature (0.8f); break;
-        case GrowMode::Far:    backend->setTemperature (req.parents.empty() ? 0.9f : 1.0f); break;
+        case GrowMode::Close:  backend->setTemperature (req.parents.empty() ? 0.9f : 0.6f); break;
+        case GrowMode::Medium: backend->setTemperature (req.parents.empty() ? 0.95f : 0.8f); break;
+        case GrowMode::Far:    backend->setTemperature (1.0f); break;
     }
 
     // Written up front so a failed run can still be inspected.
@@ -954,6 +999,35 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
         if (mode == GrowMode::Far && ! req.parents.empty())
             keepIdentity (*patch, *parentFor (req, *patch, base));
 
+        // A fresh batch: siblings must be different engines, not one design with
+        // other numbers. A too-close patch takes directed idea moves until it
+        // stands apart.
+        if (req.parents.empty())
+        {
+            const auto seed = (juce::int64) juce::Time::getHighResolutionTicks() + (juce::int64) out.size() * 7919;
+            auto tooClose = [&]
+            {
+                for (const auto& sibling : out)
+                    if (countStructuralDifferences (*patch, sibling) < kFreshBetweenSiblings) return true;
+                return false;
+            };
+            juce::Random order ((juce::int64) seed);
+            int move = order.nextInt (kNumIdeaMoves);
+            for (int attempt = 0; attempt < 6 && tooClose(); ++attempt, ++move)
+            {
+                applyIdeaMove (*patch, move, seed + attempt);
+                keepPatchInTune (*patch);
+            }
+        }
+        // New designs (fresh, or Far from a favourite) get the finish a small
+        // model leaves out: a second source, width, velocity, a working filter
+        // envelope, the right space.
+        if (req.parents.empty() || mode == GrowMode::Far)
+        {
+            enrichPatch (*patch, (juce::int64) juce::Time::getHighResolutionTicks() + (juce::int64) out.size() * 131);
+            keepPatchInTune (*patch);
+        }
+
         ensureMacroRoutings (*patch);
         patch->set (P::master_gain, -6.0f);
         patch->origin = "grown";
@@ -967,6 +1041,30 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
             patch->description = describePatch (*patch);
         else if (patch->description.length() < 60)
             patch->description << " (" << describePatch (*patch) << ")";
+        // "A soft X with gentle sweeps and subtle reverb" five times over says
+        // nothing: a blurb that mostly repeats a sibling's gives way to the design itself.
+        {
+            auto wordsOf = [] (const juce::String& text)
+            {
+                juce::StringArray w;
+                w.addTokens (text.toLowerCase().retainCharacters ("abcdefghijklmnopqrstuvwxyz "), " ", "");
+                w.removeEmptyStrings();
+                w.removeDuplicates (false);
+                return w;
+            };
+            const auto mine = wordsOf (patch->description);
+            for (const auto& sibling : out)
+            {
+                const auto theirs = wordsOf (sibling.description);
+                int shared = 0;
+                for (const auto& w : mine) if (theirs.contains (w)) ++shared;
+                if (mine.size() > 3 && (float) shared / (float) juce::jmax (mine.size(), theirs.size()) > 0.6f)
+                {
+                    patch->description = describePatch (*patch);
+                    break;
+                }
+            }
+        }
 
         out.push_back (*patch);
         progress.patch (*patch);

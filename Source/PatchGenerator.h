@@ -86,6 +86,12 @@ void applyIdeaMove (Patch&, int move, juce::int64 seed);
 // Far mode keeps the parent's identity: envelope class and category survive.
 void keepIdentity (Patch& child, const Patch& parent);
 
+// Fills the gaps a thin design leaves - one bare oscillator, no width on a
+// pad, nothing on velocity, a filter envelope that does nothing on a pluck, no
+// space at all, glide on a bell - with what makes a preset feel finished. It
+// only touches what is missing, so a deliberate design stays as it is.
+void enrichPatch (Patch&, juce::int64 seed);
+
 // Honours what a prompt asks for by name: "lush chorus", "with delay", "tape",
 // "shimmer", "distorted", "wide", "sub bass", "portamento", "punchy", "riser",
 // "arp". Raises the settings those words call for and never lowers what the

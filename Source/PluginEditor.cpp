@@ -221,7 +221,23 @@ bool StacksAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
     if (cmd && key.getKeyCode() == 'Z' && key.getModifiers().isShiftDown()) { synthProcessor.redo(); return true; }
     if (cmd && key.getKeyCode() == 'Z')  { synthProcessor.undo(); return true; }
     if (cmd && key.getKeyCode() == 'Y')  { synthProcessor.redo(); return true; }
+    // Note keys and Z / X belong to the on-screen keyboard wherever the focus
+    // is (a text box that has focus takes its letters first and never gets
+    // here). Swallowing them keeps a host from reading them as its own key
+    // commands while the player is typing notes.
+    if (keyboard.handlesKey (key))
+    {
+        keyboard.noteKeyPressed (key);
+        return true;
+    }
     return false;
+}
+
+bool StacksAudioProcessorEditor::keyStateChanged (bool isKeyDown)
+{
+    if (keyboard.hasKeyboardFocus (false))
+        return false;   // it handles its own keys
+    return keyboard.keyStateChanged (isKeyDown);
 }
 
 void StacksAudioProcessorEditor::paint (juce::Graphics& g)

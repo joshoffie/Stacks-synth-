@@ -138,15 +138,18 @@ void LfoDisplay::paint (juce::Graphics& g)
     g.setColour (juce::Colours::white.withAlpha (0.1f));
     g.drawHorizontalLine ((int) inner.getCentreY(), inner.getX(), inner.getRight());
 
-    // shape
+    // shape - or, while a sound grows, the shape the engine just wrote for this LFO
     const auto& table = processor.lfoTable (lfo);
     const int shape = (int) processor.apvts.getRawParameterValue (paramId (lfoShapeParam (lfo)))->load();
+    const int written = (int) processor.writtenOr ((int) lfoShapeParam (lfo), (float) shape);
+    const bool previewing = written != shape && written != ShapeCustom && written != ShapeRandom;
+    const auto preview = previewing ? defaultPointsForShape (written) : LfoPoints();
     juce::Path path;
     const int steps = 128;
     for (int i = 0; i <= steps; ++i)
     {
         const float x = (float) i / (float) steps;
-        const float y = shape == ShapeRandom ? 0.0f : table.at (x);
+        const float y = previewing ? preview.at (x) : shape == ShapeRandom ? 0.0f : table.at (x);
         const auto s = toScreen ({ x, y });
         if (i == 0) path.startNewSubPath (s); else path.lineTo (s);
     }
@@ -154,9 +157,10 @@ void LfoDisplay::paint (juce::Graphics& g)
     fill.lineTo (toScreen ({ 1.0f, 0.0f }));
     fill.lineTo (toScreen ({ 0.0f, 0.0f }));
     fill.closeSubPath();
-    g.setColour (colour.withAlpha (0.12f));
+    const auto line = previewing ? colours::accent : colour;
+    g.setColour (line.withAlpha (0.12f));
     g.fillPath (fill);
-    g.setColour (colour);
+    g.setColour (line);
     g.strokePath (path, juce::PathStrokeType (1.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
     if (shape == ShapeRandom)

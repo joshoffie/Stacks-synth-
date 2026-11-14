@@ -105,22 +105,69 @@ WaveDisplay::~WaveDisplay()
 
 void WaveDisplay::timerCallback()
 {
-    const int wave = (int) processor.apvts.getRawParameterValue (paramId (oscWaveParam (osc)))->load();
-    float morph = processor.apvts.getRawParameterValue (paramId (oscMorphParam (osc)))->load();
+    const int rawWave = (int) processor.apvts.getRawParameterValue (paramId (oscWaveParam (osc)))->load();
+    float rawMorph = processor.apvts.getRawParameterValue (paramId (oscMorphParam (osc)))->load();
     if ((int) processor.apvts.getRawParameterValue (paramId (P::life))->load() > 0 && processor.audioRunning())
-        morph = processor.liveValue ((int) oscMorphParam (osc));   // Life is moving the table: draw where it is
-    const int warp = (int) processor.apvts.getRawParameterValue (paramId (oscWarpParam (osc)))->load();
-    const float warpAmt = processor.apvts.getRawParameterValue (paramId (oscWarpAmtParam (osc)))->load();
+        rawMorph = processor.liveValue ((int) oscMorphParam (osc));   // Life is moving the table: draw where it is
+    const int rawWarp = (int) processor.apvts.getRawParameterValue (paramId (oscWarpParam (osc)))->load();
+    const float rawWarpAmt = processor.apvts.getRawParameterValue (paramId (oscWarpAmtParam (osc)))->load();
+
+    // While a sound grows, the engine's writes for this oscillator are drawn
+    // instead: the wave it picked, the table it designed, the morph it set.
+    int wave = rawWave, warp = rawWarp;
+    float morph = rawMorph, warpAmt = rawWarpAmt;
+    const WaveSpec* spec = nullptr;
+    if (processor.lab().generating)
+    {
+        wave = (int) processor.writtenOr ((int) oscWaveParam (osc), (float) rawWave);
+        morph = processor.writtenOr ((int) oscMorphParam (osc), rawMorph);
+        warp = (int) processor.writtenOr ((int) oscWarpParam (osc), (float) rawWarp);
+        warpAmt = processor.writtenOr ((int) oscWarpAmtParam (osc), rawWarpAmt);
+        spec = processor.writtenWave (osc);
+    }
+    const bool nowWriting = spec != nullptr || wave != rawWave || warp != rawWarp || std::abs (morph - rawMorph) > 1.0e-3f || std::abs (warpAmt - rawWarpAmt) > 1.0e-3f;
+    if (nowWriting && shownMorph >= 0.0f)
+    {
+        morph = shownMorph + (morph - shownMorph) * 0.3f;          // the morph glides to the written value
+        warpAmt = shownWarpAmt + (warpAmt - shownWarpAmt) * 0.3f;
+    }
+    const bool specChanged = spec != nullptr ? (writtenSpec != *spec) : ! writtenSpec.isEmpty();
+    if (specChanged) writtenSpec = spec != nullptr ? *spec : WaveSpec();
+
     const int slot = wave >= kCustomWave ? UserWavetables::customSlot (osc) : wave - WavetableBank::kNumBuiltIn;
-    const auto name = wave >= WavetableBank::kNumBuiltIn ? processor.userWaveName (slot) : juce::String();
-    if (wave != shownWave || std::abs (morph - shownMorph) > 0.002f || name != shownName || warp != shownWarp || std::abs (warpAmt - shownWarpAmt) > 0.002f)
+    const auto name = ! writtenSpec.isEmpty() ? writtenSpec.name : wave >= WavetableBank::kNumBuiltIn ? processor.userWaveName (slot) : juce::String();
+    if (wave != shownWave || std::abs (morph - shownMorph) > 0.002f || name != shownName || warp != shownWarp || std::abs (warpAmt - shownWarpAmt) > 0.002f
+        || specChanged || nowWriting != writing)
     {
         shownWave = wave;
         shownMorph = morph;
         shownName = name;
         shownWarp = warp;
         shownWarpAmt = warpAmt;
+        writing = nowWriting;
         repaint();
+    }
+}
+
+namespace
+{
+    // One point of a designed table, summed from its harmonics at a morph position.
+    float specSample (const WaveSpec& spec, float morph, float phase)
+    {
+        const auto& frames = spec.frames;
+        if (frames.empty()) return 0.0f;
+        const int n = (int) frames.size();
+        const float fpos = juce::jlimit (0.0f, 1.0f, morph) * (float) (n - 1);
+        const int f0 = juce::jlimit (0, n - 1, (int) fpos), f1 = juce::jmin (n - 1, f0 + 1);
+        const float t = fpos - (float) f0;
+        float y = 0.0f, norm = 0.0f;
+        for (int h = 0; h < WaveSpec::kHarmonics && h < (int) frames[(size_t) f0].size() && h < (int) frames[(size_t) f1].size(); ++h)
+        {
+            const float amp = frames[(size_t) f0][(size_t) h] + (frames[(size_t) f1][(size_t) h] - frames[(size_t) f0][(size_t) h]) * t;
+            y += amp * std::sin (juce::MathConstants<float>::twoPi * (float) (h + 1) * phase);
+            norm += amp * amp;
+        }
+        return norm > 1.0e-6f ? juce::jlimit (-1.0f, 1.0f, y / std::sqrt (norm) * 0.7f) : 0.0f;
     }
 }
 
@@ -139,18 +186,21 @@ void WaveDisplay::paint (juce::Graphics& g)
     g.setColour (juce::Colours::white.withAlpha (0.06f));
     g.drawHorizontalLine ((int) r.getCentreY(), r.getX() + 3.0f, r.getRight() - 3.0f);
 
-    // One cycle of the table at a given morph position (warp included).
+    // One cycle of the table at a given morph position (warp included); the
+    // table the engine is designing takes the place of the real one.
+    const bool designing = ! writtenSpec.isEmpty();
     auto sampleAt = [&] (float m, float phase)
     {
         const float wp = warpPhase (shownWarp, phase >= 1.0f ? 0.999f : phase, shownWarpAmt);
         float y = 0.0f;
-        if (user < 0)              y = processor.builtInWavetables().read (wave, 0, m, wp);
+        if (designing)             y = specSample (writtenSpec, m, wp);
+        else if (user < 0)         y = processor.builtInWavetables().read (wave, 0, m, wp);
         else if (table != nullptr) y = table->read (0, m, wp);
         else                       y = std::sin (juce::MathConstants<float>::twoPi * wp);
         return warpSample (shownWarp, y, shownWarpAmt);
     };
-    const bool missing = user >= 0 && table == nullptr;
-    const auto lineColour = missing ? colours::muted : colour;
+    const bool missing = user >= 0 && table == nullptr && ! designing;
+    const auto lineColour = missing ? colours::muted : writing ? colours::accent : colour;
     const int steps = juce::jlimit (48, 160, (int) r.getWidth() / 2);
 
     if (r.getWidth() >= 96.0f && r.getHeight() >= 44.0f && ! missing)
@@ -209,11 +259,11 @@ void WaveDisplay::paint (juce::Graphics& g)
     }
 
     // The table's name only when it is a designed or imported one.
-    if (user >= 0)
+    if (designing || user >= 0)
     {
-        g.setColour (colours::muted);
+        g.setColour (designing ? colours::accent : colours::muted);
         g.setFont (StacksLookAndFeel::font (9.0f));
-        const auto caption = table != nullptr ? shownName.upToLastOccurrenceOf (".", false, false) : juce::String (custom ? "no table designed" : "click to import");
+        const auto caption = designing ? shownName : table != nullptr ? shownName.upToLastOccurrenceOf (".", false, false) : juce::String (custom ? "no table designed" : "click to import");
         g.drawText (caption, r.reduced (5.0f, 2.0f).toNearestInt(), juce::Justification::bottomRight, true);
     }
 }
@@ -671,9 +721,9 @@ SynthPanel::SynthPanel (StacksAudioProcessor& p) : processor (p), apvts (p.apvts
         else if (w == "waveB")   d = std::make_unique<WaveDisplay> (processor, 1, colour);
         else if (w == "waveC")   d = std::make_unique<WaveDisplay> (processor, 2, colour);
         else if (w == "sample")  d = std::make_unique<SampleDisplay> (processor, apvts, colour);
-        else if (w == "filter")  d = std::make_unique<FilterCurve> (apvts, colour);
-        else if (w == "fenv")    d = std::make_unique<EnvelopeDisplay> (apvts, "fenv", colour);
-        else if (w == "aenv")    d = std::make_unique<EnvelopeDisplay> (apvts, "aenv", colour);
+        else if (w == "filter")  d = std::make_unique<FilterCurve> (apvts, colour, &processor);
+        else if (w == "fenv")    d = std::make_unique<EnvelopeDisplay> (apvts, "fenv", colour, &processor);
+        else if (w == "aenv")    d = std::make_unique<EnvelopeDisplay> (apvts, "aenv", colour, &processor);
         if (d == nullptr) return nullptr;
         auto* raw = d.get();
         controls.push_back (std::move (d));

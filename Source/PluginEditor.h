@@ -27,6 +27,7 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
     bool keyPressed (const juce::KeyPress&) override;
+    bool keyStateChanged (bool isKeyDown) override;   // the computer keyboard plays notes from anywhere in the window
     std::unique_ptr<juce::ComponentTraverser> createKeyboardFocusTraverser() override;   // no automatic focus target
 
     // Paints every screen (home, each synth page, each modulator tab, each lab

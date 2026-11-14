@@ -591,6 +591,10 @@ StacksKeyboard::StacksKeyboard (juce::MidiKeyboardState& state)
     setScrollButtonsVisible (false);
     setBlackNoteLengthProportion (0.62f);
     setBlackNoteWidthProportion (0.6f);
+    setVelocity (0.85f, false);    // every click sounds the same; JUCE's default made a click near the top of a key nearly silent
+    setKeyPressBaseOctave (baseOctave);   // the computer keys start at C3; Z and X move them
+    for (int i = 0; kKeyLetters[i] != 0; ++i)
+        setKeyPressForNote (juce::KeyPress (kKeyLetters[i], 0, 0), i);
     setColour (juce::MidiKeyboardComponent::keySeparatorLineColourId, juce::Colour (0xff0b0c0e));
     setColour (juce::MidiKeyboardComponent::shadowColourId, juce::Colours::transparentBlack);
 }
@@ -599,6 +603,46 @@ void StacksKeyboard::resized()
 {
     setKeyWidth (juce::jmax (4.0f, (float) getWidth() / 52.0f));   // 52 white keys across the full width
     juce::MidiKeyboardComponent::resized();
+}
+
+bool StacksKeyboard::handlesKey (const juce::KeyPress& key) const
+{
+    if (key.getModifiers().isCommandDown() || key.getModifiers().isCtrlDown() || key.getModifiers().isAltDown())
+        return false;
+    const auto c = (juce::juce_wchar) juce::CharacterFunctions::toLowerCase ((juce::juce_wchar) key.getKeyCode());
+    if (c == 'z' || c == 'x') return true;
+    for (int i = 0; kKeyLetters[i] != 0; ++i)
+        if ((juce::juce_wchar) kKeyLetters[i] == c) return true;
+    return false;
+}
+
+bool StacksKeyboard::noteKeyPressed (const juce::KeyPress& key)
+{
+    if (! handlesKey (key)) return false;
+    const auto c = (juce::juce_wchar) juce::CharacterFunctions::toLowerCase ((juce::juce_wchar) key.getKeyCode());
+    if (c == 'z') { shiftOctave (-1); return true; }
+    if (c == 'x') { shiftOctave (1);  return true; }
+    return false;
+}
+
+void StacksKeyboard::shiftOctave (int delta)
+{
+    baseOctave = juce::jlimit (1, 7, baseOctave + delta);
+    setKeyPressBaseOctave (baseOctave);
+    repaint();
+}
+
+namespace
+{
+    // The letter that plays this note from the computer keyboard, or 0.
+    juce::juce_wchar keyLetterFor (int midiNote, int baseOctave)
+    {
+        const int i = midiNote - 12 * baseOctave;
+        if (i < 0) return 0;
+        for (int k = 0; StacksKeyboard::kKeyLetters[k] != 0; ++k)
+            if (k == i) return (juce::juce_wchar) StacksKeyboard::kKeyLetters[k];
+        return 0;
+    }
 }
 
 void StacksKeyboard::paintWhiteKey (juce::Graphics& g, juce::Rectangle<float> area, bool isDown, bool isOver)
@@ -649,11 +693,24 @@ void StacksKeyboard::drawWhiteNote (int midiNoteNumber, juce::Graphics& g, juce:
         g.setFont (StacksLookAndFeel::font (juce::jmin (9.5f, key.getWidth() * 0.45f)));
         g.drawText (text, key.withTrimmedBottom (2.0f).toNearestInt(), juce::Justification::centredBottom, false);
     }
+    // The computer key that plays this note, in the octave Z and X have chosen.
+    if (const auto letter = keyLetterFor (midiNoteNumber, baseOctave); letter != 0 && key.getWidth() >= 12.0f)
+    {
+        g.setColour (isDown ? juce::Colours::white.withAlpha (0.9f) : colours::accent.withAlpha (0.8f));
+        g.setFont (StacksLookAndFeel::font (juce::jmin (9.0f, key.getWidth() * 0.42f), true));
+        g.drawText (juce::String::charToString (letter).toUpperCase(), key.withTrimmedTop (3.0f).withHeight (12.0f).toNearestInt(), juce::Justification::centred, false);
+    }
 }
 
-void StacksKeyboard::drawBlackNote (int, juce::Graphics& g, juce::Rectangle<float> area, bool isDown, bool isOver, juce::Colour)
+void StacksKeyboard::drawBlackNote (int midiNoteNumber, juce::Graphics& g, juce::Rectangle<float> area, bool isDown, bool isOver, juce::Colour)
 {
     paintBlackKey (g, area, isDown, isOver);
+    if (const auto letter = keyLetterFor (midiNoteNumber, baseOctave); letter != 0 && area.getWidth() >= 9.0f)
+    {
+        g.setColour (isDown ? juce::Colours::white : colours::accent.withAlpha (0.85f));
+        g.setFont (StacksLookAndFeel::font (juce::jmin (8.5f, area.getWidth() * 0.6f), true));
+        g.drawText (juce::String::charToString (letter).toUpperCase(), area.withTrimmedBottom (4.0f).toNearestInt(), juce::Justification::centredBottom, false);
+    }
 }
 
 juce::String StacksKeyboard::getWhiteNoteText (int midiNoteNumber)

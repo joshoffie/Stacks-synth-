@@ -120,22 +120,42 @@ void ScopeView::paint (juce::Graphics& g)
 }
 
 //==============================================================================
-EnvelopeDisplay::EnvelopeDisplay (juce::AudioProcessorValueTreeState& apvts, const juce::String& prefix, juce::Colour c) : colour (c)
+EnvelopeDisplay::EnvelopeDisplay (juce::AudioProcessorValueTreeState& apvts, const juce::String& prefix, juce::Colour c, const StacksAudioProcessor* p)
+    : colour (c), processor (p)
 {
     a = apvts.getRawParameterValue (prefix + "_attack");
     d = apvts.getRawParameterValue (prefix + "_decay");
     s = apvts.getRawParameterValue (prefix + "_sustain");
     r = apvts.getRawParameterValue (prefix + "_release");
+    const char* const stages[] = { "_attack", "_decay", "_sustain", "_release" };
+    for (int i = 0; i < 4; ++i) index[i] = paramIndexForId (prefix + stages[i]);
     setTooltip ("The envelope's shape: attack up, decay down to the sustain level, held while the key is down, then release.");
     setInterceptsMouseClicks (false, false);
-    startTimerHz (15);
+    startTimerHz (24);
 }
 
+// The real values, or while a sound grows the ones the engine just wrote,
+// approached in steps so the curve is seen moving.
 void EnvelopeDisplay::timerCallback()
 {
-    const float v[4] = { a->load(), d->load(), s->load(), r->load() };
-    bool changed = false;
-    for (int i = 0; i < 4; ++i) { changed = changed || std::abs (v[i] - shown[i]) > 1.0e-4f; shown[i] = v[i]; }
+    const float raw[4] = { a->load(), d->load(), s->load(), r->load() };
+    bool changed = false, nowWriting = false;
+    float target[4];
+    for (int i = 0; i < 4; ++i)
+    {
+        target[i] = processor != nullptr ? processor->writtenOr (index[i], raw[i]) : raw[i];
+        nowWriting = nowWriting || std::abs (target[i] - raw[i]) > 1.0e-4f;
+    }
+    for (int i = 0; i < 4; ++i)
+    {
+        if (nowWriting && shown[i] >= 0.0f)
+        {
+            const float next = shown[i] + (target[i] - shown[i]) * 0.3f;
+            if (std::abs (next - shown[i]) > 1.0e-5f) { shown[i] = next; changed = true; }
+        }
+        else if (std::abs (target[i] - shown[i]) > 1.0e-4f) { shown[i] = target[i]; changed = true; }
+    }
+    if (nowWriting != writing) { writing = nowWriting; changed = true; }
     if (changed) repaint();
 }
 
@@ -165,14 +185,15 @@ void EnvelopeDisplay::paint (juce::Graphics& g)
     fill.lineTo (x (total), inner.getBottom());
     fill.lineTo (x (0.0f), inner.getBottom());
     fill.closeSubPath();
-    g.setColour (colour.withAlpha (0.18f));
+    const auto line = writing ? colours::accent : colour;
+    g.setColour (line.withAlpha (0.18f));
     g.fillPath (fill);
-    g.setColour (colour);
+    g.setColour (line);
     g.strokePath (p, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 }
 
 //==============================================================================
-FilterCurve::FilterCurve (juce::AudioProcessorValueTreeState& apvts, juce::Colour c) : colour (c)
+FilterCurve::FilterCurve (juce::AudioProcessorValueTreeState& apvts, juce::Colour c, const StacksAudioProcessor* p) : colour (c), processor (p)
 {
     type = apvts.getRawParameterValue ("filter_type");
     cutoff = apvts.getRawParameterValue ("filter_cutoff");
@@ -182,16 +203,38 @@ FilterCurve::FilterCurve (juce::AudioProcessorValueTreeState& apvts, juce::Colou
     type2 = apvts.getRawParameterValue ("filter2_type");
     cutoff2 = apvts.getRawParameterValue ("filter2_cutoff");
     resonance2 = apvts.getRawParameterValue ("filter2_res");
+    const char* const ids[] = { "filter_type", "filter_cutoff", "filter_res", "filter_drive", "filter_routing", "filter2_type", "filter2_cutoff", "filter2_res" };
+    for (int i = 0; i < 8; ++i) index[i] = paramIndexForId (ids[i]);
     setTooltip ("What the filter lets through: low-pass keeps the lows, high-pass the highs, band-pass the middle. Resonance adds a peak at the cutoff.");
     setInterceptsMouseClicks (false, false);
-    startTimerHz (15);
+    startTimerHz (24);
 }
 
+// As the envelope display: the engine's writes are followed in steps (cutoffs
+// in octaves), choices switch at once.
 void FilterCurve::timerCallback()
 {
-    const float v[8] = { type->load(), cutoff->load(), resonance->load(), drive->load(), routing->load(), type2->load(), cutoff2->load(), resonance2->load() };
-    bool changed = false;
-    for (int i = 0; i < 8; ++i) { changed = changed || std::abs (v[i] - shown[i]) > 1.0e-4f; shown[i] = v[i]; }
+    const float raw[8] = { type->load(), cutoff->load(), resonance->load(), drive->load(), routing->load(), type2->load(), cutoff2->load(), resonance2->load() };
+    bool changed = false, nowWriting = false;
+    float target[8];
+    for (int i = 0; i < 8; ++i)
+    {
+        target[i] = processor != nullptr ? processor->writtenOr (index[i], raw[i]) : raw[i];
+        nowWriting = nowWriting || std::abs (target[i] - raw[i]) > 1.0e-4f;
+    }
+    for (int i = 0; i < 8; ++i)
+    {
+        const bool choice = i == 0 || i == 4 || i == 5;
+        const bool hz = i == 1 || i == 6;
+        if (nowWriting && shown[i] >= 0.0f && ! choice)
+        {
+            const float next = hz ? std::exp (std::log (juce::jmax (20.0f, shown[i])) + (std::log (juce::jmax (20.0f, target[i])) - std::log (juce::jmax (20.0f, shown[i]))) * 0.3f)
+                                  : shown[i] + (target[i] - shown[i]) * 0.3f;
+            if (std::abs (next - shown[i]) > 1.0e-4f) { shown[i] = next; changed = true; }
+        }
+        else if (std::abs (target[i] - shown[i]) > 1.0e-4f) { shown[i] = target[i]; changed = true; }
+    }
+    if (nowWriting != writing) { writing = nowWriting; changed = true; }
     if (changed) repaint();
 }
 
@@ -273,11 +316,12 @@ void FilterCurve::paint (juce::Graphics& g)
     fill.lineTo (inner.getRight(), inner.getBottom());
     fill.lineTo (inner.getX(), inner.getBottom());
     fill.closeSubPath();
-    g.setColour (colour.withAlpha (0.18f));
+    const auto line = writing ? colours::accent : colour;
+    g.setColour (line.withAlpha (0.18f));
     g.fillPath (fill);
     g.setColour (colours::muted.withAlpha (0.25f));
     g.drawHorizontalLine ((int) (inner.getBottom() - 36.0f / 54.0f * inner.getHeight()), inner.getX(), inner.getRight()); // 0 dB
-    g.setColour (colour);
+    g.setColour (line);
     g.strokePath (p, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
     // frequency marks

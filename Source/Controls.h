@@ -183,6 +183,15 @@ class StacksKeyboard : public juce::MidiKeyboardComponent
 public:
     explicit StacksKeyboard (juce::MidiKeyboardState&);
     void resized() override;
+
+    // The computer keyboard plays too: a w s e d f t g y h u j k o l p ; from the
+    // base octave, Z and X move that octave. The editor forwards key events here
+    // from anywhere in the window, and swallows the ones that play notes.
+    bool handlesKey (const juce::KeyPress&) const;   // a note key or Z / X
+    bool noteKeyPressed (const juce::KeyPress&);     // true when it was Z / X (the notes themselves go through keyStateChanged)
+    void shiftOctave (int delta);
+    static constexpr const char* kKeyLetters = "awsedftgyhujkolp;";
+    int baseOctave = 4;                              // where the computer keys start (JUCE keeps its own copy, without a getter)
     static void paintWhiteKey (juce::Graphics&, juce::Rectangle<float>, bool down, bool over);   // one key, no label
     static void paintBlackKey (juce::Graphics&, juce::Rectangle<float>, bool down, bool over);
 

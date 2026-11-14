@@ -33,6 +33,8 @@ private:
     int shownWarp = 0;
     float shownWarpAmt = 0.0f;
     juce::String shownName;
+    WaveSpec writtenSpec;                        // the table the engine is designing right now, drawn in place of the real one
+    bool writing = false;                        // the engine is writing this oscillator
     std::unique_ptr<juce::FileChooser> chooser;
 };
 

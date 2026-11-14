@@ -796,6 +796,20 @@ std::vector<Patch> RandomPatchGenerator::generate (const GenerationRequest& req,
             p = randomPatch (archetype, rng);
             if (req.variation > 0.6f)
                 mutate (p, (req.variation - 0.6f) * 1.5f, rng);
+            // A batch of one kind ("pluck") must still have range: every patch after
+            // the first takes an idea move, and more until it stands apart from the others.
+            if (hintArchetype >= 0 && i > 0)
+            {
+                const auto seed = (juce::int64) (ticks ^ salt) + (juce::int64) i * 7919;
+                int move = (i * 3) % kNumIdeaMoves;
+                for (int attempt = 0; attempt < 6; ++attempt, ++move)
+                {
+                    bool apart = true;
+                    for (const auto& sibling : out) apart = apart && countStructuralDifferences (p, sibling) >= 2;
+                    if (apart && attempt > 0) break;
+                    applyIdeaMove (p, move, seed + attempt);
+                }
+            }
         }
         else
         {
@@ -808,6 +822,8 @@ std::vector<Patch> RandomPatchGenerator::generate (const GenerationRequest& req,
         if (req.designWaves)
             designWave (p, req, *bank, archetype, rng);
         applyHint (p, hintLower, rng);
+        if (req.parents.empty())
+            enrichPatch (p, (juce::int64) (ticks ^ salt) + (juce::int64) i * 131);   // a sketch becomes a finished sound
         keepPatchInTune (p);
         ensureMacroRoutings (p);
         p.set (P::master_gain, -6.0f);
@@ -1223,6 +1239,157 @@ void keepIdentity (Patch& child, const Patch& parent)
     else if (cls == "short pluck" || cls == "percussive")
         child.set (P::aenv_sustain, juce::jmin (child.get (P::aenv_sustain), 0.3f));
     if (child.category.isEmpty()) child.category = parent.category;
+}
+
+// What a finished preset has that a sketch does not, in the order a sound
+// designer would add them: a second source, width where the kind wants it,
+// velocity, a filter envelope that does the shaping, the right space, a little
+// analog life, a transient on things that are struck.
+void enrichPatch (Patch& p, juce::int64 seed)
+{
+    juce::Random rng (seed);
+    auto uni  = [&] (float a, float b) { return a + (b - a) * rng.nextFloat(); };
+    auto pick = [&] (std::initializer_list<int> xs) { auto it = xs.begin(); std::advance (it, rng.nextInt ((int) xs.size())); return *it; };
+    auto option = [] (const juce::StringArray& names, const char* name) { return (float) juce::jmax (0, names.indexOf (name)); };
+    auto target = [] (P param) { return modTargetForParam ((int) param); };
+
+    const auto cat = p.category.toLowerCase();
+    const bool pad   = cat.contains ("pad") || cat.contains ("drone") || cat.contains ("texture") || cat.contains ("string") || cat.contains ("choir");
+    const bool pluck = cat.contains ("pluck") || cat.contains ("perc") || cat.contains ("stab") || cat.contains ("drum");
+    const bool bass  = cat.contains ("bass");
+    const bool keys  = cat.contains ("key") || cat.contains ("piano") || cat.contains ("organ");
+    const bool lead  = cat.contains ("lead");
+    const bool bell  = cat.contains ("bell") || cat.contains ("chime") || cat.contains ("mallet");
+    const auto conns = connections (p);
+    auto hasSource = [&] (int src) { for (const auto& c : conns) if (c.first == src) return true; return false; };
+    auto hasConn   = [&] (int src, int dst) { return conns.count ({ src, dst }) > 0; };
+    auto addConn   = [&] (int src, int dst, float amount)
+    {
+        if (dst <= TargetOff) return;
+        for (int i = 0; i < kNumModSlots; ++i)
+            if ((int) p.get (modSourceParam (i)) == SrcOff || (int) p.get (modDestParam (i)) == TargetOff)
+            {
+                p.set (modSourceParam (i), (float) src);
+                p.set (modDestParam (i), (float) dst);
+                p.set (modAmountParam (i), amount);
+                return;
+            }
+    };
+
+    // 1. A second source when only A sounds.
+    const bool bOn = p.get (P::oscB_level) > 0.05f, fm = p.get (P::fm_amount) > 0.05f, cOn = p.get (P::oscC_level) > 0.05f;
+    const bool sub = p.get (P::sub_level) > 0.1f, noise = p.get (P::noise_level) > 0.05f;
+    bool addedTransient = false;
+    if (! bOn && ! fm && ! cOn && ! sub && ! noise)
+    {
+        if (bass)
+            p.set (P::sub_level, uni (0.5f, 0.8f));
+        else if (bell)
+        {
+            p.set (P::oscB_wave, option (waveNames(), "Sine"));
+            p.set (P::oscB_coarse, (float) pick ({ 12, 19, 24 }));
+            p.set (P::oscB_level, uni (0.3f, 0.5f));
+            p.set (P::fm_amount, uni (0.35f, 0.6f));
+        }
+        else if (pluck && rng.nextBool())
+        {
+            // a noise transient: the click that makes a pluck a pluck
+            p.set (P::noise_level, uni (0.12f, 0.25f));
+            p.set (P::menv_attack, 0.001f); p.set (P::menv_decay, uni (0.03f, 0.08f)); p.set (P::menv_sustain, 0.0f); p.set (P::menv_release, 0.05f);
+            addConn (SrcModEnv, target (P::noise_level), uni (0.5f, 0.8f));
+            addedTransient = true;
+        }
+        else
+        {
+            static const char* const partners[] = { "Saw", "Triangle", "Pulse", "Organ", "Glass", "Formant" };
+            p.set (P::oscB_wave, option (waveNames(), partners[rng.nextInt ((int) std::size (partners))]));
+            p.set (P::oscB_coarse, (float) (pad ? pick ({ 0, -12, 12 }) : pick ({ 12, 0, -12 })));
+            p.set (P::oscB_fine, uni (-9.0f, 9.0f));
+            p.set (P::oscB_level, pluck ? uni (0.2f, 0.4f) : uni (0.3f, 0.55f));
+            p.set (P::oscB_morph, uni (0.2f, 0.8f));
+        }
+    }
+
+    // 2. Width where the kind wants it.
+    const int voices = (int) p.get (P::unison_voices);
+    if ((pad || lead) && voices < 2)
+    {
+        p.set (P::unison_voices, (float) (pad ? pick ({ 3, 4, 5 }) : pick ({ 2, 3 })));
+        p.set (P::unison_detune, uni (10.0f, 22.0f));
+        p.set (P::unison_spread, uni (0.5f, 0.9f));
+    }
+
+    // 3. Velocity, so playing it matters.
+    if (! hasSource (SrcVelocity) && ! pad)
+        addConn (SrcVelocity, target (P::filter_cutoff), uni (0.25f, 0.5f));
+    if ((pluck || keys || bell) && ! hasConn (SrcVelocity, TargetAmp))
+        addConn (SrcVelocity, TargetAmp, uni (0.3f, 0.5f));
+
+    // 4. A filter envelope that shapes things that are struck.
+    if ((pluck || keys || bass) && p.get (P::filter_env) < 0.5f)
+    {
+        p.set (P::filter_env, uni (1.5f, 3.5f));
+        p.set (P::fenv_attack, juce::jmin (p.get (P::fenv_attack), 0.01f));
+        p.set (P::fenv_decay, pluck ? uni (0.1f, 0.35f) : uni (0.25f, 0.8f));
+        p.set (P::fenv_sustain, uni (0.05f, 0.3f));
+        if (p.get (P::filter_cutoff) > 4000.0f) p.set (P::filter_cutoff, uni (800.0f, 2500.0f));   // room for the envelope to open
+    }
+
+    // 5. Glide only where it belongs.
+    if (! lead && ! bass && p.get (P::glide) > 0.0f)
+        p.set (P::glide, 0.0f);
+
+    // 5b. A note, not a click: a 20 ms decay with no sustain is a blip on anything
+    // but a drum. Plucks ring for 100-400 ms; keys and bells longer still.
+    const bool perc = cat.contains ("perc") || cat.contains ("drum") || cat.contains ("hit");
+    if (! perc && p.get (P::aenv_sustain) < 0.2f && p.get (P::aenv_decay) < 0.08f)
+        p.set (P::aenv_decay, bell ? uni (0.8f, 1.6f) : keys ? uni (0.5f, 1.2f) : uni (0.12f, 0.35f));
+    if (! perc && p.get (P::aenv_release) < 0.05f)
+        p.set (P::aenv_release, uni (0.1f, 0.25f));
+
+    // 6. A space that fits the kind.
+    const float rev = p.get (P::reverb_mix), del = p.get (P::delay_mix), cho = p.get (P::chorus_mix);
+    if (pad)
+    {
+        if (rev < 0.25f) p.set (P::reverb_mix, uni (0.3f, 0.5f));
+        if (p.get (P::reverb_size) < 0.5f) p.set (P::reverb_size, uni (0.6f, 0.85f));
+        if (cho < 0.15f && p.get (P::hyper_amount) < 0.1f && (int) p.get (P::unison_voices) < 3) p.set (P::chorus_mix, uni (0.2f, 0.4f));
+    }
+    else if (pluck || keys || lead)
+    {
+        // A synced delay is half of what makes a pluck or a lead sit in a track;
+        // most of them get one, the rest stay with their reverb alone.
+        if (del < 0.05f && (rev < 0.12f || rng.nextFloat() < 0.65f))
+        {
+            p.set (P::delay_mix, uni (0.15f, 0.3f));
+            p.set (P::delay_sync, option (delaySyncNames(), pick ({ 0, 1, 2 }) == 0 ? "1/8" : rng.nextBool() ? "1/8D" : "1/16"));
+            p.set (P::delay_feedback, uni (0.25f, 0.45f));
+            if (pluck || lead) p.set (P::delay_mode, option (delayModeNames(), "Ping-Pong"));
+        }
+        if (rev < 0.08f) p.set (P::reverb_mix, uni (0.12f, 0.25f));
+    }
+    else if (bass)
+    {
+        if (rev > 0.2f) p.set (P::reverb_mix, 0.1f);
+        if (cho > 0.2f) p.set (P::chorus_mix, 0.15f);
+    }
+    else if (bell && rev < 0.2f)
+        p.set (P::reverb_mix, uni (0.25f, 0.4f));
+    for (int e : { 2, 5, 6 })   // an effect that is used is switched on
+        if (fxActive (p, e) || (e == 2 && p.get (P::chorus_mix) > 0.02f) || (e == 5 && p.get (P::delay_mix) > 0.02f) || (e == 6 && p.get (P::reverb_mix) > 0.02f))
+            p.set (fxOnParam (e), 1.0f);
+
+    // 7. A little analog life.
+    if (p.get (P::char_drift) < 0.05f) p.set (P::char_drift, uni (0.1f, 0.3f));
+    if (p.get (P::char_sat) < 0.05f && (bass || lead || keys)) p.set (P::char_sat, uni (0.1f, 0.3f));
+
+    // 8. A transient on things that are struck, when nothing gives one yet.
+    if ((pluck || keys) && ! addedTransient && ! hasSource (SrcModEnv) && ! noise && rng.nextFloat() < 0.5f)
+    {
+        p.set (P::noise_level, juce::jmax (p.get (P::noise_level), uni (0.08f, 0.18f)));
+        p.set (P::menv_attack, 0.001f); p.set (P::menv_decay, uni (0.03f, 0.08f)); p.set (P::menv_sustain, 0.0f); p.set (P::menv_release, 0.05f);
+        addConn (SrcModEnv, target (P::noise_level), uni (0.5f, 0.8f));
+    }
 }
 
 } // namespace stacks

@@ -1409,13 +1409,13 @@ static void testLiveWrites()
     w = LlmPatchGenerator::extractWrites ("{\"name\":\"Warm Glass\",\"category\":\"Pad\",\"filter_cutoff\": 820,\"oscA_wave\":3,\"chorus_mix\":0.4,\"reverb_mix\":0.", seen);
     CHECK (w.size() == 1 && w[0] == "chorus_mix\t0.4");   // finished now; the earlier two are not repeated
     w = LlmPatchGenerator::extractWrites ("{\"name\":\"Warm Glass\",\"filter_cutoff\": 820,\"oscA_wave\":3,\"chorus_mix\":0.4,\"reverb_mix\":0.5,\"waveA\":{\"name\":\"glassy bell\",\"spectra\":[[1,0,0.5]]},\"delay_mode\":1}", seen);
-    CHECK (w.size() == 3 && w[0] == "reverb_mix\t0.5" && w[1] == "wave\tGlassy Bell" && w[2] == "delay_mode\t1");
+    CHECK (w.size() == 3 && w[0] == "reverb_mix\t0.5" && w[1].startsWith ("waveA\tGlassy Bell\t{") && w[2] == "delay_mode\t1");
     // the real reply: settings nested under "params", choices by name, the table after
     std::set<std::string> seen2;
     w = LlmPatchGenerator::extractWrites ("{\"name\":\"Velvet Horizon\",\"category\":\"Lead\",\"parent\":1,\"params\":{\"oscA_wave\":\"Saw\",\"oscA_morph\":0.7,\"filter_type\":\"LP24\",\"filter_cutoff\":2400,\"lfo1_sync\":\"Free\",\"unison_detune\":22},\"waveA\":{\"name\":\"Neon Saw\",\"tail\":7,\"spectra\":[[9,8", seen2);
     CHECK (w.size() == 6 && w[0] == "oscA_wave\tSaw" && w[2] == "filter_type\tLP24" && w[3] == "filter_cutoff\t2400" && w[5] == "unison_detune\t22");
     w = LlmPatchGenerator::extractWrites ("{\"name\":\"Velvet Horizon\",\"params\":{\"oscA_wave\":\"Saw\",\"oscA_morph\":0.7,\"filter_type\":\"LP24\",\"filter_cutoff\":2400,\"lfo1_sync\":\"Free\",\"unison_detune\":22},\"waveA\":{\"name\":\"Neon Saw\",\"tail\":7,\"spectra\":[[9,8,7]]}}", seen2);
-    CHECK (w.size() == 1 && w[0] == "wave\tNeon Saw");
+    CHECK (w.size() == 1 && w[0].startsWith ("waveA\tNeon Saw\t{"));
 }
 
 static void testCharacterAndEffects()
@@ -1630,6 +1630,50 @@ static void testQuickTweak()
     CHECK (parsed.size() == 1 && parsed.front().paramIndex == (int) P::filter_cutoff);
 }
 
+//==============================================================================
+static void testEnrich()
+{
+    section ("enrich: a sketch becomes a finished sound");
+    Patch thin;                                  // one bare saw, nothing else: what a small model hands back
+    thin.category = "Pluck";
+    thin.set (P::aenv_attack, 0.003f); thin.set (P::aenv_decay, 0.2f); thin.set (P::aenv_sustain, 0.0f); thin.set (P::aenv_release, 0.2f);
+    thin.set (P::filter_env, -1.5f); thin.set (P::glide, 0.07f);
+    auto enriched = thin;
+    enrichPatch (enriched, 42);
+    const bool secondSource = enriched.get (P::oscB_level) > 0.05f || enriched.get (P::noise_level) > 0.05f || enriched.get (P::sub_level) > 0.1f || enriched.get (P::fm_amount) > 0.05f;
+    CHECK (secondSource);
+    CHECK (enriched.get (P::filter_env) >= 1.5f);                 // a pluck's filter envelope opens
+    CHECK (enriched.get (P::glide) == 0.0f);                      // no glide on a pluck
+    bool velocity = false;
+    for (int i = 0; i < kNumModSlots; ++i)
+        if ((int) enriched.get (modSourceParam (i)) == SrcVelocity && (int) enriched.get (modDestParam (i)) != TargetOff) velocity = true;
+    CHECK (velocity);
+    CHECK (enriched.get (P::delay_mix) > 0.1f || enriched.get (P::reverb_mix) > 0.1f);   // some space
+    CHECK (enriched.get (P::oscA_wave) == thin.get (P::oscA_wave));   // the design itself is not touched
+
+    Patch pad;                                   // a deliberate, complete pad stays as it is
+    pad.category = "Pad";
+    pad.set (P::oscB_wave, 1.0f); pad.set (P::oscB_level, 0.5f); pad.set (P::oscB_coarse, -12.0f);
+    pad.set (P::unison_voices, 4); pad.set (P::unison_detune, 18.0f);
+    pad.set (P::reverb_mix, 0.4f); pad.set (P::reverb_size, 0.7f); pad.set (P::chorus_mix, 0.3f);
+    pad.set (P::aenv_attack, 0.8f); pad.set (P::filter_env, -1.0f); pad.set (P::filter_cutoff, 1500.0f);
+    auto kept = pad;
+    enrichPatch (kept, 7);
+    for (auto param : { P::oscB_wave, P::oscB_level, P::oscB_coarse, P::unison_voices, P::unison_detune, P::reverb_mix, P::chorus_mix, P::filter_env, P::filter_cutoff, P::aenv_attack })
+        CHECK (kept.get (param) == pad.get (param));
+
+    // A fresh batch hands each patch its own engine.
+    GenerationRequest fresh;
+    fresh.count = 5;
+    fresh.hint = "pluck";
+    const auto prompt = LlmPatchGenerator::userPrompt (fresh);
+    CHECK (prompt.contains ("Patch 1:") && prompt.contains ("Patch 5:"));
+    const auto line1 = prompt.fromFirstOccurrenceOf ("Patch 1:", false, false).upToFirstOccurrenceOf ("\n", false, false);
+    const auto line2 = prompt.fromFirstOccurrenceOf ("Patch 2:", false, false).upToFirstOccurrenceOf ("\n", false, false);
+    CHECK (line1 != line2);
+    CHECK (LlmPatchGenerator::systemPrompt (true).contains ("What makes a sound finished"));
+}
+
 static void testPromptCues()
 {
     std::printf ("prompt cues\n");
@@ -1789,6 +1833,7 @@ int main (int argc, char** argv)
     testWarpsAndSources();
     testPromptCues();
     testQuickTweak();
+    testEnrich();
     testSampler();
     testSampleAnalyser();
     testSongAnalyser();

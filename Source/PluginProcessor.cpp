@@ -1640,6 +1640,7 @@ void StacksAudioProcessor::startGeneration (GenerationRequest req)
     labState.generating = true;
     labState.liveWrites.clear();
     labState.writtenValues.clear();
+    for (auto& w : labState.writtenWaves) w = WaveSpec();
     labState.status = "Growing...";
 
     const bool usingAi = generator != randomGenerator;
@@ -1775,6 +1776,21 @@ static juce::String describeWrite (const juce::String& id, const juce::String& r
     return juce::String (spec.name) + "  " + value;
 }
 
+float StacksAudioProcessor::writtenOr (int paramIndex, float fallback) const
+{
+    if (! labState.generating)
+        return fallback;
+    const auto it = labState.writtenValues.find (paramIndex);
+    return it != labState.writtenValues.end() ? it->second : fallback;
+}
+
+const WaveSpec* StacksAudioProcessor::writtenWave (int osc) const
+{
+    if (! labState.generating || osc < 0 || osc >= kNumOscs || labState.writtenWaves[(size_t) osc].isEmpty())
+        return nullptr;
+    return &labState.writtenWaves[(size_t) osc];
+}
+
 void StacksAudioProcessor::addLiveWrites (int token, const juce::StringArray& writes)
 {
     if (token != generationToken || ! labState.generating)
@@ -1786,6 +1802,22 @@ void StacksAudioProcessor::addLiveWrites (int token, const juce::StringArray& wr
         const auto raw = w.fromFirstOccurrenceOf ("\t", false, false);
         juce::String line;
         if (id == "wave") line = "Wavetable  " + raw;
+        else if (id.startsWith ("wave") && id.length() == 5)
+        {
+            // "waveA<TAB>name<TAB>{json}": the table itself travels with its name.
+            const auto name = raw.upToFirstOccurrenceOf ("\t", false, false);
+            const auto json = raw.fromFirstOccurrenceOf ("\t", false, false);
+            line = "Wavetable  " + name;
+            const int osc = (int) (id[4] - 'A');
+            if (osc >= 0 && osc < kNumOscs && json.isNotEmpty())
+                if (auto spec = WaveSpec::fromVar (juce::JSON::parse (json)))
+                {
+                    spec->name = name;
+                    labState.writtenWaves[(size_t) osc] = *spec;
+                    labState.writtenValues[(int) oscWaveParam (osc)] = (float) kCustomWave;
+                    labState.tweakedParams.push_back ((int) oscWaveParam (osc));
+                }
+        }
         else
         {
             line = describeWrite (id, raw);

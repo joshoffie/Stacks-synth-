@@ -42,6 +42,7 @@ struct LabState
     juce::String progressDetail;                // what the model is doing right now
     juce::StringArray liveWrites;               // the last settings written for the sound in progress, as shown text ("Cutoff 1.2 kHz")
     std::map<int, float> writtenValues;         // parameter index -> value the engine just wrote, so knobs can move to it
+    std::array<WaveSpec, kNumOscs> writtenWaves; // the designed tables as they arrive, so the wave displays can draw them
 };
 
 enum class EngineKind { Random, Ollama, Builtin };
@@ -107,6 +108,12 @@ public:
     void loadLabJsonForTools (const juce::String& json);   // tools only: a lab state (generations, tree) from JSON   // a tree node's patch (candidate -1 = that generation's seed), null if gone
     void cancelGeneration();
     void goBackGeneration();
+
+    // While a sound is being written: the value the engine just wrote for a
+    // setting (the displays draw it alongside the knobs), or `fallback` when it
+    // has not written that one; and the designed table it wrote for an oscillator.
+    float writtenOr (int paramIndex, float fallback) const;
+    const WaveSpec* writtenWave (int osc) const;
     void audition (int candidateIndex);
     void auditionSeed();                                   // hear the parent of this generation again
     void auditionFromTree (int generation, int candidate); // any node of the family tree (candidate -1 = that generation's seed)
