@@ -24,10 +24,14 @@ Two things, and only these two (`Source/Taste.h`):
    with no single knob behind them take a directed idea move), and the model
    is told in one sentence what to avoid. This is the stronger pull.
 
-2. **Weight the recipes gently.** A fresh batch draws its engine recipes
-   (two saws, FM, PWM, formant, ...) by weight instead of evenly. A recipe's
-   weight comes from the mean rating of the sounds written to it, shrunk
-   toward even while there are few ratings; dislikes pull harder than likes
+2. **Weight the recipes gently, per kind.** A fresh batch draws its engine
+   recipes (two saws, FM, PWM, formant, ...) by weight instead of evenly, each
+   slot with the weights of the kind it is going to be (the five sounds a Pad
+   tile grows use the pad weights; a batch without a hint rotates through the
+   kinds). A recipe's weight on a kind comes from the mean rating of the
+   sounds of that kind written to it, shrunk toward even while there are few
+   ratings, so "two saws" rated badly on basses says nothing about pads;
+   dislikes pull harder than likes
    (0.75 per point below 3, 0.35 per point above). It never drops under 0.4
    of even or rises over 1.7, and one slot in every five is drawn evenly
    whatever the weights, so a disliked recipe still turns up now and then and
@@ -48,7 +52,8 @@ takes it back there.
 - A trait the trash and the good share alike: nothing moves.
 - Recipe draw over 10,000 slots: a loved recipe (weight 1.7) takes 10% of the
   slots against 7% even, a hated one (0.4) still takes 4%, all fourteen
-  recipes appear; with no taste the draw is even.
+  recipes appear; with no taste, or for a kind the weights were not learned
+  on, the draw is even.
 - Over batches: random pads carry a Triangle LFO about half the time; for a
   player whose trash all had one, the share falls to 0% while the pads stay
   as varied (five distinct A tables either way).

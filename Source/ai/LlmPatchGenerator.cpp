@@ -261,26 +261,43 @@ namespace
     // Recipes for `count` slots, drawn without replacement: evenly for a player
     // with no taste yet, by the player's recipe weights otherwise, always with
     // one even draw in every run of five.
-    std::vector<int> pickRecipes (int count, const TasteProfile& taste = {})
+    std::vector<int> pickRecipes (int count, const TasteProfile& taste = {}, const std::vector<juce::String>& slotKinds = {})
     {
         juce::Random rng ((juce::int64) juce::Time::getHighResolutionTicks());
         std::vector<juce::String> tags;
         for (const auto& e : freshEngines()) tags.push_back (e.tag);
-        return drawRecipes (count, tags, taste, rng);
+        return drawRecipes (count, tags, taste, rng, slotKinds);
+    }
+
+    // The kind each slot of a fresh batch is asked for: the hint's kind for
+    // every slot when there is a hint, otherwise a rotation from a random start.
+    const char* const kFreshKinds[] = { "Pad", "Pluck", "Bass", "Keys", "Lead", "Bell", "Texture", "Drone" };
+    std::vector<juce::String> pickSlotKinds (const GenerationRequest& req)
+    {
+        std::vector<juce::String> kinds;
+        if (req.hint.trim().isNotEmpty())
+        {
+            const auto kind = tasteKind (req.hint);
+            for (int i = 0; i < req.count; ++i) kinds.push_back (kind);
+            return kinds;
+        }
+        juce::Random rng ((juce::int64) juce::Time::getHighResolutionTicks() ^ 0x51ed270b);
+        const int offset = rng.nextInt (8);
+        for (int i = 0; i < req.count; ++i) kinds.push_back (juce::String (kFreshKinds[(offset + i) % 8]).toLowerCase());
+        return kinds;
     }
 
     juce::String freshDirections (const GenerationRequest& req)
     {
-        static const char* const kinds[] = { "Pad", "Pluck", "Bass", "Keys", "Lead", "Bell", "Texture", "Drone" };
-        const auto recipes = (int) req.recipes.size() >= req.count ? req.recipes : pickRecipes (req.count);
-        juce::Random rng ((juce::int64) juce::Time::getHighResolutionTicks());
+        const auto slotKinds = (int) req.slotKinds.size() >= req.count ? req.slotKinds : pickSlotKinds (req);
+        const auto recipes = (int) req.recipes.size() >= req.count ? req.recipes : pickRecipes (req.count, req.taste, slotKinds);
         const bool hinted = req.hint.trim().isNotEmpty();
-        const int kindOffset = rng.nextInt (8);
         juce::String s;
         for (int i = 0; i < req.count; ++i)
         {
             const auto& engine = freshEngines()[(size_t) juce::jlimit (0, (int) freshEngines().size() - 1, recipes[(size_t) i])];
-            s << "  Patch " << (i + 1) << (hinted ? juce::String() : juce::String (" (a ") + kinds[(kindOffset + i) % 8] + ")")
+            auto kindLabel = slotKinds[(size_t) i]; kindLabel = kindLabel.substring (0, 1).toUpperCase() + kindLabel.substring (1);
+            s << "  Patch " << (i + 1) << (hinted ? juce::String() : juce::String (" (a ") + kindLabel + ")")
               << ": " << engine.text << (hinted ? " - still the kind of sound the direction asks for" : "") << "."
               << designInstruction (req, i, engine.builtIn) << "\n";
         }
@@ -889,8 +906,10 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
     // ask of a small model mid-JSON. So first it writes a few sentences about
     // what that should sound like in synth terms, and designs from those.
     GenerationRequest req = request;
+    if (req.parents.empty() && req.slotKinds.empty())
+        req.slotKinds = pickSlotKinds (req);
     if (req.parents.empty() && req.recipes.empty())
-        req.recipes = pickRecipes (req.count, req.taste);   // chosen once, so the prompt on disk, the prompt sent and the tags on the patches agree
+        req.recipes = pickRecipes (req.count, req.taste, req.slotKinds);   // chosen once, so the prompt on disk, the prompt sent and the tags on the patches agree
     if ((req.parents.empty() || growModeFor (req.variation) == GrowMode::Far) && req.designSlots.empty())
         req.designSlots = pickDesignSlots (req.count);
     if (req.hint.trim().isNotEmpty() && ! progress.cancelled())

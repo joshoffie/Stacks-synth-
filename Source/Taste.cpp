@@ -129,31 +129,35 @@ TasteProfile TasteProfile::fromRatings (const std::vector<TasteRating>& ratings)
         if (! dup) t.avoids.push_back (a);
     }
 
-    // Recipe weights: shrunk toward even with few ratings; dislikes pull harder than likes.
-    std::map<juce::String, std::pair<int, double>> byRecipe;   // tag -> (n, sum)
+    // Recipe weights, per kind: shrunk toward even with few ratings; dislikes pull
+    // harder than likes. A recipe rated badly on basses says nothing about pads.
+    std::map<juce::String, std::map<juce::String, std::pair<int, double>>> byKind;   // kind -> tag -> (n, sum)
     for (const auto& r : ratings)
         if (r.recipe.isNotEmpty() && ! r.recipe.startsWith ("grow:") && r.recipe != "random" && r.recipe != "random:grow")
         {
-            auto& e = byRecipe[r.recipe];
+            auto& e = byKind[tasteKind (r.category)][r.recipe];
             ++e.first; e.second += r.verdict;
         }
-    for (const auto& kv : byRecipe)
-    {
-        const int n = kv.second.first;
-        if (n < 2) continue;
-        const double mean = kv.second.second / n;
-        const double shrink = (double) n / (n + 3.0);
-        const double delta = mean - 3.0;
-        const double w = 1.0 + shrink * (delta < 0.0 ? 0.75 * delta : 0.35 * delta);
-        t.recipeWeights[kv.first] = (float) juce::jlimit ((double) kFloor, (double) kCap, w);
-    }
+    for (const auto& kindEntry : byKind)
+        for (const auto& kv : kindEntry.second)
+        {
+            const int n = kv.second.first;
+            if (n < 2) continue;
+            const double mean = kv.second.second / n;
+            const double shrink = (double) n / (n + 3.0);
+            const double delta = mean - 3.0;
+            const double w = 1.0 + shrink * (delta < 0.0 ? 0.75 * delta : 0.35 * delta);
+            t.recipeWeights[kindEntry.first][kv.first] = (float) juce::jlimit ((double) kFloor, (double) kCap, w);
+        }
     return t;
 }
 
-float TasteProfile::weightFor (const juce::String& recipeTag) const
+float TasteProfile::weightFor (const juce::String& kind, const juce::String& recipeTag) const
 {
-    const auto it = recipeWeights.find (recipeTag);
-    return it == recipeWeights.end() ? 1.0f : it->second;
+    const auto k = recipeWeights.find (kind);
+    if (k == recipeWeights.end()) return 1.0f;
+    const auto it = k->second.find (recipeTag);
+    return it == k->second.end() ? 1.0f : it->second;
 }
 
 juce::StringArray TasteProfile::avoidedTraitsIn (const Patch& p) const
@@ -191,11 +195,12 @@ juce::String TasteProfile::summary() const
         s << " Steering away from " << parts.joinIntoString (", ") << ".";
     }
     juce::StringArray up, down;
-    for (const auto& kv : recipeWeights)
-    {
-        if (kv.second >= 1.25f) up.add (kv.first);
-        if (kv.second <= 0.7f)  down.add (kv.first);
-    }
+    for (const auto& kindEntry : recipeWeights)
+        for (const auto& kv : kindEntry.second)
+        {
+            if (kv.second >= 1.25f) up.add (kv.first + " on " + kindEntry.first + "s");
+            if (kv.second <= 0.7f)  down.add (kv.first + " on " + kindEntry.first + "s");
+        }
     if (! up.isEmpty())   s << " Drawing a little more often: " << up.joinIntoString (", ") << ".";
     if (! down.isEmpty()) s << " Drawing less often: " << down.joinIntoString (", ") << ".";
     if (avoids.empty() && up.isEmpty() && down.isEmpty())
@@ -346,10 +351,11 @@ int steerAwayFromAvoided (Patch& p, const TasteProfile& taste, juce::int64 seed,
     return taste.avoidedTraitsIn (p).size();
 }
 
-std::vector<int> drawRecipes (int count, const std::vector<juce::String>& tags, const TasteProfile& taste, juce::Random& rng)
+std::vector<int> drawRecipes (int count, const std::vector<juce::String>& tags, const TasteProfile& taste, juce::Random& rng, const std::vector<juce::String>& slotKinds)
 {
     std::vector<int> picked;
     if (tags.empty() || count <= 0) return picked;
+    auto kindOf = [&] (int slot) { return slotKinds.empty() ? juce::String() : slotKinds[(size_t) juce::jmin (slot, (int) slotKinds.size() - 1)]; };
     std::vector<int> pool;
     auto refill = [&] { pool.clear(); for (int i = 0; i < (int) tags.size(); ++i) pool.push_back (i); };
     refill();
@@ -360,17 +366,18 @@ std::vector<int> drawRecipes (int count, const std::vector<juce::String>& tags, 
         if (slot % 5 == 0 && slot > 0) wildcardAt = rng.nextInt (5);
         const bool wildcard = slot % 5 == wildcardAt;   // one even draw in every run of five, at a random position
         int chosen = 0;
-        if (wildcard || taste.recipeWeights.empty())
+        const auto kind = kindOf (slot);
+        if (wildcard || kind.isEmpty() || ! taste.recipeWeights.count (kind))
             chosen = (int) rng.nextInt ((int) pool.size());
         else
         {
             double total = 0.0;
-            for (int i : pool) total += taste.weightFor (tags[(size_t) i]);
+            for (int i : pool) total += taste.weightFor (kind, tags[(size_t) i]);
             double r = rng.nextDouble() * total;
             chosen = (int) pool.size() - 1;
             for (size_t k = 0; k < pool.size(); ++k)
             {
-                r -= taste.weightFor (tags[(size_t) pool[k]]);
+                r -= taste.weightFor (kind, tags[(size_t) pool[k]]);
                 if (r <= 0.0) { chosen = (int) k; break; }
             }
         }

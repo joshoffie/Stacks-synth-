@@ -46,7 +46,7 @@ struct TasteProfile
         float lift = 1.0f;
     };
     std::vector<Avoid> avoids;
-    std::map<juce::String, float> recipeWeights;   // recipe tag -> weight, 1 = an even draw
+    std::map<juce::String, std::map<juce::String, float>> recipeWeights;   // kind -> recipe tag -> weight, 1 = an even draw; a kind learns only from its own ratings
     int rated = 0, trash = 0, whoa = 0;
 
     static constexpr float kFloor = 0.4f, kCap = 1.7f;        // a disliked recipe falls to 0.4 of even; a loved one rises to 1.7 at most
@@ -58,7 +58,7 @@ struct TasteProfile
     static TasteProfile fromFolder (const juce::File& folder) { return fromRatings (readRatingLogs (folder)); }
 
     bool isEmpty() const noexcept                            { return avoids.empty() && recipeWeights.empty(); }
-    float weightFor (const juce::String& recipeTag) const;   // 1 for a recipe never rated
+    float weightFor (const juce::String& kind, const juce::String& recipeTag) const;   // 1 for a recipe never rated on that kind
     juce::StringArray avoidedTraitsIn (const Patch&) const;  // the avoided traits this patch carries, for its kind and for every kind
     juce::String promptLines() const;                        // "Avoid on pads: ..." lines for the model, at most one per kind; never what to imitate
     juce::String summary() const;                            // plain words for Settings: what it has learned
@@ -79,8 +79,10 @@ void nudgeAway (Patch&, const juce::String& feature, juce::int64 seed);
 int steerAwayFromAvoided (Patch&, const TasteProfile&, juce::int64 seed, int attempts = 6);
 
 // `count` recipe indices for a batch from `tags`, drawn without replacement by
-// the profile's weights; in every run of five, one slot is drawn evenly
-// whatever the weights, so a disliked recipe still turns up now and then.
-std::vector<int> drawRecipes (int count, const std::vector<juce::String>& tags, const TasteProfile&, juce::Random&);
+// the profile's weights for each slot's kind (`slotKinds`, as tasteKind gives
+// them; fewer entries than slots means the last one repeats, none means an
+// even draw); in every run of five, one slot is drawn evenly whatever the
+// weights, so a disliked recipe still turns up now and then.
+std::vector<int> drawRecipes (int count, const std::vector<juce::String>& tags, const TasteProfile&, juce::Random&, const std::vector<juce::String>& slotKinds = {});
 
 } // namespace stacks

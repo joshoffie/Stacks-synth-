@@ -315,10 +315,12 @@ static void testTasteProfile()
     for (const auto& a : t.avoids) std::printf ("[%s%s%s x%.1f] ", a.kind.toRawUTF8(), a.kind.isEmpty() ? "" : ": ", a.feature.toRawUTF8(), a.lift);
     std::printf ("\n");
     // the pulls: "noise body" was rated 1 six times -> the floor; "fm" mixed (six 2s, six 3-5s) stays near even; "two saws" rated 4 six times -> up, under the cap
-    std::printf ("  weights: noise body %.2f, fm %.2f, two saws %.2f, never-rated %.2f\n", t.weightFor ("noise body"), t.weightFor ("fm"), t.weightFor ("two saws"), t.weightFor ("vocal"));
-    CHECK (std::abs (t.weightFor ("noise body") - TasteProfile::kFloor) < 1.0e-4f);
-    CHECK (t.weightFor ("two saws") > 1.15f && t.weightFor ("two saws") <= TasteProfile::kCap);
-    CHECK (t.weightFor ("vocal") == 1.0f);
+    std::printf ("  pad weights: noise body %.2f, fm %.2f, two saws %.2f, never-rated %.2f; on basses two saws %.2f\n",
+                 t.weightFor ("pad", "noise body"), t.weightFor ("pad", "fm"), t.weightFor ("pad", "two saws"), t.weightFor ("pad", "vocal"), t.weightFor ("bass", "two saws"));
+    CHECK (std::abs (t.weightFor ("pad", "noise body") - TasteProfile::kFloor) < 1.0e-4f);
+    CHECK (t.weightFor ("pad", "two saws") > 1.15f && t.weightFor ("pad", "two saws") <= TasteProfile::kCap);
+    CHECK (t.weightFor ("pad", "vocal") == 1.0f);
+    CHECK (t.weightFor ("bass", "two saws") == 1.0f && t.weightFor ("bass", "noise body") == 1.0f);   // learned on pads: basses are untouched
     CHECK (t.promptLines().contains ("Avoid on pads") && t.promptLines().contains ("HP24") && ! t.promptLines().containsIgnoreCase ("prefer") && ! t.promptLines().containsIgnoreCase ("like"));
     CHECK (t.summary().contains ("Rated 30 sounds") && t.summary().contains ("HP24"));
 
@@ -343,23 +345,27 @@ static void testTasteProfile()
         std::vector<juce::String> tags;
         for (int i = 0; i < 14; ++i) tags.push_back ("r" + juce::String (i));
         TasteProfile w;
-        w.recipeWeights["r0"] = TasteProfile::kCap;
-        w.recipeWeights["r1"] = TasteProfile::kFloor;
+        w.recipeWeights["bass"]["r0"] = TasteProfile::kCap;
+        w.recipeWeights["bass"]["r1"] = TasteProfile::kFloor;
         juce::Random rng (99);
         std::map<int, int> counts;
         const int batches = 2000;
+        const std::vector<juce::String> basses (5, "bass");
         for (int b = 0; b < batches; ++b)
-            for (int i : drawRecipes (5, tags, w, rng)) ++counts[i];
+            for (int i : drawRecipes (5, tags, w, rng, basses)) ++counts[i];
         const double slots = 5.0 * batches;
         std::printf ("  draw shares: loved %.1f%%, hated %.1f%%, even would be %.1f%%; recipes seen %d of 14\n", 100.0 * counts[0] / slots, 100.0 * counts[1] / slots, 100.0 / 14, (int) counts.size());
         CHECK (counts[0] / slots < 0.33 && counts[0] / slots > 1.0 / 14);
         CHECK (counts[1] / slots > 0.025 && counts[1] / slots < 1.0 / 14);
         CHECK ((int) counts.size() == 14);
-        // no taste: an even draw without replacement
+        // no taste, or another kind: an even draw without replacement
         TasteProfile none;
-        std::map<int, int> even;
+        std::map<int, int> even, pads;
+        const std::vector<juce::String> padKinds (5, "pad");
         for (int b = 0; b < batches; ++b) for (int i : drawRecipes (5, tags, none, rng)) ++even[i];
+        for (int b = 0; b < batches; ++b) for (int i : drawRecipes (5, tags, w, rng, padKinds)) ++pads[i];   // the weights were learned on basses
         for (const auto& kv : even) CHECK (std::abs (kv.second / slots - 1.0 / 14) < 0.015);
+        for (const auto& kv : pads) CHECK (std::abs (kv.second / slots - 1.0 / 14) < 0.015);
     }
 
     // 5. Steering: a pad through HP24 leaves with a low-pass; a pad with nothing avoided is untouched.
@@ -2664,8 +2670,9 @@ int main (int argc, char** argv)
         std::printf ("%s\n%s\n", folder.getFullPathName().toRawUTF8(), t.summary().toRawUTF8());
         for (const auto& a : t.avoids)
             std::printf ("  avoid %-8s %-28s %d of %d trash, %d of %d others, x%.1f\n", a.kind.isEmpty() ? "(all)" : a.kind.toRawUTF8(), a.feature.toRawUTF8(), a.trash, a.ofTrash, a.others, a.ofOthers, a.lift);
-        for (const auto& kv : t.recipeWeights)
-            std::printf ("  recipe %-14s weight %.2f\n", kv.first.toRawUTF8(), kv.second);
+        for (const auto& kindEntry : t.recipeWeights)
+            for (const auto& kv : kindEntry.second)
+                std::printf ("  recipe %-8s %-14s weight %.2f\n", kindEntry.first.toRawUTF8(), kv.first.toRawUTF8(), kv.second);
         std::printf ("%s", t.promptLines().toRawUTF8());
         return 0;
     }

@@ -22,6 +22,7 @@ struct GenerationRequest
     std::vector<int> recipes;     // fresh batches: per slot, the engine recipe it was given (an index into the generator's list; the generator fills it)
     std::vector<int> designSlots; // fresh and Far batches: per slot, 1 = design a table for oscillator A, 0 = a built-in table (the generator fills it: half and half)
     TasteProfile taste;           // what this player's ratings say: traits to steer away from, recipe weights (empty = the factory build's behaviour)
+    std::vector<juce::String> slotKinds;   // fresh batches: the kind each slot is asked for, as tasteKind names them ("pad", ...); the generator fills it
     int generation = 1;
 };
 
