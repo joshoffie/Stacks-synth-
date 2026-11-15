@@ -7,31 +7,97 @@ namespace stacks
 
 namespace
 {
-    constexpr float kVoiceGain = 0.35f;
+    constexpr float kVoiceGain = 0.45f;
     constexpr float twoPi = juce::MathConstants<float>::twoPi;
 
     inline float midiToHz (float note) noexcept { return 440.0f * std::exp2 ((note - 69.0f) / 12.0f); }
     inline float wrap01 (float p) noexcept     { return p - std::floor (p); }
-
-    juce::dsp::LadderFilterMode filterModeFor (int type) noexcept
-    {
-        using M = juce::dsp::LadderFilterMode;
-        switch (type)
-        {
-            case 0:  return M::LPF12;
-            case 1:  return M::LPF24;
-            case 2:  return M::HPF12;
-            case 3:  return M::HPF24;
-            case 4:  return M::BPF12;
-            default: return M::BPF24;
-        }
-    }
 }
 
+//==============================================================================
+void Ladder::setMode (int type) noexcept
+{
+    type = juce::jlimit (0, 5, type);
+    if (type == mode)
+        return;
+    mode = type;
+    // The six responses as taps on the four stages (juce::dsp::LadderFilter's table), with its 1.2 output gain.
+    static const float taps[6][5] = { { 0.0f, 0.0f, 1.0f, 0.0f, 0.0f },      // LP12
+                                      { 0.0f, 0.0f, 0.0f, 0.0f, 1.0f },      // LP24
+                                      { 1.0f, -2.0f, 1.0f, 0.0f, 0.0f },     // HP12
+                                      { 1.0f, -4.0f, 6.0f, -4.0f, 1.0f },    // HP24
+                                      { 0.0f, 1.0f, -1.0f, 0.0f, 0.0f },     // BP12
+                                      { 0.0f, 0.0f, 1.0f, -2.0f, 1.0f } };   // BP24
+    for (int i = 0; i < 5; ++i) A[i] = 1.2f * taps[type][i];
+    comp = type == 2 || type == 3 ? 0.0f : 0.5f;
+    reset();
+}
+
+void Ladder::prepare (double sr, int maxBlock)
+{
+    sampleRate = 2.0 * (sr > 0.0 ? sr : 48000.0);
+    os = std::make_unique<juce::dsp::Oversampling<float>> (2, 1, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true);
+    os->initProcessing ((size_t) juce::jmax (1, maxBlock));
+    reset();
+}
+
+Ladder::Coefs Ladder::coefsFor (float cutoffHz, float resonance, float drive) const noexcept
+{
+    Coefs c;
+    c.a1 = std::exp (-twoPi * juce::jlimit (10.0f, 0.45f * (float) sampleRate, cutoffHz) / (float) sampleRate);
+    c.res = 0.1f + 0.9f * juce::jlimit (0.0f, 1.0f, resonance);
+    c.drive = juce::jmax (1.0f, drive);
+    c.gain = std::pow (c.drive, -2.642f) * 0.6103f + 0.3903f;
+    c.drive2 = c.drive * 0.04f + 0.96f;
+    c.gain2 = std::pow (c.drive2, -2.642f) * 0.6103f + 0.3903f;
+    return c;
+}
+
+void Ladder::process (float* L, float* R, int n, float cutoffHz, float resonance, float drive) noexcept
+{
+    if (os == nullptr || n <= 0 || n > kMaxBlock)
+        return;
+    const Coefs target = coefsFor (cutoffHz, resonance, drive);
+    if (! primed) { last = target; primed = true; }
+    float* ptrs[2] = { L, R };
+    juce::dsp::AudioBlock<float> block (ptrs, 2, (size_t) n);
+    auto up = os->processSamplesUp (block);
+    const int m = (int) up.getNumSamples();
+    float* ch[2] = { up.getChannelPointer (0), up.getChannelPointer (1) };
+    const float inv = 1.0f / (float) juce::jmax (1, m);
+    for (int i = 0; i < m; ++i)
+    {
+        const float t = (float) (i + 1) * inv;
+        const float a1 = last.a1 + (target.a1 - last.a1) * t;
+        const float res = last.res + (target.res - last.res) * t;
+        const float gain = last.gain + (target.gain - last.gain) * t;
+        const float gain2 = last.gain2 + (target.gain2 - last.gain2) * t;
+        const float dr = last.drive + (target.drive - last.drive) * t;
+        const float dr2 = last.drive2 + (target.drive2 - last.drive2) * t;
+        const float g = 1.0f - a1, b0 = g * 0.76923076923f, b1 = g * 0.23076923076f;
+        for (int c = 0; c < 2; ++c)
+        {
+            float* st = s[c];
+            const float dx = gain * saturate (dr * ch[c][i]);
+            const float a = dx + res * -4.0f * (gain2 * saturate (dr2 * st[4]) - dx * comp);
+            const float b = b1 * st[0] + a1 * st[1] + b0 * a;
+            const float cc = b1 * st[1] + a1 * st[2] + b0 * b;
+            const float d = b1 * st[2] + a1 * st[3] + b0 * cc;
+            const float e = b1 * st[3] + a1 * st[4] + b0 * d;
+            st[0] = a; st[1] = b; st[2] = cc; st[3] = d; st[4] = e;
+            ch[c][i] = a * A[0] + b * A[1] + cc * A[2] + d * A[3] + e * A[4];
+        }
+    }
+    os->processSamplesDown (block);
+    last = target;
+}
+
+//==============================================================================
 SynthVoice::SynthVoice (VoiceContext& context) : ctx (context)
 {
-    rng.setSeedRandomly();
-    for (auto& f : filters) f.ladder.setMode (f.mode);
+    if (ctx.randomSeed != 0) rng.setSeed ((juce::int64) ctx.randomSeed * 7919 + ++ctx.voiceCounter);
+    else                     rng.setSeedRandomly();
+    for (auto& f : filters) f.ladder.setMode (1);
 }
 
 bool SynthVoice::canPlaySound (juce::SynthesiserSound* sound)
@@ -54,12 +120,9 @@ void SynthVoice::setCurrentPlaybackSampleRate (double newRate)
 void SynthVoice::updateEnvelopes (const SynthParams& p)
 {
     const float e = envScale;
-    ampEnv.setParameters ({ p.get (P::aenv_attack) * e, p.get (P::aenv_decay) * e,
-                            p.get (P::aenv_sustain), p.get (P::aenv_release) * e });
-    filterEnv.setParameters ({ p.get (P::fenv_attack) * e, p.get (P::fenv_decay) * e,
-                               p.get (P::fenv_sustain), p.get (P::fenv_release) * e });
-    modEnv.setParameters ({ p.get (P::menv_attack) * e, p.get (P::menv_decay) * e,
-                            p.get (P::menv_sustain), p.get (P::menv_release) * e });
+    ampEnv.setParameters (p.get (P::aenv_attack) * e, p.get (P::aenv_decay) * e, p.get (P::aenv_sustain), p.get (P::aenv_release) * e);
+    filterEnv.setParameters (p.get (P::fenv_attack) * e, p.get (P::fenv_decay) * e, p.get (P::fenv_sustain), p.get (P::fenv_release) * e);
+    modEnv.setParameters (p.get (P::menv_attack) * e, p.get (P::menv_decay) * e, p.get (P::menv_sustain), p.get (P::menv_release) * e);
 }
 
 void SynthVoice::startNote (int midiNoteNumber, float vel, juce::SynthesiserSound*, int currentPitchWheelPosition)
@@ -104,14 +167,18 @@ void SynthVoice::startNote (int midiNoteNumber, float vel, juce::SynthesiserSoun
     }
     ctx.lastNote.store (targetNote);
 
-    // Spread unison start phases so stacked copies don't all hit the same peak.
+    // Every note starts the oscillators somewhere new, like free-running analog
+    // oscillators do, so two notes never have the same attack and A against B
+    // never sits in the same comb twice. Unison copies keep their even spread
+    // around that start so the stack doesn't all hit one peak.
     const int unison = juce::jlimit (1, kMaxUnison, p.geti (P::unison_voices));
+    const float startA = rng.nextFloat(), startB = rng.nextFloat(), startC = rng.nextFloat();
     for (int u = 0; u < kMaxUnison; ++u)
     {
         const float ph = unison > 1 ? (float) u / (float) unison : 0.0f;
-        phaseA[u] = ph;
-        phaseB[u] = ph;
-        phaseC[u] = ph;
+        phaseA[u] = wrap01 (ph + startA);
+        phaseB[u] = wrap01 (ph + startB);
+        phaseC[u] = wrap01 (ph + startC);
     }
     subPhase = 0.0f;
     for (int k = 0; k < kNumLfos; ++k)
@@ -219,8 +286,9 @@ float SynthVoice::lfoValueFor (int k, const SynthParams& p, int sampleInBlock, i
 
 // Built-in tables come from the shared bank, "User n" from the imported slots,
 // "Custom" from the patch's designed table for this oscillator (a sine stands
-// in for an empty slot).
-float SynthVoice::readWave (int osc, int wave, int mip, float morph, float phase) const noexcept
+// in for an empty slot). `mip` is fractional: two neighbouring band-limited
+// levels are blended so a pitch sweep never steps in brightness.
+float SynthVoice::readWave (int osc, int wave, float mip, float morph, float phase) const noexcept
 {
     if (wave < WavetableBank::kNumBuiltIn)
         return ctx.bank->read (wave, mip, morph, phase);
@@ -232,8 +300,7 @@ float SynthVoice::readWave (int osc, int wave, int mip, float morph, float phase
 
 void SynthVoice::FilterUnit::prepare (double sampleRate, int blockSize)
 {
-    juce::dsp::ProcessSpec spec { sampleRate, (juce::uint32) blockSize, 2 };
-    ladder.prepare (spec);
+    ladder.prepare (sampleRate, blockSize);
     for (auto& c : comb) c.prepare ((int) (sampleRate / 20.0) + 8);
     reset();
 }
@@ -244,10 +311,14 @@ void SynthVoice::FilterUnit::reset() noexcept
     for (auto& s : svfA) s.reset();
     for (auto& s : svfB) s.reset();
     for (auto& c : comb) c.clear();
+    lastCutoff = -1.0f;
 }
 
 void SynthVoice::FilterUnit::process (int type, int model, float cutoff, float res, float drive, juce::AudioBuffer<float>& buffer, int n, float fsr) noexcept
 {
+    const float from = lastCutoff > 0.0f ? lastCutoff : cutoff;
+    lastCutoff = cutoff;
+
     // Character: Warm and Diode saturate the input and push the ladder; Smooth
     // swaps the ladder for a soft state-variable filter.
     if (model == 1 || model == 2)
@@ -256,21 +327,24 @@ void SynthVoice::FilterUnit::process (int type, int model, float cutoff, float r
         for (int c = 0; c < 2; ++c)
         {
             float* x = buffer.getWritePointer (c);
-            for (int i = 0; i < n; ++i) x[i] = std::tanh (x[i] * k) / comp;
+            for (int i = 0; i < n; ++i) x[i] = Ladder::saturate (x[i] * k) / comp;
         }
         if (model == 2) { drive = juce::jmax (drive, 2.5f); res = juce::jmin (1.0f, res * 1.15f); }
         else            { drive = juce::jmax (drive, 1.2f); }
     }
     if (model == 3 && type <= 5)
     {
-        const float g = std::tan (juce::MathConstants<float>::pi * juce::jmin (cutoff, fsr * 0.45f) / fsr);
+        const float g0 = std::tan (juce::MathConstants<float>::pi * juce::jmin (from, fsr * 0.45f) / fsr);
+        const float g1 = std::tan (juce::MathConstants<float>::pi * juce::jmin (cutoff, fsr * 0.45f) / fsr);
         const float kd = 2.0f - 1.85f * juce::jlimit (0.0f, 1.0f, res);
         const bool twoPole24 = (type % 2) == 1;
+        const float inv = 1.0f / (float) juce::jmax (1, n);
         for (int c = 0; c < 2; ++c)
         {
             float* x = buffer.getWritePointer (c);
             for (int i = 0; i < n; ++i)
             {
+                const float g = g0 + (g1 - g0) * (float) (i + 1) * inv;
                 svfA[c].process (x[i], g, kd);
                 float y = type < 2 ? svfA[c].lp : type < 4 ? svfA[c].hp : svfA[c].bp;
                 if (twoPole24)
@@ -285,52 +359,45 @@ void SynthVoice::FilterUnit::process (int type, int model, float cutoff, float r
     }
     if (type <= 5)
     {
-        const auto wanted = filterModeFor (type);
-        if (wanted != mode)
-        {
-            mode = wanted;
-            ladder.setMode (mode);   // resets state, so only on a real change
-        }
-        ladder.setCutoffFrequencyHz (cutoff);
-        ladder.setResonance (res);
-        ladder.setDrive (drive);
-        juce::dsp::AudioBlock<float> block (buffer);
-        auto subBlock = block.getSubBlock (0, (size_t) n);
-        juce::dsp::ProcessContextReplacing<float> context (subBlock);
-        ladder.process (context);
+        ladder.setMode (type);
+        ladder.process (buffer.getWritePointer (0), buffer.getWritePointer (1), n, cutoff, res, drive);
     }
     else
-        processExtra (type, cutoff, res, buffer, n, fsr);
+        processExtra (type, from, cutoff, res, buffer, n, fsr);
 }
 
 // Notch (a hole at the cutoff), Comb (a resonance at the cutoff's pitch) and
-// Formant (two vowel peaks; the cutoff sweeps A-E-I-O-U).
-void SynthVoice::FilterUnit::processExtra (int type, float cutoff, float res, juce::AudioBuffer<float>& buffer, int n, float fsr) noexcept
+// Formant (two vowel peaks; the cutoff sweeps A-E-I-O-U). The cutoff ramps
+// from `cutoffFrom` to `cutoffTo` over the block.
+void SynthVoice::FilterUnit::processExtra (int type, float cutoffFrom, float cutoffTo, float res, juce::AudioBuffer<float>& buffer, int n, float fsr) noexcept
 {
     float* L = buffer.getWritePointer (0);
     float* R = buffer.getWritePointer (1);
     float* ch[2] = { L, R };
+    const float inv = 1.0f / (float) juce::jmax (1, n);
 
     if (type == 6)   // Notch
     {
-        const float g = std::tan (juce::MathConstants<float>::pi * cutoff / fsr);
+        const float g0 = std::tan (juce::MathConstants<float>::pi * juce::jmin (cutoffFrom, fsr * 0.45f) / fsr);
+        const float g1 = std::tan (juce::MathConstants<float>::pi * juce::jmin (cutoffTo, fsr * 0.45f) / fsr);
         const float k = 1.0f / (0.7f + res * 8.0f);
         for (int c = 0; c < 2; ++c)
             for (int i = 0; i < n; ++i)
             {
-                svfA[c].process (ch[c][i], g, k);
+                svfA[c].process (ch[c][i], g0 + (g1 - g0) * (float) (i + 1) * inv, k);
                 ch[c][i] = svfA[c].lp + svfA[c].hp;
             }
         return;
     }
     if (type == 7)   // Comb
     {
-        const float delaySamples = juce::jlimit (2.0f, fsr / 20.0f, fsr / cutoff);
+        const float d0 = juce::jlimit (2.0f, fsr / 20.0f, fsr / juce::jmax (20.0f, cutoffFrom));
+        const float d1 = juce::jlimit (2.0f, fsr / 20.0f, fsr / juce::jmax (20.0f, cutoffTo));
         const float fb = res * 0.93f;
         for (int c = 0; c < 2; ++c)
             for (int i = 0; i < n; ++i)
             {
-                const float z = comb[c].read (delaySamples);
+                const float z = comb[c].read (d0 + (d1 - d0) * (float) (i + 1) * inv);
                 const float y = ch[c][i] + fb * z;
                 comb[c].write (y);
                 ch[c][i] = 0.5f * (ch[c][i] + y);
@@ -340,17 +407,24 @@ void SynthVoice::FilterUnit::processExtra (int type, float cutoff, float res, ju
     // Formant: F1/F2 of A, E, I, O, U, swept by the cutoff on a log scale.
     static const float f1[] = { 730.0f, 530.0f, 390.0f, 570.0f, 440.0f };
     static const float f2[] = { 1090.0f, 1840.0f, 1990.0f, 840.0f, 1020.0f };
-    const float pos = juce::jlimit (0.0f, 3.999f, std::log2 (juce::jmax (1.0f, cutoff / 150.0f)) / std::log2 (20000.0f / 150.0f) * 4.0f);
-    const int v0 = (int) pos; const float t = pos - (float) v0; const int v1 = juce::jmin (4, v0 + 1);
-    const float fa = f1[v0] + (f1[v1] - f1[v0]) * t, fb2 = f2[v0] + (f2[v1] - f2[v0]) * t;
-    const float ga = std::tan (juce::MathConstants<float>::pi * juce::jmin (fa, fsr * 0.45f) / fsr);
-    const float gb = std::tan (juce::MathConstants<float>::pi * juce::jmin (fb2, fsr * 0.45f) / fsr);
+    auto formants = [&] (float cutoff, float& ga, float& gb)
+    {
+        const float pos = juce::jlimit (0.0f, 3.999f, std::log2 (juce::jmax (1.0f, cutoff / 150.0f)) / std::log2 (20000.0f / 150.0f) * 4.0f);
+        const int v0 = (int) pos; const float t = pos - (float) v0; const int v1 = juce::jmin (4, v0 + 1);
+        const float fa = f1[v0] + (f1[v1] - f1[v0]) * t, fb2 = f2[v0] + (f2[v1] - f2[v0]) * t;
+        ga = std::tan (juce::MathConstants<float>::pi * juce::jmin (fa, fsr * 0.45f) / fsr);
+        gb = std::tan (juce::MathConstants<float>::pi * juce::jmin (fb2, fsr * 0.45f) / fsr);
+    };
+    float ga0, gb0, ga1, gb1;
+    formants (cutoffFrom, ga0, gb0);
+    formants (cutoffTo, ga1, gb1);
     const float k = 1.0f / (2.0f + res * 16.0f);
     for (int c = 0; c < 2; ++c)
         for (int i = 0; i < n; ++i)
         {
-            svfA[c].process (ch[c][i], ga, k);
-            svfB[c].process (ch[c][i], gb, k);
+            const float t = (float) (i + 1) * inv;
+            svfA[c].process (ch[c][i], ga0 + (ga1 - ga0) * t, k);
+            svfB[c].process (ch[c][i], gb0 + (gb1 - gb0) * t, k);
             ch[c][i] = (svfA[c].bp + 0.7f * svfB[c].bp) * 2.2f;
         }
 }
@@ -524,19 +598,17 @@ void SynthVoice::renderNextBlock (juce::AudioBuffer<float>& out, int startSample
                            : 0.0f;
         // Analog drift: a slow random walk per voice, a few cents and a breath of filter.
         {
-            const float amt = p.get (P::char_drift);
             driftPitch += 0.03f * ((rng.nextFloat() * 2.0f - 1.0f) - driftPitch);
             driftFilter += 0.02f * ((rng.nextFloat() * 2.0f - 1.0f) - driftFilter);
-            juce::ignoreUnused (amt);
         }
         const float note   = currentNote + retune + pitchBendSemis + pitchMod + driftPitch * 0.08f * p.get (P::char_drift);
         const float baseHz = midiToHz (note);
         const float hzA    = baseHz * std::exp2 (semisA / 12.0f);
         const float hzB    = baseHz * std::exp2 (semisB / 12.0f);
         const float hzC    = baseHz * std::exp2 (semisC / 12.0f);
-        const int mipA     = WavetableBank::levelFor (hzA * (1.0f + 3.0f * fm) * warpRateFactor (warpA, warpAmtA), sr); // FM and Sync widen A's spectrum
-        const int mipB     = WavetableBank::levelFor (hzB * warpRateFactor (warpB, warpAmtB), sr);
-        const int mipC     = WavetableBank::levelFor (hzC * warpRateFactor (warpC, warpAmtC), sr);
+        const float mipA   = Tables::levelForF (hzA * (1.0f + 3.0f * fm) * warpRateFactor (warpA, warpAmtA), sr); // FM and Sync widen A's spectrum
+        const float mipB   = Tables::levelForF (hzB * warpRateFactor (warpB, warpAmtB), sr);
+        const float mipC   = Tables::levelForF (hzC * warpRateFactor (warpC, warpAmtC), sr);
 
         float incA[kMaxUnison], incB[kMaxUnison], incC[kMaxUnison];
         for (int u = 0; u < unison; ++u)
@@ -616,7 +688,7 @@ void SynthVoice::renderNextBlock (juce::AudioBuffer<float>& out, int startSample
                 for (int c = 0; c < 2; ++c)
                 {
                     float* x = buf->getWritePointer (c);
-                    for (int i = 0; i < n; ++i) x[i] = std::tanh (x[i] * k) * comp;
+                    for (int i = 0; i < n; ++i) x[i] = Ladder::saturate (x[i] * k) * comp;
                 }
         }
 
@@ -649,24 +721,34 @@ void SynthVoice::renderNextBlock (juce::AudioBuffer<float>& out, int startSample
         }
 
         // ---- amplitude, pan, output ----------------------------------------
+        // The gains this sub-block asks for are reached over its samples, from
+        // where the last one left them, so a tremolo or a pan LFO never steps.
         const float gl = std::sqrt (0.5f * (1.0f - pan)) * juce::MathConstants<float>::sqrt2;
         const float gr = std::sqrt (0.5f * (1.0f + pan)) * juce::MathConstants<float>::sqrt2;
+        const float targetL = velocityGain * ampGain * kVoiceGain * gl;
+        const float targetR = velocityGain * ampGain * kVoiceGain * gr;
+        if (! gainsPrimed) { lastGainL = targetL; lastGainR = targetR; gainsPrimed = true; }
+        const float stepL = (targetL - lastGainL) / (float) n, stepR = (targetR - lastGainR) / (float) n;
+        float gL = lastGainL, gR = lastGainR;
         auto* outL = out.getWritePointer (0, pos);
         auto* outR = numOut > 1 ? out.getWritePointer (1, pos) : nullptr;
 
         for (int i = 0; i < n; ++i)
         {
-            const float g = ampEnv.getNextSample() * velocityGain * ampGain * kVoiceGain;
+            gL += stepL; gR += stepR;
+            const float e = ampEnv.getNextSample();
             if (outR != nullptr)
             {
-                outL[i] += scratchL[i] * g * gl;
-                outR[i] += scratchR[i] * g * gr;
+                outL[i] += scratchL[i] * e * gL;
+                outR[i] += scratchR[i] * e * gR;
             }
             else
             {
-                outL[i] += 0.5f * (scratchL[i] + scratchR[i]) * g;
+                outL[i] += 0.5f * (scratchL[i] * gL + scratchR[i] * gR) * e;
             }
         }
+        lastGainL = targetL;
+        lastGainR = targetR;
 
         pos += n;
         remaining -= n;

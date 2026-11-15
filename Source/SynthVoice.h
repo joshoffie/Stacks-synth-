@@ -40,6 +40,7 @@ struct VoiceContext
     float channelPressure[16] {};
     std::atomic<float>* liveValues = nullptr;  // kNumParams, what the UI's markers show
     std::atomic<int> voiceCounter { 0 };       // hands out serial numbers at note-on
+    int randomSeed = 0;                        // 0: every voice rolls its own dice (the plug-in); otherwise repeatable renders (the offline tools)
     std::atomic<int> displayVoice { -1 };      // the newest voice publishes its values
     double bpm = 120.0;
     float lfoRateHz[kNumLfos] {};             // effective rate (sync applied) for free-running LFOs
@@ -56,6 +57,113 @@ inline void nudgeParam (SynthParams& p, int paramIndex, float delta) noexcept
     const float norm = juce::jlimit (0.0f, 1.0f, range.convertTo0to1 (juce::jlimit (range.start, range.end, v)) + delta);
     v = range.convertFrom0to1 (norm);
 }
+
+// An ADSR with analog curves: the attack is a fast-then-easing rise, decay and
+// release fall exponentially (a straight line in dB), the way a capacitor
+// discharges and the way every classic synth's envelope sounds. A linear
+// decay hangs at the top and then stops dead; this one is all tail. The decay
+// time is where the curve has a tenth of the way left (-20 dB); the release
+// time is where it is 26 dB down, and the voice is freed at -60 dB, about
+// 2.3 times the release setting.
+class Envelope
+{
+public:
+    enum class Stage { idle, attack, decay, sustain, release };
+
+    void setSampleRate (double sr) noexcept          { sampleRate = sr > 0.0 ? sr : 48000.0; }
+    void setParameters (float attackSec, float decaySec, float sustainLevel, float releaseSec) noexcept
+    {
+        sustain = juce::jlimit (0.0f, 1.0f, sustainLevel);
+        attackCoef  = coefFor (juce::jmax (0.0005f, attackSec) / 1.466f);   // reaches 1.0 at attackSec, aiming past it
+        decayCoef   = coefFor (juce::jmax (0.001f, decaySec) / 2.3026f);    // -20 dB of the distance at decaySec
+        releaseCoef = coefFor (juce::jmax (0.001f, releaseSec) / 3.0f);
+    }
+    void noteOn() noexcept                            { stage = Stage::attack; }   // from wherever the level is: no click on a retrigger
+    void noteOff() noexcept                           { if (stage != Stage::idle) stage = Stage::release; }
+    void reset() noexcept                             { stage = Stage::idle; level = 0.0f; }
+    bool isActive() const noexcept                    { return stage != Stage::idle; }
+    Stage currentStage() const noexcept               { return stage; }
+    float value() const noexcept                      { return level; }
+
+    float getNextSample() noexcept
+    {
+        switch (stage)
+        {
+            case Stage::attack:
+                level += attackCoef * (1.3f - level);
+                if (level >= 1.0f) { level = 1.0f; stage = Stage::decay; }
+                break;
+            case Stage::decay:
+                level += decayCoef * (sustain - level);
+                if (std::abs (level - sustain) < 1.0e-4f) { level = sustain; stage = Stage::sustain; }
+                break;
+            case Stage::sustain:
+                level = sustain;
+                if (level < 1.0e-4f) { level = 0.0f; stage = Stage::idle; }   // a pluck that has died frees its voice
+                break;
+            case Stage::release:
+                level -= releaseCoef * level;
+                if (level < 1.0e-3f) { level = 0.0f; stage = Stage::idle; }   // -60 dB: gone, the voice is free
+                break;
+            case Stage::idle:
+            default:
+                level = 0.0f;
+                break;
+        }
+        return level;
+    }
+
+private:
+    float coefFor (float tauSec) const noexcept { return 1.0f - std::exp (-1.0f / (tauSec * (float) sampleRate)); }
+
+    double sampleRate = 48000.0;
+    float attackCoef = 0.1f, decayCoef = 0.01f, releaseCoef = 0.01f, sustain = 1.0f;
+    float level = 0.0f;
+    Stage stage = Stage::idle;
+};
+
+// The four-pole transistor ladder (the structure of juce::dsp::LadderFilter:
+// four one-pole stages, saturated feedback, the six responses as taps), with
+// three differences that matter for how it sounds: the cutoff and resonance
+// ramp across each call instead of gliding over 50 ms, so a filter envelope
+// with a 10 ms decay really snaps; it runs at twice the sample rate, so what
+// the saturators add above Nyquist folds back 30 dB quieter on bright notes;
+// and the saturator is a smooth rational tanh rather than a lookup table.
+class Ladder
+{
+public:
+    static constexpr int kMaxBlock = 64;   // the longest run process() is asked for (a voice sub-block)
+    void prepare (double sr, int maxBlock = kMaxBlock);
+    void reset() noexcept
+    {
+        for (auto& ch : s) for (auto& v : ch) v = 0.0f;
+        if (os != nullptr) os->reset();
+        primed = false;
+    }
+    void setMode (int type) noexcept;   // 0 LP12, 1 LP24, 2 HP12, 3 HP24, 4 BP12, 5 BP24; resets the state on a real change
+    // Both channels, n samples; cutoff, resonance (0..1) and drive (>= 1) move
+    // from the previous call's values to these over the block.
+    void process (float* L, float* R, int n, float cutoffHz, float resonance, float drive) noexcept;
+
+    static float saturate (float x) noexcept   // tanh to within 2%, cheap
+    {
+        x = juce::jlimit (-3.0f, 3.0f, x);
+        const float x2 = x * x;
+        return x * (27.0f + x2) / (27.0f + 9.0f * x2);
+    }
+
+private:
+    struct Coefs { float a1 = 0.5f, res = 0.1f, gain = 1.0f, gain2 = 1.0f, drive = 1.0f, drive2 = 1.0f; };
+    Coefs coefsFor (float cutoffHz, float resonance, float drive) const noexcept;
+
+    double sampleRate = 48000.0;   // the rate the ladder runs at: twice the host's
+    int mode = -1;
+    float A[5] { 0.0f, 0.0f, 0.0f, 0.0f, 1.2f }, comp = 0.5f;
+    float s[2][5] {};
+    Coefs last;
+    bool primed = false;
+    std::unique_ptr<juce::dsp::Oversampling<float>> os;   // 2x: the saturators' products above Nyquist fold back far quieter
+};
 
 // One playing note: 3 wavetable oscillators (B can FM A, each with a warp) x
 // up to 16 unison copies, sub + noise, two filters, three envelopes, four LFOs.
@@ -81,12 +189,12 @@ private:
     float lfoValue (int shape, float phase, float held) const noexcept;
     void updateEnvelopes (const SynthParams&);
 
-    float readWave (int osc, int wave, int mip, float morph, float phase) const noexcept;
+    float readWave (int osc, int wave, float mip, float morph, float phase) const noexcept;
     float lfoValueFor (int k, const SynthParams& p, int sampleInBlock, int blockLen, float& heldOut) noexcept;
     float sourceValue (int source, const float* lfo, float filterEnvValue, float modEnvValue) const noexcept;
 
     VoiceContext& ctx;
-    juce::ADSR ampEnv, filterEnv, modEnv;
+    Envelope ampEnv, filterEnv, modEnv;
     struct Svf
     {
         float ic1 = 0.0f, ic2 = 0.0f, lp = 0.0f, bp = 0.0f, hp = 0.0f;
@@ -101,17 +209,19 @@ private:
     };
 
     // One filter: the ladder for LP/HP/BP; a TPT state-variable pair and a comb
-    // line for Notch, Comb and Formant. Two of them: filter 1 and filter 2.
+    // line for Notch, Comb and Formant. Two of them: filter 1 and filter 2. The
+    // cutoff ramps across each sub-block from where it was, so modulation
+    // never steps.
     struct FilterUnit
     {
-        juce::dsp::LadderFilter<float> ladder;
-        juce::dsp::LadderFilterMode mode = juce::dsp::LadderFilterMode::LPF24;
+        Ladder ladder;
         Svf svfA[2], svfB[2];
         FracDelay comb[2];
+        float lastCutoff = -1.0f;   // < 0: nothing to ramp from
         void prepare (double sampleRate, int blockSize);
         void reset() noexcept;
         void process (int type, int model, float cutoff, float res, float drive, juce::AudioBuffer<float>& buffer, int n, float fsr) noexcept;
-        void processExtra (int type, float cutoff, float res, juce::AudioBuffer<float>& buffer, int n, float fsr) noexcept;
+        void processExtra (int type, float cutoffFrom, float cutoffTo, float res, juce::AudioBuffer<float>& buffer, int n, float fsr) noexcept;
     };
     FilterUnit filters[2];
     SampleVoice sampler;
@@ -128,6 +238,8 @@ private:
     int channel = 1;               // MIDI channel of this note
     float noteRandom = 0.0f;       // -1..1, drawn per note
     float currentNote = 60.0f, targetNote = 60.0f, glideInc = 0.0f;
+    float lastGainL = 0.0f, lastGainR = 0.0f;   // the output gains of the previous sub-block, ramped from
+    bool gainsPrimed = false;
 
     float phaseA[kMaxUnison] {}, phaseB[kMaxUnison] {}, phaseC[kMaxUnison] {};
     float subPhase = 0.0f;

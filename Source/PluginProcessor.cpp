@@ -15,7 +15,7 @@ namespace stacks
 
 namespace
 {
-    constexpr int kNumVoices = 12;
+    constexpr int kNumVoices = 16;
 
     // Keeps wild AI patches from clipping hard: linear below 0.8, then a
     // gentle tanh knee that never exceeds 1.0.

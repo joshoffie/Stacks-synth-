@@ -164,7 +164,7 @@ namespace
         for (int h = 0; h < WaveSpec::kHarmonics && h < (int) frames[(size_t) f0].size() && h < (int) frames[(size_t) f1].size(); ++h)
         {
             const float amp = frames[(size_t) f0][(size_t) h] + (frames[(size_t) f1][(size_t) h] - frames[(size_t) f0][(size_t) h]) * t;
-            y += amp * std::sin (juce::MathConstants<float>::twoPi * (float) (h + 1) * phase);
+            y += amp * std::sin (juce::MathConstants<float>::twoPi * (float) (h + 1) * phase + WaveSpec::harmonicPhase (h + 1, spec.scatter));
             norm += amp * amp;
         }
         return norm > 1.0e-6f ? juce::jlimit (-1.0f, 1.0f, y / std::sqrt (norm) * 0.7f) : 0.0f;

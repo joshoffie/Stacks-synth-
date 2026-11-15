@@ -234,7 +234,7 @@ void UserWavetables::set (int slot, std::shared_ptr<UserTable> table)
 //==============================================================================
 bool WaveSpec::operator== (const WaveSpec& o) const noexcept
 {
-    if (name != o.name || std::abs (tail - o.tail) > 1.0e-3f || frames.size() != o.frames.size())
+    if (name != o.name || std::abs (tail - o.tail) > 1.0e-3f || std::abs (scatter - o.scatter) > 1.0e-3f || frames.size() != o.frames.size())
         return false;
     for (size_t f = 0; f < frames.size(); ++f)
     {
@@ -265,6 +265,8 @@ juce::var WaveSpec::toVar (bool asDigits) const
     auto* obj = new juce::DynamicObject();
     obj->setProperty ("name", name);
     obj->setProperty ("tail", asDigits ? juce::var (juce::roundToInt (tail * 9.0f)) : juce::var (std::round (tail * 1000.0f) / 1000.0f));
+    if (scatter > 0.001f)
+        obj->setProperty ("scatter", asDigits ? juce::var (juce::roundToInt (scatter * 9.0f)) : juce::var (std::round (scatter * 1000.0f) / 1000.0f));
     juce::Array<juce::var> frameArray;
     for (const auto& frame : frames)
     {
@@ -292,6 +294,11 @@ std::optional<WaveSpec> WaveSpec::fromVar (const juce::var& v)
     s.name = obj->getProperty ("name").toString().trim().substring (0, 24);
     const auto tailVar = obj->getProperty ("tail");
     s.tail = juce::jlimit (0.0f, 1.0f, digits ? (float) (int) tailVar / 9.0f : (float) (double) tailVar);
+    if (obj->hasProperty ("scatter"))
+    {
+        const auto sc = obj->getProperty ("scatter");
+        s.scatter = juce::jlimit (0.0f, 1.0f, digits ? (float) (int) sc / 9.0f : (float) (double) sc);
+    }
 
     float peak = 0.0f;
     for (const auto& frameVar : *frameArray)
@@ -364,8 +371,16 @@ std::shared_ptr<UserTable> buildSpectralTable (const WaveSpec& spec)
 
         // Harmonic k is a sine with alternating sign, like a saw's series, so
         // 1/k levels really make a saw and odd-only levels really make a square.
+        // Scatter turns each one by its own fixed angle: the same spectrum, a
+        // rounder wave with a lower peak.
         std::fill (spectrum.begin(), spectrum.end(), 0.0f);
-        auto setHarmonic = [&] (int k, float a) { spectrum[(size_t) k * 2 + 1] = (k % 2 == 1 ? -1.0f : 1.0f) * a; };
+        auto setHarmonic = [&] (int k, float a)
+        {
+            const float sign = k % 2 == 1 ? -1.0f : 1.0f;
+            const float theta = WaveSpec::harmonicPhase (k, spec.scatter);
+            spectrum[(size_t) k * 2]     = -sign * a * std::sin (theta);
+            spectrum[(size_t) k * 2 + 1] =  sign * a * std::cos (theta);
+        };
         for (int k = 1; k <= WaveSpec::kHarmonics; ++k)
             setHarmonic (k, fa[(size_t) (k - 1)] + (fb[(size_t) (k - 1)] - fa[(size_t) (k - 1)]) * t);
 

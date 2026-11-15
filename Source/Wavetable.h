@@ -34,6 +34,33 @@ struct Tables
         return level < kLevels ? level : kLevels - 1;
     }
 
+    // The same as a fraction: the integer part is the safe level, the fraction
+    // says how far the pitch has climbed toward the next one. Read with the
+    // fractional overload below, two levels blend and a pitch sweep never
+    // steps in brightness (the blend leans on the duller level late, so it
+    // never lets a harmonic past Nyquist).
+    static float levelForF (float freqHz, double sampleRate) noexcept
+    {
+        const float x = freqHz * (float) kSize / (float) sampleRate;
+        if (x <= 1.0f) return 0.0f;
+        const float lx = std::log2 (x);
+        const float safe = std::ceil (lx);
+        const float w = lx - (safe - 1.0f);          // (0, 1]: 1 means the next level is due
+        return std::min ((float) (kLevels - 1), safe + w);
+    }
+
+    // Interpolated read from a frame set laid out [frame][level][kStride].
+    static float read (const float* data, int frames, float level, float morph, float phase) noexcept
+    {
+        const int l0 = (int) level;
+        const float w = level - (float) l0;
+        const float a = read (data, frames, l0, morph, phase);
+        if (w < 1.0e-3f || l0 + 1 >= kLevels)
+            return a;
+        const float w2 = w * w;                      // stay bright for most of the octave, fade late
+        return a + w2 * (read (data, frames, l0 + 1, morph, phase) - a);
+    }
+
     // Interpolated read from a frame set laid out [frame][level][kStride].
     static float read (const float* data, int frames, int level, float morph, float phase) noexcept
     {
@@ -73,6 +100,10 @@ public:
     {
         return Tables::read (data.data() + (size_t) wave * kFrames * kLevels * kStride, kFrames, level, morph, phase);
     }
+    float read (int wave, float level, float morph, float phase) const noexcept
+    {
+        return Tables::read (data.data() + (size_t) wave * kFrames * kLevels * kStride, kFrames, level, morph, phase);
+    }
 
     static int levelFor (float freqHz, double sampleRate) noexcept { return Tables::levelFor (freqHz, sampleRate); }
 
@@ -92,6 +123,10 @@ struct UserTable
     {
         return Tables::read (data.data(), frames, level, morph, phase);
     }
+    float read (float level, float morph, float phase) const noexcept
+    {
+        return Tables::read (data.data(), frames, level, morph, phase);
+    }
 };
 
 // A wavetable described by its spectrum: 2-4 frames of harmonic amplitudes
@@ -106,7 +141,20 @@ struct WaveSpec
 
     juce::String name;
     float tail = 0.0f;                        // 0..1
+    float scatter = 0.0f;                     // 0..1: how far the harmonics' phases are spread. 0 keeps them in step (a sharp,
+                                              // buzzy peak like a saw); 1 scrambles them (the same spectrum, round and smooth)
     std::vector<std::vector<float>> frames;   // each kHarmonics amplitudes, 0..1
+
+    // The phase harmonic k (1-based) is given at a scatter amount: a fixed
+    // pseudo-random angle per harmonic, scaled, so every frame of a table and
+    // the display agree.
+    static float harmonicPhase (int k, float scatter) noexcept
+    {
+        uint32_t x = (uint32_t) k * 2654435761u;
+        x ^= x >> 15; x *= 0x2c1b3c6dU; x ^= x >> 12; x *= 0x297a2d39U; x ^= x >> 15;
+        const float u = (float) (x & 0xffffffU) / 16777216.0f * 2.0f - 1.0f;   // -1..1
+        return scatter * 3.14159265f * u;
+    }
 
     bool isEmpty() const noexcept { return frames.empty(); }
     bool operator== (const WaveSpec&) const noexcept;

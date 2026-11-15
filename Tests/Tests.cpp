@@ -23,6 +23,7 @@
 #include "Sampler.h"
 #include "ai/SampleAnalyser.h"
 #include "ai/SongAnalyser.h"
+#include "AudioAudit.h"
 
 using namespace stacks;
 
@@ -56,6 +57,15 @@ static void testWaveSpecDigits()
     const int half = WaveSpec::amplitudeToDigit (0.5f);
     CHECK (half == 7 || half == 8);
 
+    if (auto sc = WaveSpec::fromJson (R"json({"name":"Round","tail":2,"scatter":6,"spectra":[[9,8,7,6,5,5,5,4,4,4,4,3,3,3,3,3]]})json"))
+    {
+        CHECK_NEAR (sc->scatter, 6.0 / 9.0, 1.0e-3);
+        auto again = WaveSpec::fromJson (sc->toJson (true));
+        CHECK (again && std::abs (again->scatter - sc->scatter) < 1.0e-3 && sc->toJson (true).contains ("\"scatter\": 6"));
+        auto floats = WaveSpec::fromJson (sc->toJson());
+        CHECK (floats && std::abs (floats->scatter - sc->scatter) < 1.0e-3);
+    }
+    else CHECK (false);
     auto digits = WaveSpec::fromJson (R"json({"name":"Glass Choir","tail":4,"spectra":[[9,0,0,6,0,0,5,0,0,0,4,0,0,0,0,3],[9,5,3,2,2,1,1,1,0,0,0,0,0,0,0,0]]})json");
     CHECK (digits.has_value());
     if (digits)
@@ -137,6 +147,64 @@ static void testSpectralTables()
     // Re-rendering an analysed built-in gives a close relative of it.
     auto twin = analyseTable (*buildSpectralTable (builtInSaw));
     CHECK_NEAR (twin.frames[2][1], builtInSaw.frames[2][1], 0.1);
+}
+
+// Every mip level of a table must hold nothing above its harmonic limit: a
+// designed table at level 7 keeps eight harmonics, the rest is below -60 dB.
+static void testMipBandLimiting()
+{
+    section ("mip band limiting");
+    auto levelSpectrum = [] (const std::function<float (float)>& sample)
+    {
+        juce::dsp::FFT fft (11);
+        std::vector<float> buf ((size_t) Tables::kSize * 2, 0.0f);
+        for (int i = 0; i < Tables::kSize; ++i) buf[(size_t) i] = sample ((float) i / (float) Tables::kSize);
+        fft.performFrequencyOnlyForwardTransform (buf.data());
+        return buf;
+    };
+    auto report = [&] (const char* name, const std::function<float (float)>& sample, int maxHarmonic)
+    {
+        const auto mags = levelSpectrum (sample);
+        float peak = 1.0e-9f, above = 0.0f;
+        for (int k = 1; k <= maxHarmonic; ++k) peak = std::max (peak, mags[(size_t) k]);
+        for (int k = maxHarmonic + 1; k < Tables::kSize / 2; ++k) above = std::max (above, mags[(size_t) k]);
+        const float dB = 20.0f * std::log10 (above / peak + 1.0e-12f);
+        std::printf ("  %-22s level 7: loudest harmonic above %d is %.1f dB under the peak\n", name, maxHarmonic, dB);
+        return dB;
+    };
+    juce::SharedResourcePointer<WavetableBank> bank;
+    const int sawIndex = waveNames().indexOf ("Saw");
+    CHECK (report ("built-in Saw", [&] (float ph) { return bank->read (sawIndex, 7, 1.0f, ph); }, 8) < -60.0f);
+    WaveSpec spec;
+    for (int f = 0; f < 3; ++f)
+    {
+        std::vector<float> frame ((size_t) WaveSpec::kHarmonics, 0.0f);
+        for (int k = 1; k <= WaveSpec::kHarmonics; ++k) frame[(size_t) (k - 1)] = std::pow ((float) k, -0.6f - 0.3f * (float) f);
+        spec.frames.push_back (frame);
+    }
+    spec.tail = 0.5f;
+    auto table = buildSpectralTable (spec);
+    CHECK (table != nullptr);
+    if (table != nullptr)
+    {
+        CHECK (report ("designed, morph 0", [&] (float ph) { return table->read (7, 0.0f, ph); }, 8) < -60.0f);
+        CHECK (report ("designed, morph 0.3", [&] (float ph) { return table->read (7, 0.3f, ph); }, 8) < -60.0f);
+        CHECK (report ("designed, level 0", [&] (float ph) { return table->read (0, 0.3f, ph); }, 1024) < 200.0f);
+    }
+    WaveSpec scattered = spec;
+    scattered.scatter = 1.0f;
+    auto st = buildSpectralTable (scattered);
+    CHECK (st != nullptr);
+    if (st != nullptr)
+    {
+        CHECK (report ("scattered, morph 0.3", [&] (float ph) { return st->read (7, 0.3f, ph); }, 8) < -60.0f);
+        // the same spectrum, a lower peak
+        float peakA = 0.0f, peakS = 0.0f;
+        for (int i = 0; i < Tables::kSize; ++i) { peakA = std::max (peakA, std::abs (table->read (0, 0.0f, (float) i / Tables::kSize))); peakS = std::max (peakS, std::abs (st->read (0, 0.0f, (float) i / Tables::kSize))); }
+        std::printf ("  peak aligned %.2f, scattered %.2f (both normalised to 1 by the mip builder; crest differs in the mix)\n", peakA, peakS);
+        const auto back = analyseWave ([&] (float m, float ph) { return st->read (0, m, ph); }, "back");
+        CHECK_NEAR (back.frames[0][1], spec.frames[0][1], 0.08);   // the magnitudes survive the phase scatter
+    }
 }
 
 static void testParameterTable()
@@ -322,6 +390,7 @@ static void testGrammarAndPrompt()
     CHECK (g.contains ("base-conn1 \",\" lfo-conn2"));                 // one performance/envelope connection, then one LFO
     CHECK (! g.contains ("| conn2") && g.contains ("| conn3"));           // extras start at slot 3
     CHECK (g.contains ("\nwave ::=") && g.contains ("\nspectrum ::=") && g.contains ("digit ::= [0-9]"));
+    CHECK (g.contains ("scatter"));
     CHECK (g.contains ("\\\"Custom\\\""));
     CHECK (! g.contains ("p-mod1-source") && ! g.contains ("p-lfo3-rate"));
     checkGrammarConsistency (g);
@@ -333,6 +402,7 @@ static void testGrammarAndPrompt()
 
     const auto sys = LlmPatchGenerator::systemPrompt (true);
     CHECK (sys.contains ("waveA") && sys.contains ("spectra") && sys.contains ("Connections route modulation"));
+    CHECK (sys.contains ("scatter = how the harmonics' phases line up") && sys.contains ("HP24 and BP24 as the main filter"));
     CHECK (sys.contains ("oscA_wave, oscA_morph, oscA_level"));
     CHECK (! sys.contains ("Velvet Horizon") && sys.contains ("<wave>"));
     CHECK (! LlmPatchGenerator::systemPrompt (false).contains ("Wavetable design"));
@@ -711,6 +781,14 @@ static int liveTest (const juce::String& hint)
     auto out = gen.generate (r, progress);
     std::printf ("Fresh: %d patches in %.0f s\n", (int) out.size(), (juce::Time::getMillisecondCounterHiRes() - t0) / 1000.0);
     for (const auto& p : out) describe (p);
+    for (const auto& p : out)   // the filters, since a high-pass main filter on a struck sound is the kind of thing to catch
+    {
+        const auto& t = filterTypeNames();
+        std::printf ("  filters  %-24s %s @ %.0f Hz env %+.1f res %.2f | 2: %s %s @ %.0f Hz env %+.1f\n", p.name.toRawUTF8(),
+                     t[juce::jlimit (0, t.size() - 1, (int) p.get (P::filter_type))].toRawUTF8(), p.get (P::filter_cutoff), p.get (P::filter_env), p.get (P::filter_res),
+                     filterRoutingNames()[juce::jlimit (0, filterRoutingNames().size() - 1, (int) p.get (P::filter_routing))].toRawUTF8(),
+                     t[juce::jlimit (0, t.size() - 1, (int) p.get (P::filter2_type))].toRawUTF8(), p.get (P::filter2_cutoff), p.get (P::filter2_env));
+    }
 
     if (! out.empty())
     {
@@ -1493,26 +1571,39 @@ static void testCharacterAndEffects()
 }
 
 // Re-applies the prompt cues to every preset in Factory/ (after the rules change).
-static int retouchFactory()
+// `--retouch` re-applies each preset's prompt cues; `--retouch guards [--dry-run]`
+// runs the filter guards (guardFilters) over the library instead and says what moved.
+static int retouchFactory (bool guards, bool dryRun)
 {
     const auto factory = juce::File (__FILE__).getParentDirectory().getParentDirectory().getChildFile ("Factory");
     int changed = 0, seen = 0;
     for (const auto& file : factory.findChildFiles (juce::File::findFiles, true, "*.json"))
     {
         auto p = Patch::fromJson (file.loadFileAsString());
-        if (! p || p->prompt.isEmpty()) continue;
+        if (! p || (! guards && p->prompt.isEmpty())) continue;
         ++seen;
         const auto before = p->toJson();
-        applyPromptCues (p->prompt, *p);
+        const Patch was = *p;
+        if (guards) guardFilters (*p, (juce::int64) file.getFileName().hashCode64());
+        else        applyPromptCues (p->prompt, *p);
         const auto after = p->toJson();
         if (after != before)
         {
-            file.replaceWithText (after);
+            if (! dryRun) file.replaceWithText (after);
             ++changed;
-            std::printf ("  %-28s <- %s\n", p->name.toRawUTF8(), p->prompt.toRawUTF8());
+            if (guards)
+            {
+                const auto& t = filterTypeNames();
+                std::printf ("  %-28s %-8s %s @ %.0f Hz env %+.1f  ->  %s @ %.0f Hz env %+.1f%s\n", p->name.toRawUTF8(), p->category.toRawUTF8(),
+                             t[(int) was.get (P::filter_type)].toRawUTF8(), was.get (P::filter_cutoff), was.get (P::filter_env),
+                             t[(int) p->get (P::filter_type)].toRawUTF8(), p->get (P::filter_cutoff), p->get (P::filter_env),
+                             (int) p->get (P::filter_routing) != (int) was.get (P::filter_routing) ? "  + LP filter 2 in series" : "");
+            }
+            else
+                std::printf ("  %-28s <- %s\n", p->name.toRawUTF8(), p->prompt.toRawUTF8());
         }
     }
-    std::printf ("retouched %d of %d presets\n", changed, seen);
+    std::printf ("%s %d of %d presets\n", dryRun ? "would retouch" : "retouched", changed, seen);
     return 0;
 }
 
@@ -1638,22 +1729,50 @@ static void testQuickTweak()
 // says per kind of sound what the trash has in common, what the whoa ones
 // share, how each recipe fared and where the numbers sit. Written to
 // <first folder>/report.md as well.
-static int ratingsReport (const juce::StringArray& args)
+//
+// Verdicts run 1 (trash) to 5 (whoa). Lines without a "scale" field came from
+// the first rig, which had 1 / 2 / 3, and are read as 1 / 3 / 5. A rating
+// names its sound by `key`, the hash of the settings as generated; the first
+// rig hashed the sound after loading, where a few values drift through the
+// knobs, so a rating of that age is matched to the nearest "seen" line.
+namespace
 {
-    juce::StringArray places = args;
-    if (places.isEmpty()) places.add (ModelManager::appDataDirectory().getChildFile ("ratings").getFullPathName());
-    std::vector<juce::File> files;
-    for (const auto& place : places)
-    {
-        const juce::File f (place);
-        if (f.isDirectory()) for (const auto& x : f.findChildFiles (juce::File::findFiles, true, "*.jsonl")) files.push_back (x);
-        else if (f.existsAsFile()) files.push_back (f);
-    }
-    if (files.empty()) { std::printf ("no ratings files under %s\n", places[0].toRawUTF8()); return 2; }
+    struct RatingEntry { Patch patch; int verdict = 0; juce::String category; juce::StringArray features; };
 
-    struct Entry { Patch patch; int verdict = 0; juce::String category; juce::StringArray features; };
-    std::map<juce::String, Entry> entries;   // by key: a rating overrides the "seen" line of the same sound
+    int verdictOnFiveScale (int verdict, bool legacyThreeScale)
+    {
+        if (verdict <= 0) return 0;
+        return juce::jlimit (1, 5, legacyThreeScale ? verdict * 2 - 1 : verdict);
+    }
+
+    int differingValues (const Patch& a, const Patch& b)
+    {
+        int n = 0;
+        for (size_t i = 0; i < kNumParams; ++i)
+            if (std::abs (a.values[i] - b.values[i]) > 0.01f * juce::jmax (1.0f, std::abs (a.values[i]))) ++n;
+        return n;
+    }
+}
+
+// The report for a set of log files; `linesOut` is how many lines were read.
+static juce::String buildRatingsReport (const std::vector<juce::File>& files, int& linesOut)
+{
+    std::map<juce::String, RatingEntry> entries;   // by key: a rating overrides the "seen" line of the same sound
+    std::vector<juce::String> seenKeys;            // in arrival order, for matching the first rig's ratings
     int lines = 0;
+    auto merge = [&] (const juce::String& key, const Patch& patch, int verdict)
+    {
+        auto& e = entries[key];
+        if (e.verdict > 0 && verdict == 0) return;   // never let a later batch log erase a rating
+        auto p = patch;
+        if (p.recipe.isEmpty()) p.recipe = e.patch.recipe;   // a loaded sound used to forget its recipe; the seen line knows it
+        e.patch = std::move (p);
+        e.verdict = verdict;
+        e.category = e.patch.category.isNotEmpty() ? e.patch.category : juce::String ("Unsorted");
+        e.features = tasteFeatures (e.patch);
+    };
+    struct Line { Patch patch; int verdict = 0; bool legacy = false; juce::String key; };
+    std::vector<Line> read;
     for (const auto& file : files)
     {
         juce::StringArray text;
@@ -1667,56 +1786,97 @@ static int ratingsReport (const juce::StringArray& args)
             auto patch = Patch::fromVar (o->getProperty ("patch"));
             if (! patch) continue;
             ++lines;
-            const int verdict = (int) o->getProperty ("verdict");
-            auto key = o->getProperty ("key").toString();
-            if (key.isEmpty()) key = juce::String::toHexString (juce::JSON::toString (patch->paramsToVar()).hashCode64());
-            auto& e = entries[key];
-            if (e.verdict > 0 && verdict == 0) continue;   // never let a later batch log erase a rating
-            e.patch = *patch;
-            e.verdict = verdict;
-            e.category = patch->category.isNotEmpty() ? patch->category : juce::String ("Unsorted");
-            e.features = tasteFeatures (*patch);
+            Line l;
+            l.patch = *patch;
+            l.legacy = ! o->hasProperty ("scale");
+            l.verdict = verdictOnFiveScale ((int) o->getProperty ("verdict"), l.legacy);
+            l.key = o->getProperty ("key").toString();
+            if (l.key.isEmpty()) l.key = juce::String::toHexString (juce::JSON::toString (patch->paramsToVar()).hashCode64());
+            read.push_back (std::move (l));
         }
+    }
+    linesOut = lines;
+
+    // Every sound the engine showed first, then the ratings in order: a rating made while its
+    // batch was still arriving sits before its seen line in the file.
+    for (const auto& l : read)
+        if (l.verdict == 0)
+        {
+            if (entries.find (l.key) == entries.end()) seenKeys.push_back (l.key);
+            merge (l.key, l.patch, 0);
+        }
+    for (const auto& l : read)
+    {
+        if (l.verdict == 0) continue;
+        auto key = l.key;
+        if (l.legacy && entries.find (key) == entries.end())
+        {
+            int best = 7;
+            juce::String bestKey;
+            for (const auto& k : seenKeys)
+            {
+                const int d = differingValues (l.patch, entries.at (k).patch);
+                if (d < best) { best = d; bestKey = k; }
+            }
+            if (bestKey.isNotEmpty()) key = bestKey;
+        }
+        merge (key, l.patch, l.verdict);
     }
 
     juce::String out;
     out << "# Tuning rig report\n\n" << lines << " lines in " << (int) files.size() << " file(s), " << (int) entries.size() << " distinct sounds.\n";
-    out << "Keys: 1 = trash, 2 = fine, 3 = whoa. Unrated sounds count toward the base rate only.\n\n";
+    out << "Verdicts 1 to 5: 1-2 trash, 3 fine, 4-5 whoa (the first rig's 1 / 2 / 3 read as 1 / 3 / 5). Unrated sounds count toward the base rate only.\n";
+    out << "How to read it: a trait marked ACT has at least five trash (or four whoa) behind it and twice the rate of the rest; "
+           "everything else is WATCH until another session agrees. One ACT becomes one change (a guard, an avoid line, a recipe weight), "
+           "at most three changes per round, and the next session has to show fewer trash with no fewer whoa or the change comes out.\n\n";
 
     // Categories, most rated first
-    std::map<juce::String, std::vector<const Entry*>> byCat;
+    std::map<juce::String, std::vector<const RatingEntry*>> byCat;
     for (const auto& kv : entries) byCat[kv.second.category].push_back (&kv.second);
     std::vector<std::pair<juce::String, int>> order;
     for (const auto& kv : byCat) { int rated = 0; for (auto* e : kv.second) if (e->verdict > 0) ++rated; order.push_back ({ kv.first, rated }); }
     std::sort (order.begin(), order.end(), [] (const auto& a, const auto& b) { return a.second > b.second; });
 
     auto pct = [] (int a, int b) { return b > 0 ? juce::String (juce::roundToInt (100.0f * (float) a / (float) b)) + "%" : juce::String ("-"); };
+    auto mean = [] (float sum, int n) { return n > 0 ? juce::String (sum / (float) n, 1) : juce::String ("-"); };
     for (const auto& [cat, ratedCount] : order)
     {
         const auto& all = byCat[cat];
-        std::vector<const Entry*> rated, trash, others, whoa;
-        for (auto* e : all) { if (e->verdict > 0) rated.push_back (e); if (e->verdict == 1) trash.push_back (e); else if (e->verdict > 1) others.push_back (e); if (e->verdict == 3) whoa.push_back (e); }
-        out << "## " << cat << " - " << (int) rated.size() << " rated of " << (int) all.size() << " seen: "
-            << (int) trash.size() << " trash, " << (int) (others.size() - whoa.size()) << " fine, " << (int) whoa.size() << " whoa"
-            << (rated.empty() ? juce::String() : " (" + pct ((int) trash.size(), (int) rated.size()) + " trash)") << "\n\n";
+        std::vector<const RatingEntry*> rated, trash, others, whoa;
+        std::array<int, 6> levels {};
+        float sum = 0.0f;
+        for (auto* e : all)
+        {
+            if (e->verdict <= 0) continue;
+            rated.push_back (e);
+            ++levels[(size_t) e->verdict];
+            sum += (float) e->verdict;
+            if (e->verdict <= 2) trash.push_back (e); else others.push_back (e);
+            if (e->verdict >= 4) whoa.push_back (e);
+        }
+        out << "## " << cat << " - " << (int) rated.size() << " rated of " << (int) all.size() << " seen";
+        if (! rated.empty())
+            out << ": " << levels[1] << " / " << levels[2] << " / " << levels[3] << " / " << levels[4] << " / " << levels[5] << " at 1..5, mean " << mean (sum, (int) rated.size())
+                << ", " << pct ((int) trash.size(), (int) rated.size()) << " trash, " << pct ((int) whoa.size(), (int) rated.size()) << " whoa";
+        out << "\n\n";
         if (rated.size() < 6) { out << "Fewer than six rated: no patterns yet.\n\n"; continue; }
 
         // Feature counts among the rated
-        std::map<juce::String, std::array<int, 4>> counts;   // [1] trash, [2] fine, [3] whoa, [0] all rated
+        std::map<juce::String, std::array<int, 6>> counts;   // [0] all rated, [1..5] by verdict
         for (auto* e : rated) for (const auto& f : e->features) { auto& c = counts[f]; ++c[0]; ++c[(size_t) e->verdict]; }
-        struct Finding { juce::String feature; int with, of, withOther, ofOther; float lift; };
+        struct Finding { juce::String feature; int with, of, withOther, ofOther; float lift; bool act; };
         auto findings = [&] (bool forTrash)
         {
             std::vector<Finding> list;
             const int nA = (int) (forTrash ? trash.size() : whoa.size()), nB = (int) rated.size() - nA;
             for (const auto& [f, c] : counts)
             {
-                const int withA = forTrash ? c[1] : c[3], withB = c[0] - withA;
+                const int withA = forTrash ? c[1] + c[2] : c[4] + c[5], withB = c[0] - withA;
                 if (withA < (forTrash ? 3 : 2)) continue;
                 const float pA = ((float) withA + 0.5f) / ((float) nA + 1.0f), pB = ((float) withB + 0.5f) / ((float) nB + 1.0f);
                 const float lift = pA / pB;
                 if (lift < 1.5f) continue;
-                list.push_back ({ f, withA, nA, withB, nB, lift });
+                list.push_back ({ f, withA, nA, withB, nB, lift, withA >= (forTrash ? 5 : 4) && lift >= 2.0f });
             }
             std::sort (list.begin(), list.end(), [] (const Finding& a, const Finding& b) { return a.lift * (float) a.with > b.lift * (float) b.with; });
             return list;
@@ -1729,7 +1889,8 @@ static int ratingsReport (const juce::StringArray& args)
             for (const auto& f : list)
             {
                 out << "- " << f.feature << " - " << f.with << " of " << f.of << " " << a << " (" << pct (f.with, f.of) << "), "
-                    << f.withOther << " of " << f.ofOther << " " << b << " (" << pct (f.withOther, f.ofOther) << "), x" << juce::String (f.lift, 1) << "\n";
+                    << f.withOther << " of " << f.ofOther << " " << b << " (" << pct (f.withOther, f.ofOther) << "), x" << juce::String (f.lift, 1)
+                    << (f.act ? "  ACT" : "  watch") << "\n";
                 if (++shown >= 12) break;
             }
             out << "\n";
@@ -1742,8 +1903,8 @@ static int ratingsReport (const juce::StringArray& args)
         {
             std::map<juce::String, std::pair<int, int>> pairs;   // "a + b" -> (in trash, in others)
             std::set<juce::String> common;
-            for (const auto& [f, c] : counts) if (c[1] >= 3) common.insert (f);
-            auto pairsOf = [&] (const Entry* e, bool isTrash)
+            for (const auto& [f, c] : counts) if (c[1] + c[2] >= 3) common.insert (f);
+            auto pairsOf = [&] (const RatingEntry* e, bool isTrash)
             {
                 juce::StringArray fs;
                 for (const auto& f : e->features) if (common.count (f)) fs.add (f);
@@ -1780,14 +1941,23 @@ static int ratingsReport (const juce::StringArray& args)
 
         // Recipes: how each fared
         {
-            std::map<juce::String, std::array<int, 4>> byRecipe;
-            for (auto* e : all) { auto& c = byRecipe[e->patch.recipe.isNotEmpty() ? e->patch.recipe : juce::String ("(none)")]; ++c[0]; if (e->verdict > 0) ++c[(size_t) e->verdict]; }
-            out << "### By recipe (seen / trash / fine / whoa)\n";
-            for (const auto& [name, c] : byRecipe)
+            struct Tally { int seen = 0, rated = 0, trash = 0, whoa = 0; float sum = 0.0f; };
+            std::map<juce::String, Tally> byRecipe;
+            for (auto* e : all)
             {
-                const int r = c[1] + c[2] + c[3];
-                out << "- " << name << ": " << c[0] << " seen, " << r << " rated - " << c[1] << " / " << c[2] << " / " << c[3]
-                    << (r > 0 ? "  (" + pct (c[1], r) + " trash)" : juce::String()) << "\n";
+                auto& t = byRecipe[e->patch.recipe.isNotEmpty() ? e->patch.recipe : juce::String ("(none)")];
+                ++t.seen;
+                if (e->verdict <= 0) continue;
+                ++t.rated; t.sum += (float) e->verdict;
+                if (e->verdict <= 2) ++t.trash;
+                if (e->verdict >= 4) ++t.whoa;
+            }
+            out << "### By recipe\n";
+            for (const auto& [name, t] : byRecipe)
+            {
+                out << "- " << name << ": " << t.seen << " seen, " << t.rated << " rated";
+                if (t.rated > 0) out << ", mean " << mean (t.sum, t.rated) << ", " << pct (t.trash, t.rated) << " trash, " << pct (t.whoa, t.rated) << " whoa";
+                out << "\n";
             }
             out << "\n";
         }
@@ -1810,13 +1980,85 @@ static int ratingsReport (const juce::StringArray& args)
             out << "\n";
         }
     }
+    return out;
+}
 
+static int ratingsReport (const juce::StringArray& args)
+{
+    juce::StringArray places = args;
+    if (places.isEmpty()) places.add (ModelManager::appDataDirectory().getChildFile ("ratings").getFullPathName());
+    std::vector<juce::File> files;
+    for (const auto& place : places)
+    {
+        const juce::File f (place);
+        if (f.isDirectory()) for (const auto& x : f.findChildFiles (juce::File::findFiles, true, "*.jsonl")) files.push_back (x);
+        else if (f.existsAsFile()) files.push_back (f);
+    }
+    if (files.empty()) { std::printf ("no ratings files under %s\n", places[0].toRawUTF8()); return 2; }
+
+    int lines = 0;
+    const auto out = buildRatingsReport (files, lines);
     std::printf ("%s", out.toRawUTF8());
     const juce::File first (places[0]);
     const auto target = (first.isDirectory() ? first : first.getParentDirectory()).getChildFile ("report.md");
     target.replaceWithText (out);
     std::printf ("(written to %s)\n", target.getFullPathName().toRawUTF8());
     return 0;
+}
+
+static void testRatingsReport()
+{
+    section ("tuning rig: the report reads both scales and meets the first rig's ratings with their seen lines");
+    auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("stacks-ratings-test");
+    dir.deleteRecursively();
+    dir.createDirectory();
+    auto line = [] (const Patch& p, int verdict, const juce::String& key, bool fiveScale)
+    {
+        auto* o = new juce::DynamicObject();
+        o->setProperty ("verdict", verdict);
+        o->setProperty ("key", key);
+        if (fiveScale) o->setProperty ("scale", 5);
+        o->setProperty ("patch", p.toVar());
+        return juce::JSON::toString (juce::var (o), true) + "\n";
+    };
+    juce::String text;
+    for (int i = 0; i < 7; ++i)
+    {
+        // Seven pads, each logged as seen with its recipe; the first rig then rates them 1 / 2 / 3 under a
+        // drifted key, from a loaded copy that forgot its recipe and moved a value by a hair.
+        Patch p;
+        p.category = "Pad";
+        p.name = "Pad " + juce::String (i);
+        p.recipe = i % 2 == 0 ? "fm" : "pwm";
+        p.set (P::filter_cutoff, 400.0f + 150.0f * (float) i);
+        p.set (P::aenv_attack, 0.1f * (float) (i + 1));
+        p.set (P::oscB_level, 0.1f * (float) i);
+        p.set (P::unison_voices, (float) (1 + i % 4));
+        p.set (P::aenv_release, i < 4 ? 3.0f : 0.5f);   // the first four: a long tail
+        text << line (p, 0, "seen" + juce::String (i), true);
+        Patch loaded = p;
+        loaded.recipe = {};
+        loaded.set (P::filter_cutoff, loaded.get (P::filter_cutoff) + 0.001f);
+        text << line (loaded, i < 4 ? 1 : 3, "drifted" + juce::String (i), false);
+    }
+    Patch p;   // a rating from this rig: the real key, the five scale
+    p.category = "Pad";
+    p.name = "Pad 7";
+    p.recipe = "fm";
+    p.set (P::filter_cutoff, 2000.0f);
+    text << line (p, 0, "seen7", true) << line (p, 4, "seen7", true);
+    dir.getChildFile ("test.jsonl").replaceWithText (text);
+
+    int lines = 0;
+    const auto report = buildRatingsReport ({ dir.getChildFile ("test.jsonl") }, lines);
+    CHECK (lines == 16);
+    CHECK (report.contains ("8 distinct sounds"));                 // every old rating met its seen line
+    CHECK (report.contains ("Pad - 8 rated of 8 seen: 4 / 0 / 0 / 1 / 3 at 1..5"));   // 1 -> 1, 3 -> 5, the 4 stays
+    CHECK (report.contains ("release: >2s - 4 of 4 trash"));      // the trait the trash shares
+    CHECK (report.contains ("watch"));                              // four trash is short of ACT
+    CHECK (report.contains ("- fm: 5 seen, 5 rated"));             // recipes recovered from the seen lines
+    CHECK (report.contains ("- pwm: 3 seen, 3 rated"));
+    dir.deleteRecursively();
 }
 
 static void testTaste()
@@ -1881,6 +2123,77 @@ static void testEnrich()
     enrichPatch (kept, 7);
     for (auto param : { P::oscB_wave, P::oscB_level, P::oscB_coarse, P::unison_voices, P::unison_detune, P::reverb_mix, P::chorus_mix, P::filter_env, P::filter_cutoff, P::aenv_attack })
         CHECK (kept.get (param) == pad.get (param));
+
+    // A clavinet the model wrote through a high-pass with a struck sweep: all fizz. The high-pass
+    // stays low and still, the sweep moves to a low-pass filter 2 in series, velocity opens that.
+    Patch clav;
+    clav.category = "Keys";
+    clav.set (P::filter_type, (float) filterTypeNames().indexOf ("HP24"));
+    clav.set (P::filter_cutoff, 800.0f); clav.set (P::filter_env, 2.0f); clav.set (P::filter_res, 0.6f);
+    clav.set (modSourceParam (0), (float) SrcVelocity); clav.set (modDestParam (0), (float) modTargetForParam ((int) P::filter_cutoff)); clav.set (modAmountParam (0), 0.4f);
+    CHECK (tasteFeatures (clav).contains ("fenv: lifts a HP/BP"));
+    enrichPatch (clav, 3);
+    CHECK (clav.get (P::filter_cutoff) <= 300.0f);
+    CHECK (clav.get (P::filter_env) == 0.0f);
+    CHECK ((int) clav.get (P::filter_routing) == filterRoutingNames().indexOf ("Series"));
+    CHECK (filterTypeNames()[(int) clav.get (P::filter2_type)].startsWith ("LP"));
+    CHECK (clav.get (P::filter2_env) >= 1.5f);
+    CHECK ((int) clav.get (modDestParam (0)) != modTargetForParam ((int) P::filter_cutoff));   // velocity no longer lifts the high-pass
+    CHECK (! tasteFeatures (clav).contains ("fenv: lifts a HP/BP"));
+    Patch bpKeys = clav;   // the band-pass case turns gentle and low
+    bpKeys.set (P::filter_type, (float) filterTypeNames().indexOf ("BP24")); bpKeys.set (P::filter_cutoff, 1500.0f); bpKeys.set (P::filter_env, 1.0f); bpKeys.set (P::filter_routing, 0.0f);
+    enrichPatch (bpKeys, 4);
+    CHECK (filterTypeNames()[(int) bpKeys.get (P::filter_type)] == "BP12" && bpKeys.get (P::filter_cutoff) <= 700.0f && bpKeys.get (P::filter_env) <= 0.5f);
+    Patch hpPad;           // a pad keeps its high-pass and its cutoff: the struck-sound rule is not for it; only the 24 dB slope goes
+    hpPad.category = "Pad";
+    hpPad.set (P::filter_type, (float) filterTypeNames().indexOf ("HP24")); hpPad.set (P::filter_cutoff, 800.0f); hpPad.set (P::filter_env, 1.0f);
+    enrichPatch (hpPad, 5);
+    CHECK (filterTypeNames()[(int) hpPad.get (P::filter_type)] == "HP12" && hpPad.get (P::filter_cutoff) == 800.0f);
+    Patch bpTexture;       // BP24 anywhere becomes BP12 (six of seven rated BP24/HP24 sounds were trash)
+    bpTexture.category = "Texture";
+    bpTexture.set (P::filter_type, (float) filterTypeNames().indexOf ("BP24")); bpTexture.set (P::filter_cutoff, 900.0f);
+    guardFilters (bpTexture, 1);
+    CHECK (filterTypeNames()[(int) bpTexture.get (P::filter_type)] == "BP12" && bpTexture.get (P::filter_cutoff) == 900.0f);
+    Patch hpLead;          // the factory's "lead through HP12 at 1 kHz" that rendered at -54 dB: leads take the struck-sound path too
+    hpLead.category = "Lead";
+    hpLead.set (P::filter_type, (float) filterTypeNames().indexOf ("HP12")); hpLead.set (P::filter_cutoff, 1000.0f); hpLead.set (P::filter_env, 0.0f);
+    guardFilters (hpLead, 2);
+    CHECK (hpLead.get (P::filter_cutoff) <= 300.0f && (int) hpLead.get (P::filter_routing) == filterRoutingNames().indexOf ("Series"));
+
+    // The filter has somewhere to go: "Resonant Pulse" sat at LP12 164 Hz with a -2.6 octave dive (rated trash).
+    Patch dive;
+    dive.category = "Pad";
+    dive.set (P::filter_type, (float) filterTypeNames().indexOf ("LP12")); dive.set (P::filter_cutoff, 164.0f); dive.set (P::filter_env, -2.6f); dive.set (P::fenv_sustain, 0.5f);
+    guardFilters (dive, 6);
+    CHECK (dive.get (P::filter_cutoff) * std::exp2 (-2.6f) >= 219.0f);                          // the dip stays audible
+    CHECK (dive.get (P::filter_cutoff) * std::exp2 (-2.6f * 0.5f) >= 219.0f);                   // and so does the held note
+    Patch settle;          // a positive sweep whose rest point is in the mud: cutoff 60 Hz, env +1, sustain 0 (a factory bass pattern)
+    settle.category = "Pad";
+    settle.set (P::filter_cutoff, 60.0f); settle.set (P::filter_env, 1.0f); settle.set (P::fenv_sustain, 0.0f);
+    guardFilters (settle, 7);
+    CHECK (settle.get (P::filter_cutoff) >= 219.0f);
+    Patch openSweep;       // a 3-octave sweep starting at 8 kHz does nothing: it starts lower
+    openSweep.category = "Lead";
+    openSweep.set (P::filter_cutoff, 8000.0f); openSweep.set (P::filter_env, 3.0f);
+    guardFilters (openSweep, 8);
+    CHECK (openSweep.get (P::filter_cutoff) <= 3000.0f);
+    Patch fine;            // a sensible low-pass is left alone
+    fine.category = "Pad";
+    fine.set (P::filter_cutoff, 1200.0f); fine.set (P::filter_env, -1.0f); fine.set (P::fenv_sustain, 0.5f);
+    guardFilters (fine, 9);
+    CHECK (fine.get (P::filter_cutoff) == 1200.0f);
+    Patch bassRest;        // a bass may sit lower
+    bassRest.category = "Bass";
+    bassRest.set (P::filter_cutoff, 120.0f); bassRest.set (P::filter_env, 2.0f); bassRest.set (P::fenv_sustain, 0.0f);
+    guardFilters (bassRest, 10);
+    CHECK (bassRest.get (P::filter_cutoff) == 120.0f);
+
+    // Edited means the knobs moved, not that a cutoff came back from them as 799.9996.
+    Patch a, b;
+    a.set (P::filter_cutoff, 800.0f); b.set (P::filter_cutoff, 799.9996f);
+    CHECK (a.sameValuesAs (b));
+    b.set (P::filter_cutoff, 810.0f);
+    CHECK (! a.sameValuesAs (b));
 
     // A fresh batch hands each patch its own engine.
     GenerationRequest fresh;
@@ -2034,13 +2347,25 @@ int main (int argc, char** argv)
     if (argc > 2 && (juce::String (argv[1]) == "--song" || juce::String (argv[1]) == "--recreate"))
         return audioMode (argv[1], juce::File::getCurrentWorkingDirectory().getChildFile (juce::String::fromUTF8 (argv[2])), argc > 3 && juce::String (argv[3]) == "nomodel");
     if (argc > 1 && juce::String (argv[1]) == "--retouch")
-        return retouchFactory();
+        return retouchFactory (argc > 2 && juce::String (argv[2]) == "guards", argc > 3 && juce::String (argv[3]) == "--dry-run");
     if (argc > 1 && juce::String (argv[1]) == "--factory")
         return buildFactory (argc > 2 ? juce::jlimit (1, 4, juce::String (argv[2]).getIntValue()) : 2, argc > 3 ? juce::String (argv[3]).getIntValue() : 0);
     if (argc > 1 && juce::String (argv[1]) == "--bench")
         return benchmark (argc > 2 ? juce::String::fromUTF8 (argv[2]) : juce::String ("unlabelled"));
     if (argc > 1 && juce::String (argv[1]) == "--live")
         return liveTest (argc > 2 ? juce::String::fromUTF8 (argv[2]) : juce::String());
+    if (argc > 1 && juce::String (argv[1]) == "--level")
+    {
+        juce::StringArray rest;
+        for (int i = 2; i < argc; ++i) rest.add (juce::String::fromUTF8 (argv[i]));
+        return levelPatches (rest);
+    }
+    if (argc > 1 && juce::String (argv[1]) == "--audit")
+    {
+        juce::StringArray rest;
+        for (int i = 2; i < argc; ++i) rest.add (juce::String::fromUTF8 (argv[i]));
+        return audioAudit (rest);
+    }
     if (argc > 1 && juce::String (argv[1]) == "--ratings")
     {
         juce::StringArray places;
@@ -2050,6 +2375,7 @@ int main (int argc, char** argv)
 
     testWaveSpecDigits();
     testSpectralTables();
+    testMipBandLimiting();
     testParameterTable();
     testPatchJson();
     testTuningGuard();
@@ -2061,6 +2387,7 @@ int main (int argc, char** argv)
     testQuickTweak();
     testEnrich();
     testTaste();
+    testRatingsReport();
     testSampler();
     testSampleAnalyser();
     testSongAnalyser();

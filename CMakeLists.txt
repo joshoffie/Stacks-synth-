@@ -212,6 +212,8 @@ endif()
 juce_add_console_app(StacksTests PRODUCT_NAME "StacksTests")
 target_sources(StacksTests PRIVATE
     Tests/Tests.cpp
+    Tests/AudioAudit.cpp
+    Source/SynthVoice.cpp
     Source/Parameters.cpp
     Source/Life.cpp
     Source/Wavetable.cpp
