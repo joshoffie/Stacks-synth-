@@ -828,6 +828,7 @@ std::vector<Patch> RandomPatchGenerator::generate (const GenerationRequest& req,
         ensureMacroRoutings (p);
         p.set (P::master_gain, -6.0f);
         p.origin = "Random";
+        p.recipe = req.parents.empty() ? "random" : "random:grow";
         p.prompt = req.hint.trim();
         p.parentName = req.parents.empty() ? juce::String() : req.parents.front().name;
         p.tags = autoTags (p);
@@ -1239,6 +1240,84 @@ void keepIdentity (Patch& child, const Patch& parent)
     else if (cls == "short pluck" || cls == "percussive")
         child.set (P::aenv_sustain, juce::jmin (child.get (P::aenv_sustain), 0.3f));
     if (child.category.isEmpty()) child.category = parent.category;
+}
+
+juce::StringArray tasteFeatures (const Patch& p)
+{
+    juce::StringArray f;
+    auto waveName = [&] (int osc)
+    {
+        const int w = (int) p.get (oscWaveParam (osc));
+        return w == kCustomWave ? juce::String ("designed") : w >= WavetableBank::kNumBuiltIn ? juce::String ("imported") : waveNames()[juce::jlimit (0, waveNames().size() - 1, w)];
+    };
+    auto band = [] (float v, std::initializer_list<float> edges, std::initializer_list<const char*> names)
+    {
+        int b = 0;
+        for (float e : edges) if (v >= e) ++b;
+        auto it = names.begin(); std::advance (it, juce::jmin (b, (int) names.size() - 1));
+        return juce::String (*it);
+    };
+
+    // Sources
+    f.add ("wave A: " + waveName (0));
+    if (p.get (P::oscB_level) > 0.05f)
+    {
+        const int c = juce::roundToInt (p.get (P::oscB_coarse));
+        f.add ("osc B: " + waveName (1) + (c == 0 ? " unison" : c == 12 || c == 24 ? " +" + juce::String (c) : c == -12 || c == -24 ? " " + juce::String (c) : c == 7 || c == 19 ? " fifth" : " other"));
+    }
+    else f.add ("osc B: off");
+    if (p.get (P::oscC_level) > 0.05f) f.add ("osc C");
+    f.add ("fm: " + band (p.get (P::fm_amount), { 0.05f, 0.3f }, { "none", "light", "heavy" }));
+    if (p.get (P::sub_level) > 0.2f) f.add ("sub");
+    if (p.get (P::noise_level) > 0.1f) f.add ("noise");
+    f.add ("unison: " + band ((float) p.get (P::unison_voices), { 1.5f, 4.5f }, { "1", "2-4", "5+" }));
+    const int warp = (int) p.get (P::oscA_warp);
+    if (warp > 0 && p.get (P::oscA_warp_amt) > 0.05f) f.add ("warp: " + warpNames()[juce::jlimit (0, warpNames().size() - 1, warp)]);
+
+    // Filter
+    f.add ("filter: " + filterTypeNames()[juce::jlimit (0, filterTypeNames().size() - 1, (int) p.get (P::filter_type))]);
+    if ((int) p.get (P::filter_routing) > 0) f.add ("filter 2: " + filterRoutingNames()[juce::jlimit (0, filterRoutingNames().size() - 1, (int) p.get (P::filter_routing))]);
+    f.add ("cutoff: " + band (p.get (P::filter_cutoff), { 300.0f, 1000.0f, 4000.0f }, { "<300", "300-1k", "1k-4k", ">4k" }));
+    f.add ("resonance: " + band (p.get (P::filter_res), { 0.3f, 0.6f }, { "low", "mid", "high" }));
+    f.add (juce::String ("filter env: ") + (filterEnvClass (p) == 0 ? "down" : filterEnvClass (p) == 2 ? "up" : "flat"));
+
+    // Envelope
+    f.add ("envelope: " + envelopeClass (p));
+    f.add ("attack: " + band (p.get (P::aenv_attack), { 0.01f, 0.1f, 1.0f }, { "<10ms", "10-100ms", "100ms-1s", ">1s" }));
+    f.add ("decay: " + band (p.get (P::aenv_decay), { 0.08f, 0.3f, 1.0f }, { "<80ms", "80-300ms", "300ms-1s", ">1s" }));
+    f.add ("sustain: " + band (p.get (P::aenv_sustain), { 0.15f, 0.6f }, { "none", "some", "high" }));
+    f.add ("release: " + band (p.get (P::aenv_release), { 0.1f, 0.5f, 2.0f }, { "<100ms", "100-500ms", "0.5-2s", ">2s" }));
+    if (p.get (P::glide) > 0.01f) f.add ("glide");
+
+    // Movement
+    const auto conns = connections (p);
+    if (conns.empty()) f.add ("mod: none");
+    bool lfo = false;
+    for (const auto& c : conns)
+    {
+        f.add ("mod: " + modSourceNames()[juce::jlimit (0, modSourceNames().size() - 1, c.first)] + " > " + modTargetNames()[juce::jlimit (0, modTargetNames().size() - 1, c.second)]);
+        if (c.first >= SrcLfo1 && c.first <= SrcLfo4)
+        {
+            lfo = true;
+            const int k = c.first - SrcLfo1;
+            f.add ("lfo shape: " + lfoShapeNames()[juce::jlimit (0, lfoShapeNames().size() - 1, (int) p.get (lfoShapeParam (k)))]);
+            f.add ((int) p.get (lfoSyncParam (k)) > 0 ? "lfo: synced" : "lfo: free");
+        }
+    }
+    if (! lfo) f.add ("no lfo");
+
+    // Space and character
+    static const char* const fxNames[] = { "distortion", "eq", "chorus", "hyper", "tape", "delay", "reverb", "compressor" };
+    int active = 0;
+    for (int e = 0; e < kNumFx; ++e)
+        if (fxActive (p, e)) { f.add (juce::String ("fx: ") + fxNames[e]); ++active; }
+    if (active == 0) f.add ("fx: none");
+    if (fxActive (p, 6)) f.add ("reverb: " + reverbTypeNames()[juce::jlimit (0, reverbTypeNames().size() - 1, (int) p.get (P::reverb_type))] + " " + band (p.get (P::reverb_mix), { 0.2f, 0.4f }, { "light", "medium", "wet" }));
+    if (fxActive (p, 5)) f.add ("delay: " + delayModeNames()[juce::jlimit (0, delayModeNames().size() - 1, (int) p.get (P::delay_mode))] + ((int) p.get (P::delay_sync) > 0 ? " synced" : " free"));
+    if (fxActive (p, 0)) f.add ("distortion: " + distModeNames()[juce::jlimit (0, distModeNames().size() - 1, (int) p.get (P::dist_mode))]);
+    if ((int) p.get (P::arp_mode) > 0) f.add ("arp");
+    if (p.recipe.isNotEmpty()) f.add ("recipe: " + p.recipe);
+    return f;
 }
 
 // What a finished preset has that a sketch does not, in the order a sound

@@ -66,6 +66,7 @@ private:
     TourOverlay tour;
     void drawAnnotations (juce::Image&, float scale);
     StacksKeyboard keyboard;
+    std::unique_ptr<juce::Component> tuningBadge;   // the tuning rig's pill in the header, only when the rig is on
     juce::Rectangle<int> headerBounds;
     std::unique_ptr<juce::TooltipWindow> tooltips;   // only while the ? is on
 };

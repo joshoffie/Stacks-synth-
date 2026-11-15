@@ -49,6 +49,7 @@ juce::var Patch::toVar() const
     }
     if (parentName.isNotEmpty()) obj->setProperty ("parentName", parentName);
     if (prompt.isNotEmpty())     obj->setProperty ("prompt", prompt);
+    if (recipe.isNotEmpty())     obj->setProperty ("recipe", recipe);
     obj->setProperty ("params", paramsToVar());
 
     bool anyWave = false;
@@ -137,6 +138,7 @@ std::optional<Patch> Patch::fromVar (const juce::var& v, const Patch* base)
     p.favourite = (bool) obj->getProperty ("favourite");
     p.parentName = obj->getProperty ("parentName").toString();
     p.prompt = obj->getProperty ("prompt").toString();
+    p.recipe = obj->getProperty ("recipe").toString();
     if (base != nullptr) p.tags = base->tags;
     if (auto* t = obj->getProperty ("tags").getArray())
     {

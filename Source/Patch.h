@@ -32,6 +32,7 @@ struct Patch
     juce::StringArray tags;                // lowercase words a producer would search for
     juce::String parentName;               // the sound this one grew from (empty for fresh ideas)
     juce::String prompt;                   // the direction it was designed to
+    juce::String recipe;                   // the engine recipe a fresh patch was written to ("fm", "two saws"), "grow:far", "random"; the tuning rig reads it
     juce::String filePath;                 // library file this patch is saved as (not part of the JSON)
     bool favourite = false;                // the heart
 

@@ -6,6 +6,8 @@
 #include <juce_dsp/juce_dsp.h>
 #include <cstdio>
 #include <set>
+#include <map>
+#include <tuple>
 
 #include "Parameters.h"
 #include "Wavetable.h"
@@ -1631,6 +1633,224 @@ static void testQuickTweak()
 }
 
 //==============================================================================
+// `StacksTests --ratings [folder or file...]`: the tuning rig's report. Reads
+// every ratings/*.jsonl it is given (default: this Mac's), merges them, and
+// says per kind of sound what the trash has in common, what the whoa ones
+// share, how each recipe fared and where the numbers sit. Written to
+// <first folder>/report.md as well.
+static int ratingsReport (const juce::StringArray& args)
+{
+    juce::StringArray places = args;
+    if (places.isEmpty()) places.add (ModelManager::appDataDirectory().getChildFile ("ratings").getFullPathName());
+    std::vector<juce::File> files;
+    for (const auto& place : places)
+    {
+        const juce::File f (place);
+        if (f.isDirectory()) for (const auto& x : f.findChildFiles (juce::File::findFiles, true, "*.jsonl")) files.push_back (x);
+        else if (f.existsAsFile()) files.push_back (f);
+    }
+    if (files.empty()) { std::printf ("no ratings files under %s\n", places[0].toRawUTF8()); return 2; }
+
+    struct Entry { Patch patch; int verdict = 0; juce::String category; juce::StringArray features; };
+    std::map<juce::String, Entry> entries;   // by key: a rating overrides the "seen" line of the same sound
+    int lines = 0;
+    for (const auto& file : files)
+    {
+        juce::StringArray text;
+        file.readLines (text);
+        for (const auto& line : text)
+        {
+            if (line.trim().isEmpty()) continue;
+            const auto v = juce::JSON::parse (line);
+            auto* o = v.getDynamicObject();
+            if (o == nullptr) continue;
+            auto patch = Patch::fromVar (o->getProperty ("patch"));
+            if (! patch) continue;
+            ++lines;
+            const int verdict = (int) o->getProperty ("verdict");
+            auto key = o->getProperty ("key").toString();
+            if (key.isEmpty()) key = juce::String::toHexString (juce::JSON::toString (patch->paramsToVar()).hashCode64());
+            auto& e = entries[key];
+            if (e.verdict > 0 && verdict == 0) continue;   // never let a later batch log erase a rating
+            e.patch = *patch;
+            e.verdict = verdict;
+            e.category = patch->category.isNotEmpty() ? patch->category : juce::String ("Unsorted");
+            e.features = tasteFeatures (*patch);
+        }
+    }
+
+    juce::String out;
+    out << "# Tuning rig report\n\n" << lines << " lines in " << (int) files.size() << " file(s), " << (int) entries.size() << " distinct sounds.\n";
+    out << "Keys: 1 = trash, 2 = fine, 3 = whoa. Unrated sounds count toward the base rate only.\n\n";
+
+    // Categories, most rated first
+    std::map<juce::String, std::vector<const Entry*>> byCat;
+    for (const auto& kv : entries) byCat[kv.second.category].push_back (&kv.second);
+    std::vector<std::pair<juce::String, int>> order;
+    for (const auto& kv : byCat) { int rated = 0; for (auto* e : kv.second) if (e->verdict > 0) ++rated; order.push_back ({ kv.first, rated }); }
+    std::sort (order.begin(), order.end(), [] (const auto& a, const auto& b) { return a.second > b.second; });
+
+    auto pct = [] (int a, int b) { return b > 0 ? juce::String (juce::roundToInt (100.0f * (float) a / (float) b)) + "%" : juce::String ("-"); };
+    for (const auto& [cat, ratedCount] : order)
+    {
+        const auto& all = byCat[cat];
+        std::vector<const Entry*> rated, trash, others, whoa;
+        for (auto* e : all) { if (e->verdict > 0) rated.push_back (e); if (e->verdict == 1) trash.push_back (e); else if (e->verdict > 1) others.push_back (e); if (e->verdict == 3) whoa.push_back (e); }
+        out << "## " << cat << " - " << (int) rated.size() << " rated of " << (int) all.size() << " seen: "
+            << (int) trash.size() << " trash, " << (int) (others.size() - whoa.size()) << " fine, " << (int) whoa.size() << " whoa"
+            << (rated.empty() ? juce::String() : " (" + pct ((int) trash.size(), (int) rated.size()) + " trash)") << "\n\n";
+        if (rated.size() < 6) { out << "Fewer than six rated: no patterns yet.\n\n"; continue; }
+
+        // Feature counts among the rated
+        std::map<juce::String, std::array<int, 4>> counts;   // [1] trash, [2] fine, [3] whoa, [0] all rated
+        for (auto* e : rated) for (const auto& f : e->features) { auto& c = counts[f]; ++c[0]; ++c[(size_t) e->verdict]; }
+        struct Finding { juce::String feature; int with, of, withOther, ofOther; float lift; };
+        auto findings = [&] (bool forTrash)
+        {
+            std::vector<Finding> list;
+            const int nA = (int) (forTrash ? trash.size() : whoa.size()), nB = (int) rated.size() - nA;
+            for (const auto& [f, c] : counts)
+            {
+                const int withA = forTrash ? c[1] : c[3], withB = c[0] - withA;
+                if (withA < (forTrash ? 3 : 2)) continue;
+                const float pA = ((float) withA + 0.5f) / ((float) nA + 1.0f), pB = ((float) withB + 0.5f) / ((float) nB + 1.0f);
+                const float lift = pA / pB;
+                if (lift < 1.5f) continue;
+                list.push_back ({ f, withA, nA, withB, nB, lift });
+            }
+            std::sort (list.begin(), list.end(), [] (const Finding& a, const Finding& b) { return a.lift * (float) a.with > b.lift * (float) b.with; });
+            return list;
+        };
+        auto print = [&] (const char* title, const std::vector<Finding>& list, const char* a, const char* b)
+        {
+            out << "### " << title << "\n";
+            if (list.empty()) { out << "Nothing stands out yet.\n\n"; return; }
+            int shown = 0;
+            for (const auto& f : list)
+            {
+                out << "- " << f.feature << " - " << f.with << " of " << f.of << " " << a << " (" << pct (f.with, f.of) << "), "
+                    << f.withOther << " of " << f.ofOther << " " << b << " (" << pct (f.withOther, f.ofOther) << "), x" << juce::String (f.lift, 1) << "\n";
+                if (++shown >= 12) break;
+            }
+            out << "\n";
+        };
+        if (! trash.empty()) print ("What the trash shares (vs the rest you rated)", findings (true), "trash", "others");
+        if (! whoa.empty())  print ("What the whoa ones share", findings (false), "whoa", "others");
+
+        // Pairs among the trash: two features together, each already common in trash
+        if (trash.size() >= 4)
+        {
+            std::map<juce::String, std::pair<int, int>> pairs;   // "a + b" -> (in trash, in others)
+            std::set<juce::String> common;
+            for (const auto& [f, c] : counts) if (c[1] >= 3) common.insert (f);
+            auto pairsOf = [&] (const Entry* e, bool isTrash)
+            {
+                juce::StringArray fs;
+                for (const auto& f : e->features) if (common.count (f)) fs.add (f);
+                for (int i = 0; i < fs.size(); ++i)
+                    for (int j = i + 1; j < fs.size(); ++j)
+                    {
+                        auto& pr = pairs[fs[i] + "  +  " + fs[j]];
+                        (isTrash ? pr.first : pr.second)++;
+                    }
+            };
+            for (auto* e : trash) pairsOf (e, true);
+            for (auto* e : others) pairsOf (e, false);
+            std::vector<std::tuple<float, juce::String, int, int>> ranked;
+            for (const auto& [name, pr] : pairs)
+            {
+                if (pr.first < 3) continue;
+                const float lift = (((float) pr.first + 0.5f) / ((float) trash.size() + 1.0f)) / (((float) pr.second + 0.5f) / ((float) others.size() + 1.0f));
+                if (lift >= 2.0f) ranked.push_back ({ lift * (float) pr.first, name, pr.first, pr.second });
+            }
+            std::sort (ranked.begin(), ranked.end(), [] (const auto& a, const auto& b) { return std::get<0> (a) > std::get<0> (b); });
+            out << "### Pairs the trash shares\n";
+            if (ranked.empty()) out << "Nothing stands out yet.\n\n";
+            else
+            {
+                int shown = 0;
+                for (const auto& [score, name, a, b] : ranked)
+                {
+                    out << "- " << name << " - " << a << " of " << (int) trash.size() << " trash, " << b << " of " << (int) others.size() << " others\n";
+                    if (++shown >= 8) break;
+                }
+                out << "\n";
+            }
+        }
+
+        // Recipes: how each fared
+        {
+            std::map<juce::String, std::array<int, 4>> byRecipe;
+            for (auto* e : all) { auto& c = byRecipe[e->patch.recipe.isNotEmpty() ? e->patch.recipe : juce::String ("(none)")]; ++c[0]; if (e->verdict > 0) ++c[(size_t) e->verdict]; }
+            out << "### By recipe (seen / trash / fine / whoa)\n";
+            for (const auto& [name, c] : byRecipe)
+            {
+                const int r = c[1] + c[2] + c[3];
+                out << "- " << name << ": " << c[0] << " seen, " << r << " rated - " << c[1] << " / " << c[2] << " / " << c[3]
+                    << (r > 0 ? "  (" + pct (c[1], r) + " trash)" : juce::String()) << "\n";
+            }
+            out << "\n";
+        }
+
+        // Numbers: medians, trash against the rest
+        {
+            auto median = [] (std::vector<float> v) { if (v.empty()) return 0.0f; std::sort (v.begin(), v.end()); return v[v.size() / 2]; };
+            static const P params[] = { P::aenv_attack, P::aenv_decay, P::aenv_sustain, P::aenv_release, P::filter_cutoff, P::filter_res, P::filter_env, P::fenv_decay,
+                                        P::oscB_level, P::fm_amount, P::sub_level, P::noise_level, P::unison_voices, P::unison_detune, P::chorus_mix, P::delay_mix, P::reverb_mix, P::dist_mix, P::glide };
+            out << "### Numbers (median of the trash / median of the rest)\n";
+            for (auto param : params)
+            {
+                std::vector<float> a, b;
+                for (auto* e : trash) a.push_back (e->patch.get (param));
+                for (auto* e : others) b.push_back (e->patch.get (param));
+                if (a.empty() || b.empty()) continue;
+                out << "- " << spec (param).name << ": " << juce::String (median (a), 3).trimCharactersAtEnd ("0").trimCharactersAtEnd (".")
+                    << " / " << juce::String (median (b), 3).trimCharactersAtEnd ("0").trimCharactersAtEnd (".") << "\n";
+            }
+            out << "\n";
+        }
+    }
+
+    std::printf ("%s", out.toRawUTF8());
+    const juce::File first (places[0]);
+    const auto target = (first.isDirectory() ? first : first.getParentDirectory()).getChildFile ("report.md");
+    target.replaceWithText (out);
+    std::printf ("(written to %s)\n", target.getFullPathName().toRawUTF8());
+    return 0;
+}
+
+static void testTaste()
+{
+    section ("tuning rig: taste features and the recipe tag");
+    Patch thin;
+    thin.category = "Pluck";
+    thin.recipe = "fm";
+    auto f = tasteFeatures (thin);
+    CHECK (f.contains ("osc B: off"));
+    CHECK (f.contains ("unison: 1"));
+    CHECK (f.contains ("recipe: fm"));
+    CHECK (f.contains ("no lfo"));
+    Patch pad;
+    pad.set (P::oscB_level, 0.5f); pad.set (P::oscB_coarse, -12.0f); pad.set (P::unison_voices, 4); pad.set (P::reverb_mix, 0.4f);
+    pad.set (P::aenv_attack, 0.6f); pad.set (P::filter_cutoff, 500.0f);
+    f = tasteFeatures (pad);
+    CHECK (f.contains ("osc B: Sine -12"));
+    CHECK (f.contains ("unison: 2-4"));
+    CHECK (f.contains ("fx: reverb"));
+    CHECK (f.contains ("cutoff: 300-1k"));
+    CHECK (f.contains ("envelope: swelling pad"));
+    // the tag survives the JSON a rating line carries
+    const auto back = Patch::fromJson (thin.toJson());
+    CHECK (back && back->recipe == "fm");
+    // a fresh request picks its recipes once and the prompt follows them
+    GenerationRequest r;
+    r.count = 3;
+    r.recipes = { 1, 1, 1 };
+    const auto prompt = LlmPatchGenerator::userPrompt (r);
+    CHECK (prompt.contains ("Patch 1 (a") && prompt.contains ("FM: oscB_wave Sine"));
+}
+
+//==============================================================================
 static void testEnrich()
 {
     section ("enrich: a sketch becomes a finished sound");
@@ -1821,6 +2041,12 @@ int main (int argc, char** argv)
         return benchmark (argc > 2 ? juce::String::fromUTF8 (argv[2]) : juce::String ("unlabelled"));
     if (argc > 1 && juce::String (argv[1]) == "--live")
         return liveTest (argc > 2 ? juce::String::fromUTF8 (argv[2]) : juce::String());
+    if (argc > 1 && juce::String (argv[1]) == "--ratings")
+    {
+        juce::StringArray places;
+        for (int i = 2; i < argc; ++i) places.add (juce::String::fromUTF8 (argv[i]));
+        return ratingsReport (places);
+    }
 
     testWaveSpecDigits();
     testSpectralTables();
@@ -1834,6 +2060,7 @@ int main (int argc, char** argv)
     testPromptCues();
     testQuickTweak();
     testEnrich();
+    testTaste();
     testSampler();
     testSampleAnalyser();
     testSongAnalyser();

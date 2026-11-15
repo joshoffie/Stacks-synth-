@@ -205,34 +205,53 @@ namespace
 
     // One engine per patch in a fresh batch. Asked for five plucks with nothing
     // more than "pluck" to go on, a small model writes the same pluck five
-    // times; handed a different recipe per patch it does not.
-    juce::String freshDirections (const GenerationRequest& req)
+    // times; handed a different recipe per patch it does not. Each recipe has
+    // a short tag that travels on the patch, so ratings can be counted per recipe.
+    struct Engine { const char* tag; const char* text; };
+    const std::vector<Engine>& freshEngines()
     {
-        static const char* const engines[] = {
-            "two Saw-family tables an octave apart: oscB_coarse -12 with oscB_level 0.5-0.7 and oscB_fine 4-9, unison_voices 3-5 with unison_detune 12-25, Velocity > Cutoff",
-            "FM: oscB_wave Sine as a silent modulator (oscB_level 0.3-0.5, oscB_coarse 7, 12 or 19), fm_amount 0.3-0.7, Mod Env > FM B>A 0.4-0.6 with menv_decay 0.1-0.4, no unison",
-            "a Pulse table with PWM: oscA_warp PWM with oscA_warp_amt 0.5, LFO 1 Triangle at 0.2-0.5 Hz > A Warp Amt 0.4, sub_level 0.3-0.5, oscB_level 0",
-            "Formant or Glass table with LFO 1 slow on A Morph (0.05-0.2 Hz, 0.3-0.5), filter_type Notch or BP12 with filter_res 0.3-0.5, chorus_mode Ensemble",
-            "three layers: A, oscB a different family at oscB_coarse 12 (oscB_level 0.3-0.5), sub_level 0.4-0.7; a resonant low-pass (filter_res 0.4-0.6) with a long filter envelope",
-            "noise and body: noise_level 0.2-0.4 with Mod Env > Noise 0.6-0.8 (menv_decay 0.03-0.08), a Sine or Triangle A, filter_type BP12 or BP24",
-            "Organ or a hollow table through Tube distortion (dist_mode Tube, dist_mix 0.3-0.5) and tape_amount 0.3-0.6, dry (reverb_mix under 0.15), Key > Cutoff 0.3",
-            "wavefolded: Fold table or oscA_warp Fold with oscA_warp_amt 0.4-0.7, filter_drive 2-4, Mod Env > A Warp Amt 0.4-0.6, reverb_type Plate",
-            "rhythmic: LFO 1 Square or Random with lfo1_sync 1/8 or 1/16 on Cutoff or Amp 0.4-0.6, delay_mode Ping-Pong with delay_sync 1/8D and delay_mix 0.25-0.4",
-            "wide and glassy: unison_voices 6 with unison_detune 20-30, hyper_amount 0.4-0.6, reverb_type Shimmer with reverb_shimmer 0.4-0.6, a Glass or sparse designed table",
-            "hard sync: oscA_wave Sync, or oscA_warp Sync with oscA_warp_amt 0.3-0.6 swept by Filter Env > A Warp Amt 0.5, filter_type LP24, filter_env 3-4",
-            "a vocal reading: Formant table with oscA_morph swept by Mod Wheel 0.6 and LFO 2 at 0.1 Hz (0.2), filter_type Formant with filter_res 0.4, chorus_mode Dimension",
+        static const std::vector<Engine> engines = {
+            { "two saws",     "two Saw-family tables an octave apart: oscB_coarse -12 with oscB_level 0.5-0.7 and oscB_fine 4-9, unison_voices 3-5 with unison_detune 12-25, Velocity > Cutoff" },
+            { "fm",           "FM: oscB_wave Sine as a silent modulator (oscB_level 0.3-0.5, oscB_coarse 7, 12 or 19), fm_amount 0.3-0.7, Mod Env > FM B>A 0.4-0.6 with menv_decay 0.1-0.4, no unison" },
+            { "pwm",          "a Pulse table with PWM: oscA_warp PWM with oscA_warp_amt 0.5, LFO 1 Triangle at 0.2-0.5 Hz > A Warp Amt 0.4, sub_level 0.3-0.5, oscB_level 0" },
+            { "formant",      "Formant or Glass table with LFO 1 slow on A Morph (0.05-0.2 Hz, 0.3-0.5), filter_type Notch or BP12 with filter_res 0.3-0.5, chorus_mode Ensemble" },
+            { "three layers", "three layers: A, oscB a different family at oscB_coarse 12 (oscB_level 0.3-0.5), sub_level 0.4-0.7; a resonant low-pass (filter_res 0.4-0.6) with a long filter envelope" },
+            { "noise body",   "noise and body: noise_level 0.2-0.4 with Mod Env > Noise 0.6-0.8 (menv_decay 0.03-0.08), a Sine or Triangle A, filter_type BP12 or BP24" },
+            { "organ tube",   "Organ or a hollow table through Tube distortion (dist_mode Tube, dist_mix 0.3-0.5) and tape_amount 0.3-0.6, dry (reverb_mix under 0.15), Key > Cutoff 0.3" },
+            { "wavefold",     "wavefolded: Fold table or oscA_warp Fold with oscA_warp_amt 0.4-0.7, filter_drive 2-4, Mod Env > A Warp Amt 0.4-0.6, reverb_type Plate" },
+            { "rhythmic",     "rhythmic: LFO 1 Square or Random with lfo1_sync 1/8 or 1/16 on Cutoff or Amp 0.4-0.6, delay_mode Ping-Pong with delay_sync 1/8D and delay_mix 0.25-0.4" },
+            { "wide glassy",  "wide and glassy: unison_voices 6 with unison_detune 20-30, hyper_amount 0.4-0.6, reverb_type Shimmer with reverb_shimmer 0.4-0.6, a Glass or sparse designed table" },
+            { "hard sync",    "hard sync: oscA_wave Sync, or oscA_warp Sync with oscA_warp_amt 0.3-0.6 swept by Filter Env > A Warp Amt 0.5, filter_type LP24, filter_env 3-4" },
+            { "vocal",        "a vocal reading: Formant table with oscA_morph swept by Mod Wheel 0.6 and LFO 2 at 0.1 Hz (0.2), filter_type Formant with filter_res 0.4, chorus_mode Dimension" },
         };
-        static const char* const kinds[] = { "Pad", "Pluck", "Bass", "Keys", "Lead", "Bell", "Texture", "Drone" };
+        return engines;
+    }
+
+    // A shuffled run of recipes for `count` slots (cycling when there are more slots than recipes).
+    std::vector<int> pickRecipes (int count)
+    {
         juce::Random rng ((juce::int64) juce::Time::getHighResolutionTicks());
-        std::vector<const char*> order (std::begin (engines), std::end (engines));
+        std::vector<int> order ((size_t) freshEngines().size());
+        for (size_t i = 0; i < order.size(); ++i) order[i] = (int) i;
         for (int i = (int) order.size() - 1; i > 0; --i)
             std::swap (order[(size_t) i], order[(size_t) rng.nextInt (i + 1)]);
+        std::vector<int> picked;
+        for (int i = 0; i < count; ++i) picked.push_back (order[(size_t) i % order.size()]);
+        return picked;
+    }
+
+    juce::String freshDirections (const GenerationRequest& req)
+    {
+        static const char* const kinds[] = { "Pad", "Pluck", "Bass", "Keys", "Lead", "Bell", "Texture", "Drone" };
+        const auto recipes = (int) req.recipes.size() >= req.count ? req.recipes : pickRecipes (req.count);
+        juce::Random rng ((juce::int64) juce::Time::getHighResolutionTicks());
         const bool hinted = req.hint.trim().isNotEmpty();
         const int kindOffset = rng.nextInt (8);
         juce::String s;
         for (int i = 0; i < req.count; ++i)
             s << "  Patch " << (i + 1) << (hinted ? juce::String() : juce::String (" (a ") + kinds[(kindOffset + i) % 8] + ")")
-              << ": " << order[(size_t) i % order.size()] << (hinted ? " - still the kind of sound the direction asks for" : "") << ".\n";
+              << ": " << freshEngines()[(size_t) juce::jlimit (0, (int) freshEngines().size() - 1, recipes[(size_t) i])].text
+              << (hinted ? " - still the kind of sound the direction asks for" : "") << ".\n";
         return s;
     }
 
@@ -832,6 +851,8 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
     // ask of a small model mid-JSON. So first it writes a few sentences about
     // what that should sound like in synth terms, and designs from those.
     GenerationRequest req = request;
+    if (req.parents.empty())
+        req.recipes = pickRecipes (req.count);   // chosen once, so the prompt on disk, the prompt sent and the tags on the patches agree
     if (req.hint.trim().isNotEmpty() && ! progress.cancelled())
     {
         const auto hint = req.hint.trim();
@@ -1031,6 +1052,10 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
         ensureMacroRoutings (*patch);
         patch->set (P::master_gain, -6.0f);
         patch->origin = "grown";
+        if (req.parents.empty())
+            patch->recipe = out.size() < req.recipes.size() ? juce::String (freshEngines()[(size_t) juce::jlimit (0, (int) freshEngines().size() - 1, req.recipes[out.size()])].tag) : juce::String ("fresh");
+        else
+            patch->recipe = mode == GrowMode::Close ? "grow:close" : mode == GrowMode::Medium ? "grow:medium" : "grow:far";
         patch->prompt = req.hint.trim();
         patch->parentName = req.parents.empty() ? juce::String() : parentFor (req, *patch, base)->name;
         if (patch->tags.isEmpty()) patch->tags = autoTags (*patch);

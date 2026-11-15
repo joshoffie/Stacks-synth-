@@ -63,6 +63,7 @@ StacksAudioProcessor::StacksAudioProcessor()
       generator (randomGenerator)
 {
     loadThemeFile (libraryRoot().getChildFile ("theme.json"));   // optional recolouring, before any window exists
+    tuning = ModelManager::appDataDirectory().getChildFile ("tuning.on").existsAsFile();   // the tuning rig, for whoever rates sounds for us
     voiceContext.mts = MTS_RegisterClient();                      // MTS-ESP: retunes to a running master, 12-TET otherwise
     const auto& specs = paramSpecs();
     for (int i = 0; i < kNumParams; ++i)
@@ -1638,6 +1639,7 @@ void StacksAudioProcessor::startGeneration (GenerationRequest req)
         labState.seedIsPatch = false;
     }
     labState.generating = true;
+    labState.lastVariation = req.variation;
     labState.liveWrites.clear();
     labState.writtenValues.clear();
     for (auto& w : labState.writtenWaves) w = WaveSpec();
@@ -1872,8 +1874,61 @@ void StacksAudioProcessor::finishGeneration (int token)
         labState.status = "Generation " + juce::String (labState.generation) + kDot + engineName()
                         + (wasCancelled ? " (stopped early)" : "");
         autoSaveGeneration();
+        if (tuning)   // every sound the rater was shown, rated or not: the base rate the report needs
+            for (const auto& c : labState.candidates)
+                appendRatingLine (ratingLine (c, 0));
     }
 
+    labBroadcaster.sendChangeMessage();
+}
+
+//==============================================================================
+juce::File StacksAudioProcessor::ratingsFolder()
+{
+    return ModelManager::appDataDirectory().getChildFile ("ratings");
+}
+
+// One line of the rig's log: the verdict, where the sound came from, and the
+// whole patch. `key` is a hash of the settings alone, so the same sound rated
+// twice (or renamed) is counted once.
+juce::var StacksAudioProcessor::ratingLine (const Patch& p, int verdict) const
+{
+    auto* o = new juce::DynamicObject();
+    o->setProperty ("time", juce::Time::getCurrentTime().toISO8601 (true));
+    o->setProperty ("verdict", verdict);
+    o->setProperty ("host", juce::SystemStats::getComputerName());
+   #ifdef JucePlugin_VersionString
+    o->setProperty ("build", JucePlugin_VersionString);
+   #else
+    o->setProperty ("build", "tool");   // the UI kit tool builds this file without the plug-in defines
+   #endif
+    o->setProperty ("engine", engineName());
+    o->setProperty ("generation", labState.generation);
+    o->setProperty ("slot", labState.auditioned);
+    o->setProperty ("seed", labState.seed.name);
+    o->setProperty ("seedIsPatch", labState.seedIsPatch);
+    o->setProperty ("variation", labState.lastVariation);
+    o->setProperty ("key", juce::String::toHexString (juce::JSON::toString (p.paramsToVar()).hashCode64()));
+    o->setProperty ("patch", p.toVar());
+    return juce::var (o);
+}
+
+void StacksAudioProcessor::appendRatingLine (const juce::var& line) const
+{
+    auto folder = ratingsFolder();
+    folder.createDirectory();
+    const auto file = folder.getChildFile (juce::File::createLegalFileName (juce::SystemStats::getComputerName()) + "-"
+                                           + juce::Time::getCurrentTime().formatted ("%Y-%m-%d") + ".jsonl");
+    file.appendText (juce::JSON::toString (line, true) + "\n");
+}
+
+void StacksAudioProcessor::rateCurrent (int verdict)
+{
+    if (! tuning || verdict < 1 || verdict > 3)
+        return;
+    appendRatingLine (ratingLine (currentPatch(), verdict));
+    lastRatingMade = { verdict, juce::Time::getMillisecondCounterHiRes() };
+    ++ratedThisSession;
     labBroadcaster.sendChangeMessage();
 }
 

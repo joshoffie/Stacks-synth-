@@ -43,6 +43,7 @@ struct LabState
     juce::StringArray liveWrites;               // the last settings written for the sound in progress, as shown text ("Cutoff 1.2 kHz")
     std::map<int, float> writtenValues;         // parameter index -> value the engine just wrote, so knobs can move to it
     std::array<WaveSpec, kNumOscs> writtenWaves; // the designed tables as they arrive, so the wave displays can draw them
+    float lastVariation = 0.5f;                 // the Variation the batch in progress was asked for (the tuning rig logs it)
 };
 
 enum class EngineKind { Random, Ollama, Builtin };
@@ -136,6 +137,19 @@ public:
     // sound and the saved presets stay (and every batch is still on disk under
     // historyRoot()).
     void clearLab();
+
+    // The tuning rig - not a feature. On only when ~/Library/Application Support/
+    // Stacks/tuning.on exists; nothing in the UI can switch it on. Keys 1 / 2 / 3
+    // rate the playing sound (trash / fine / whoa); every rating and every finished
+    // batch is appended to ratings/<host>-<date>.jsonl, which `StacksTests
+    // --ratings` reads. The findings become guards, prompt lines and recipe
+    // weights in the next build; the shipped plug-in never learns at runtime.
+    bool tuningMode() const                                { return tuning; }
+    void rateCurrent (int verdict);                        // 1 trash, 2 fine, 3 whoa
+    struct Rating { int verdict = 0; double atMs = 0.0; };
+    Rating lastRating() const                              { return lastRatingMade; }
+    int ratingsThisSession() const                         { return ratedThisSession; }
+    static juce::File ratingsFolder();
 
     // Tags on the playing sound and on saved files
     const juce::StringArray& currentTags() const           { return patchTags; }
@@ -393,6 +407,11 @@ private:
     std::atomic<int> explainToken { 0 };
     std::atomic<int> tweakToken { 0 };
     void applyTweak (const std::vector<TweakChange>&, const juce::String& summary);
+    bool tuning = false;
+    Rating lastRatingMade;
+    int ratedThisSession = 0;
+    juce::var ratingLine (const Patch&, int verdict) const;
+    void appendRatingLine (const juce::var&) const;
     bool patchFavourite = false;
     Patch loadedSnapshot;                                  // values as loaded, to spot edits
     std::vector<Patch> undoStack, redoStack;

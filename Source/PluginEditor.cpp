@@ -10,6 +10,59 @@ namespace
     constexpr int kKeyboardHeight = 58;
     constexpr int kLabWidth = 392;
     constexpr int kMargin = 6;
+
+    // The tuning rig's pill: how many sounds were rated this session, the last
+    // verdict flashing for a moment, and a click that opens the ratings folder.
+    class TuningBadge : public juce::Component,
+                        public juce::SettableTooltipClient,
+                        private juce::Timer
+    {
+    public:
+        explicit TuningBadge (StacksAudioProcessor& p) : processor (p)
+        {
+            setTooltip ("Tuning rig: with a sound playing press 1 (trash), 2 (fine) or 3 (whoa). Click to open the ratings folder.");
+            setMouseCursor (juce::MouseCursor::PointingHandCursor);
+            startTimerHz (10);
+        }
+
+        void paint (juce::Graphics& g) override
+        {
+            const auto last = processor.lastRating();
+            const double age = juce::Time::getMillisecondCounterHiRes() - last.atMs;
+            const bool flash = last.verdict > 0 && age < 1500.0;
+            const auto colour = ! flash ? colours::muted : last.verdict == 1 ? colours::rowFilter : last.verdict == 3 ? colours::rowMacro : colours::text;
+            auto r = getLocalBounds().toFloat();
+            g.setColour (colours::card);
+            g.fillRoundedRectangle (r, r.getHeight() * 0.5f);
+            g.setColour (colour.withAlpha (flash ? 0.9f : 0.5f));
+            g.drawRoundedRectangle (r.reduced (0.5f), r.getHeight() * 0.5f, 1.0f);
+            g.setColour (colour);
+            g.setFont (StacksLookAndFeel::font (10.0f, true).withExtraKerningFactor (0.08f));
+            const auto text = flash ? juce::String (last.verdict == 1 ? "TRASH" : last.verdict == 3 ? "WHOA" : "FINE")
+                                    : "TUNING " + juce::String::charToString (0xb7) + " " + juce::String (processor.ratingsThisSession()) + " rated";
+            g.drawText (text, getLocalBounds(), juce::Justification::centred, false);
+        }
+
+        void mouseDown (const juce::MouseEvent&) override
+        {
+            auto folder = StacksAudioProcessor::ratingsFolder();
+            folder.createDirectory();
+            folder.revealToUser();
+        }
+
+    private:
+        void timerCallback() override
+        {
+            const auto last = processor.lastRating();
+            const bool flash = last.verdict > 0 && juce::Time::getMillisecondCounterHiRes() - last.atMs < 1500.0;
+            if (flash || wasFlashing || shownCount != processor.ratingsThisSession()) repaint();
+            wasFlashing = flash;
+            shownCount = processor.ratingsThisSession();
+        }
+        StacksAudioProcessor& processor;
+        bool wasFlashing = false;
+        int shownCount = -1;
+    };
 }
 
 StacksAudioProcessorEditor::StacksAudioProcessorEditor (StacksAudioProcessor& p)
@@ -56,6 +109,11 @@ StacksAudioProcessorEditor::StacksAudioProcessorEditor (StacksAudioProcessor& p)
     redoButton.setTooltip ("Redo (Shift+Cmd+Z)");
     redoButton.onClick = [this] { synthProcessor.redo(); };
     content.addAndMakeVisible (redoButton);
+    if (synthProcessor.tuningMode())
+    {
+        tuningBadge = std::make_unique<TuningBadge> (synthProcessor);
+        content.addAndMakeVisible (*tuningBadge);
+    }
     helpButton.setButtonText ("?");
     helpButton.setTooltip ("Help is on: point at anything to see what it does. Click to turn it off.");
     helpButton.setClickingTogglesState (false);
@@ -221,6 +279,20 @@ bool StacksAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
     if (cmd && key.getKeyCode() == 'Z' && key.getModifiers().isShiftDown()) { synthProcessor.redo(); return true; }
     if (cmd && key.getKeyCode() == 'Z')  { synthProcessor.undo(); return true; }
     if (cmd && key.getKeyCode() == 'Y')  { synthProcessor.redo(); return true; }
+    // The tuning rig: 1 / 2 / 3 rate the playing sound (main row or number pad).
+    if (synthProcessor.tuningMode() && ! key.getModifiers().isAnyModifierKeyDown())
+    {
+        const auto text = key.getTextCharacter();
+        const int code = key.getKeyCode();
+        const int verdict = text >= '1' && text <= '3' ? (int) (text - '0')
+                          : code >= '1' && code <= '3' ? code - '0'
+                          : code == juce::KeyPress::numberPad1 ? 1 : code == juce::KeyPress::numberPad2 ? 2 : code == juce::KeyPress::numberPad3 ? 3 : 0;
+        if (verdict > 0)
+        {
+            synthProcessor.rateCurrent (verdict);
+            return true;
+        }
+    }
     // Note keys and Z / X belong to the on-screen keyboard wherever the focus
     // is (a text box that has focus takes its letters first and never gets
     // here). Swallowing them keeps a host from reading them as its own key
@@ -305,6 +377,11 @@ void StacksAudioProcessorEditor::resized()
     header.removeFromLeft (8);
     patchName.setBounds (header.removeFromLeft (juce::jmin (360, header.getWidth() / 3)).reduced (0, 8));
     header.removeFromLeft (10);
+    if (tuningBadge != nullptr)
+    {
+        tuningBadge->setBounds (header.removeFromRight (132).withSizeKeepingCentre (128, 22));
+        header.removeFromRight (8);
+    }
     scope.setBounds (header.reduced (0, 7));
 
     r.removeFromTop (kMargin);

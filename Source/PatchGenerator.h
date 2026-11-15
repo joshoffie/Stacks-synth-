@@ -18,6 +18,7 @@ struct GenerationRequest
     float variation = 0.5f;       // 0 = subtle changes, 1 = wild
     bool designWaves = true;      // invent new wavetables ("Custom") rather than only picking built-ins
     juce::String brief;           // the AI's own description of what the hint should sound like (filled in by the generator)
+    std::vector<int> recipes;     // fresh batches: per slot, the engine recipe it was given (an index into the generator's list; the generator fills it)
     int generation = 1;
 };
 
@@ -85,6 +86,12 @@ void applyIdeaMove (Patch&, int move, juce::int64 seed);
 
 // Far mode keeps the parent's identity: envelope class and category survive.
 void keepIdentity (Patch& child, const Patch& parent);
+
+// The tuning rig's view of a patch: readable tokens for everything that makes
+// it the sound it is ("osc B: +12", "filter: HP12", "decay: <80ms", "mod: LFO 1 >
+// Cutoff", "fx: delay", "recipe: fm"). Ratings are counted per token, so the
+// report can say what the trash has in common.
+juce::StringArray tasteFeatures (const Patch&);
 
 // Fills the gaps a thin design leaves - one bare oscillator, no width on a
 // pad, nothing on velocity, a filter envelope that does nothing on a pluck, no
