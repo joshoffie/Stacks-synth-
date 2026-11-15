@@ -63,6 +63,7 @@ class ProgressStrip : public juce::Component,
 public:
     ProgressStrip();
     void set (bool active, float fraction, const juce::String& detail, int done, int total);
+    bool isActive() const { return active; }
     void paint (juce::Graphics&) override;
 private:
     void timerCallback() override { repaint(); }

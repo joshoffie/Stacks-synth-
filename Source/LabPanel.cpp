@@ -139,17 +139,12 @@ void ProgressStrip::set (bool isActive, float f, const juce::String& text, int d
     repaint();
 }
 
+// Just the bar: the tree beside it shows what is being written, so no words here.
 void ProgressStrip::paint (juce::Graphics& g)
 {
     auto r = getLocalBounds().toFloat();
     if (! active)
-    {
-        // Idle: the last word from the Lab, quietly.
-        g.setColour (colours::muted);
-        g.setFont (StacksLookAndFeel::font (10.5f));
-        g.drawFittedText (detail, r.toNearestInt(), juce::Justification::centredLeft, 1, 0.8f);
         return;
-    }
     auto bar = r.removeFromTop (6.0f).reduced (0.0f, 1.0f);
     g.setColour (colours::card);
     g.fillRoundedRectangle (bar, 2.0f);
@@ -184,9 +179,6 @@ void ProgressStrip::paint (juce::Graphics& g)
         }
     }
 
-    g.setColour (colours::text.withAlpha (0.9f));
-    g.setFont (StacksLookAndFeel::font (11.0f));
-    g.drawFittedText (detail, r.toNearestInt().withTrimmedTop (1), juce::Justification::centredLeft, 1, 0.8f);
 }
 
 //==============================================================================
@@ -455,7 +447,7 @@ void LabPanel::resized()
     buttons.removeFromLeft (5);
     savePresetButton.setBounds (buttons);
     r.removeFromTop (5);
-    progressStrip.setBounds (r.removeFromTop (22));
+    progressStrip.setBounds (r.removeFromTop (progressStrip.isActive() ? 8 : 0));   // the bar while a batch grows, nothing otherwise
     r.removeFromTop (2);
 
     auto tabs = r.removeFromTop (22);
