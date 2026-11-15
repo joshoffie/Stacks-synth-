@@ -25,8 +25,8 @@ void Patch::set (int index, float v) noexcept
 
 bool Patch::sameValuesAs (const Patch& other) const noexcept
 {
-    for (int i = 0; i < kNumParams; ++i)
-        if (std::abs (values[(size_t) i] - other.values[(size_t) i]) > 1.0e-4f)
+    for (int i = 0; i < kNumParams; ++i)   // relative: a cutoff of 800 comes back from the knobs as 799.9996
+        if (std::abs (values[(size_t) i] - other.values[(size_t) i]) > 1.0e-4f * juce::jmax (1.0f, std::abs (values[(size_t) i])))
             return false;
     return true;
 }

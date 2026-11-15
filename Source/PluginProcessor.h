@@ -139,13 +139,13 @@ public:
     void clearLab();
 
     // The tuning rig - not a feature. On only when ~/Library/Application Support/
-    // Stacks/tuning.on exists; nothing in the UI can switch it on. Keys 1 / 2 / 3
-    // rate the playing sound (trash / fine / whoa); every rating and every finished
+    // Stacks/tuning.on exists; nothing in the UI can switch it on. Keys 1 to 5
+    // rate the playing sound (1 trash, 3 fine, 5 whoa); every rating and every finished
     // batch is appended to ratings/<host>-<date>.jsonl, which `StacksTests
     // --ratings` reads. The findings become guards, prompt lines and recipe
     // weights in the next build; the shipped plug-in never learns at runtime.
     bool tuningMode() const                                { return tuning; }
-    void rateCurrent (int verdict);                        // 1 trash, 2 fine, 3 whoa
+    void rateCurrent (int verdict);                        // 1 trash .. 3 fine .. 5 whoa
     struct Rating { int verdict = 0; double atMs = 0.0; };
     Rating lastRating() const                              { return lastRatingMade; }
     int ratingsThisSession() const                         { return ratedThisSession; }
@@ -410,7 +410,9 @@ private:
     bool tuning = false;
     Rating lastRatingMade;
     int ratedThisSession = 0;
-    juce::var ratingLine (const Patch&, int verdict) const;
+    juce::var ratingLine (const Patch&, int verdict, const juce::String& key = {}) const;
+    static juce::String ratingKey (const Patch&);         // a hash of the settings alone
+    juce::String loadedKey;                                // the key of the sound as it was loaded, so a rating meets its "seen" line
     void appendRatingLine (const juce::var&) const;
     bool patchFavourite = false;
     Patch loadedSnapshot;                                  // values as loaded, to spot edits

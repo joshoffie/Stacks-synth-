@@ -20,7 +20,7 @@ namespace
     public:
         explicit TuningBadge (StacksAudioProcessor& p) : processor (p)
         {
-            setTooltip ("Tuning rig: with a sound playing press 1 (trash), 2 (fine) or 3 (whoa). Click to open the ratings folder.");
+            setTooltip ("Tuning rig: with a sound playing press 1 (trash) to 5 (whoa); 3 is fine. Click to open the ratings folder.");
             setMouseCursor (juce::MouseCursor::PointingHandCursor);
             startTimerHz (10);
         }
@@ -30,7 +30,7 @@ namespace
             const auto last = processor.lastRating();
             const double age = juce::Time::getMillisecondCounterHiRes() - last.atMs;
             const bool flash = last.verdict > 0 && age < 1500.0;
-            const auto colour = ! flash ? colours::muted : last.verdict == 1 ? colours::rowFilter : last.verdict == 3 ? colours::rowMacro : colours::text;
+            const auto colour = ! flash ? colours::muted : last.verdict <= 2 ? colours::rowFilter : last.verdict >= 4 ? colours::rowMacro : colours::text;
             auto r = getLocalBounds().toFloat();
             g.setColour (colours::card);
             g.fillRoundedRectangle (r, r.getHeight() * 0.5f);
@@ -38,7 +38,8 @@ namespace
             g.drawRoundedRectangle (r.reduced (0.5f), r.getHeight() * 0.5f, 1.0f);
             g.setColour (colour);
             g.setFont (StacksLookAndFeel::font (10.0f, true).withExtraKerningFactor (0.08f));
-            const auto text = flash ? juce::String (last.verdict == 1 ? "TRASH" : last.verdict == 3 ? "WHOA" : "FINE")
+            static const char* const words[] = { "", "TRASH", "MEH", "FINE", "GOOD", "WHOA" };
+            const auto text = flash ? juce::String (words[juce::jlimit (0, 5, last.verdict)]) + " " + juce::String (last.verdict)
                                     : "TUNING " + juce::String::charToString (0xb7) + " " + juce::String (processor.ratingsThisSession()) + " rated";
             g.drawText (text, getLocalBounds(), juce::Justification::centred, false);
         }
@@ -279,14 +280,14 @@ bool StacksAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
     if (cmd && key.getKeyCode() == 'Z' && key.getModifiers().isShiftDown()) { synthProcessor.redo(); return true; }
     if (cmd && key.getKeyCode() == 'Z')  { synthProcessor.undo(); return true; }
     if (cmd && key.getKeyCode() == 'Y')  { synthProcessor.redo(); return true; }
-    // The tuning rig: 1 / 2 / 3 rate the playing sound (main row or number pad).
+    // The tuning rig: 1 to 5 rate the playing sound (main row or number pad).
     if (synthProcessor.tuningMode() && ! key.getModifiers().isAnyModifierKeyDown())
     {
         const auto text = key.getTextCharacter();
         const int code = key.getKeyCode();
-        const int verdict = text >= '1' && text <= '3' ? (int) (text - '0')
-                          : code >= '1' && code <= '3' ? code - '0'
-                          : code == juce::KeyPress::numberPad1 ? 1 : code == juce::KeyPress::numberPad2 ? 2 : code == juce::KeyPress::numberPad3 ? 3 : 0;
+        static const int pads[] = { juce::KeyPress::numberPad1, juce::KeyPress::numberPad2, juce::KeyPress::numberPad3, juce::KeyPress::numberPad4, juce::KeyPress::numberPad5 };
+        int verdict = text >= '1' && text <= '5' ? (int) (text - '0') : code >= '1' && code <= '5' ? code - '0' : 0;
+        for (int d = 0; d < 5 && verdict == 0; ++d) if (code == pads[d]) verdict = d + 1;
         if (verdict > 0)
         {
             synthProcessor.rateCurrent (verdict);

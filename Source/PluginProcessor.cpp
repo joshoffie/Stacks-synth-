@@ -855,6 +855,7 @@ Patch StacksAudioProcessor::currentPatch() const
     p.filePath = patchFile;
     p.favourite = patchFavourite;
     p.tags = patchTags;
+    p.recipe = loadedSnapshot.recipe;   // the recipe it was written to, for the tuning rig
     p.description = describePatch (p);
     return p;
 }
@@ -873,6 +874,7 @@ void StacksAudioProcessor::applyPatch (const Patch& patchIn)
     patchFavourite = p.favourite;
     patchTags = p.tags;
     loadedSnapshot = p;
+    loadedKey = ratingKey (patchIn);   // as generated, before the macro routings and the knobs' rounding
 }
 
 bool StacksAudioProcessor::currentIsEdited() const
@@ -1890,12 +1892,19 @@ juce::File StacksAudioProcessor::ratingsFolder()
 
 // One line of the rig's log: the verdict, where the sound came from, and the
 // whole patch. `key` is a hash of the settings alone, so the same sound rated
-// twice (or renamed) is counted once.
-juce::var StacksAudioProcessor::ratingLine (const Patch& p, int verdict) const
+// twice (or renamed) is counted once; a rating passes the key the sound was
+// logged under when it arrived, since a few values drift through the knobs.
+juce::String StacksAudioProcessor::ratingKey (const Patch& p)
+{
+    return juce::String::toHexString (juce::JSON::toString (p.paramsToVar()).hashCode64());
+}
+
+juce::var StacksAudioProcessor::ratingLine (const Patch& p, int verdict, const juce::String& key) const
 {
     auto* o = new juce::DynamicObject();
     o->setProperty ("time", juce::Time::getCurrentTime().toISO8601 (true));
     o->setProperty ("verdict", verdict);
+    o->setProperty ("scale", 5);   // 1 trash .. 5 whoa; lines without this field came from the first rig's 1 / 2 / 3
     o->setProperty ("host", juce::SystemStats::getComputerName());
    #ifdef JucePlugin_VersionString
     o->setProperty ("build", JucePlugin_VersionString);
@@ -1908,7 +1917,7 @@ juce::var StacksAudioProcessor::ratingLine (const Patch& p, int verdict) const
     o->setProperty ("seed", labState.seed.name);
     o->setProperty ("seedIsPatch", labState.seedIsPatch);
     o->setProperty ("variation", labState.lastVariation);
-    o->setProperty ("key", juce::String::toHexString (juce::JSON::toString (p.paramsToVar()).hashCode64()));
+    o->setProperty ("key", key.isNotEmpty() ? key : ratingKey (p));
     o->setProperty ("patch", p.toVar());
     return juce::var (o);
 }
@@ -1924,9 +1933,11 @@ void StacksAudioProcessor::appendRatingLine (const juce::var& line) const
 
 void StacksAudioProcessor::rateCurrent (int verdict)
 {
-    if (! tuning || verdict < 1 || verdict > 3)
+    if (! tuning || verdict < 1 || verdict > 5)
         return;
-    appendRatingLine (ratingLine (currentPatch(), verdict));
+    auto line = ratingLine (currentPatch(), verdict, loadedKey);
+    line.getDynamicObject()->setProperty ("edited", currentIsEdited());   // rated as it arrived, or after knobs moved
+    appendRatingLine (line);
     lastRatingMade = { verdict, juce::Time::getMillisecondCounterHiRes() };
     ++ratedThisSession;
     labBroadcaster.sendChangeMessage();
