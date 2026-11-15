@@ -322,7 +322,7 @@ static void testTasteProfile()
     CHECK (t.weightFor ("pad", "vocal") == 1.0f);
     CHECK (t.weightFor ("bass", "two saws") == 1.0f && t.weightFor ("bass", "noise body") == 1.0f);   // learned on pads: basses are untouched
     CHECK (t.promptLines().contains ("Avoid on pads") && t.promptLines().contains ("HP24") && ! t.promptLines().containsIgnoreCase ("prefer") && ! t.promptLines().containsIgnoreCase ("like"));
-    CHECK (t.summary().contains ("Rated 30 sounds") && t.summary().contains ("HP24"));
+    CHECK (t.summary().contains ("Rated 30 sounds (12 trash, 6 fine, 12 whoa)") && t.summary().contains ("HP24"));
 
     // 2. Below the bar nothing moves: four trash, or five trash with only three others.
     std::vector<TasteRating> few (ratings.begin(), ratings.begin() + 4);

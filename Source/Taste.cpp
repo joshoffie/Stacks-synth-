@@ -195,7 +195,7 @@ juce::String TasteProfile::summary() const
 {
     if (rated == 0) return "No ratings yet. Press 1 (trash) to 5 (whoa) while a sound plays; what you rate shapes the sounds Stacks makes for you.";
     juce::String s;
-    s << "Rated " << rated << " sound" << (rated == 1 ? "" : "s") << " (" << trash << " trash, " << whoa << " whoa).";
+    s << "Rated " << rated << " sound" << (rated == 1 ? "" : "s") << " (" << trash << " trash, " << (rated - trash - whoa) << " fine, " << whoa << " whoa).";
     if (! avoids.empty())
     {
         juce::StringArray parts;
