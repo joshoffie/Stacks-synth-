@@ -510,6 +510,7 @@ namespace
             s.frames.push_back (std::move (frame));
         }
         s.tail = rng.chance (0.5f) ? std::round (rng.uni (0.1f, 0.9f) * 10.0f) / 10.0f : 0.0f;
+        s.scatter = rng.chance (archetype == Bass || archetype == Lead ? 0.3f : 0.6f) ? std::round (rng.uni (0.3f, 1.0f) * 10.0f) / 10.0f : 0.0f;   // round and smooth, or in step and buzzy
         s.name = randomName (archetype, rng);
         return s;
     }
@@ -532,6 +533,8 @@ namespace
         }
         if (rng.chance (0.5f))
             s.tail = juce::jlimit (0.0f, 1.0f, std::round ((s.tail + rng.gauss() * 0.3f * amount) * 10.0f) / 10.0f);
+        if (rng.chance (0.3f * amount))
+            s.scatter = juce::jlimit (0.0f, 1.0f, std::round ((s.scatter + rng.gauss() * 0.5f * amount) * 10.0f) / 10.0f);
         s.name = childName (parent.name.isNotEmpty() ? parent.name : juce::String ("Wave"), rng);
         return s;
     }
@@ -1276,6 +1279,10 @@ juce::StringArray tasteFeatures (const Patch& p)
 
     // Filter
     f.add ("filter: " + filterTypeNames()[juce::jlimit (0, filterTypeNames().size() - 1, (int) p.get (P::filter_type))]);
+    {
+        const auto ft = filterTypeNames()[juce::jlimit (0, filterTypeNames().size() - 1, (int) p.get (P::filter_type))];
+        if ((ft.startsWith ("HP") || ft.startsWith ("BP")) && p.get (P::filter_env) > 0.5f) f.add ("fenv: lifts a HP/BP");   // the body goes at note-on
+    }
     if ((int) p.get (P::filter_routing) > 0) f.add ("filter 2: " + filterRoutingNames()[juce::jlimit (0, filterRoutingNames().size() - 1, (int) p.get (P::filter_routing))]);
     f.add ("cutoff: " + band (p.get (P::filter_cutoff), { 300.0f, 1000.0f, 4000.0f }, { "<300", "300-1k", "1k-4k", ">4k" }));
     f.add ("resonance: " + band (p.get (P::filter_res), { 0.3f, 0.6f }, { "low", "mid", "high" }));
@@ -1324,6 +1331,105 @@ juce::StringArray tasteFeatures (const Patch& p)
 // designer would add them: a second source, width where the kind wants it,
 // velocity, a filter envelope that does the shaping, the right space, a little
 // analog life, a transient on things that are struck.
+void guardFilters (Patch& p, juce::int64 seed)
+{
+    juce::Random rng (seed);
+    auto uni  = [&] (float a, float b) { return a + (b - a) * rng.nextFloat(); };
+    auto target = [] (P param) { return modTargetForParam ((int) param); };
+    const auto cat = p.category.toLowerCase();
+    const bool pluck = cat.contains ("pluck") || cat.contains ("perc") || cat.contains ("stab") || cat.contains ("drum");
+    const bool bass  = cat.contains ("bass");
+    const bool keys  = cat.contains ("key") || cat.contains ("piano") || cat.contains ("organ");
+    const bool lead  = cat.contains ("lead");
+    const bool bell  = cat.contains ("bell") || cat.contains ("chime") || cat.contains ("mallet");
+
+    // 4b. A struck sound through a high-pass or band-pass main filter. The envelope lifts the
+    // cutoff whatever the type, so a positive sweep on a high-pass throws the body away at the
+    // very moment the note should have it (the clavinet batches that were all fizz). The
+    // high-pass stays low and still, a band-pass turns gentle and low, and the struck sweep
+    // moves to a low-pass filter 2 in series; velocity opens that one instead.
+    if (pluck || keys || bass || bell || lead)
+    {
+        const auto& typeNames = filterTypeNames();
+        const auto typeName = typeNames[juce::jlimit (0, typeNames.size() - 1, (int) p.get (P::filter_type))];
+        const bool highPass = typeName.startsWith ("HP"), bandPass = typeName.startsWith ("BP");
+        if (bandPass && lead)
+        {
+            // A lead through a band-pass is a nasal, thin lead: the low-pass at the same cutoff is what was meant.
+            p.set (P::filter_type, (float) typeNames.indexOf ("LP12"));
+            p.set (P::filter_cutoff, juce::jmax (800.0f, p.get (P::filter_cutoff)));
+        }
+        else if (highPass && p.get (P::filter_cutoff) <= 300.0f && p.get (P::filter_env) <= 1.0f)
+        {
+            p.set (P::filter_env, 0.0f);   // already low: it only needs to stop moving
+        }
+        else if ((highPass || bandPass) && (p.get (P::filter_env) > 0.25f || p.get (P::filter_cutoff) > 400.0f))
+        {
+            const float sweep = juce::jlimit (1.5f, 3.5f, p.get (P::filter_env));
+            if (highPass)
+            {
+                p.set (P::filter_cutoff, juce::jmin (p.get (P::filter_cutoff), uni (120.0f, 300.0f)));
+                p.set (P::filter_env, 0.0f);
+                p.set (P::filter_res, juce::jmin (p.get (P::filter_res), 0.3f));
+            }
+            else
+            {
+                p.set (P::filter_type, (float) typeNames.indexOf ("BP12"));
+                p.set (P::filter_cutoff, juce::jmin (p.get (P::filter_cutoff), uni (300.0f, 700.0f)));
+                p.set (P::filter_env, juce::jmin (p.get (P::filter_env), 0.5f));
+            }
+            const auto type2 = typeNames[juce::jlimit (0, typeNames.size() - 1, (int) p.get (P::filter2_type))];
+            if ((int) p.get (P::filter_routing) == 0 || ! type2.startsWith ("LP"))
+            {
+                p.set (P::filter_routing, (float) filterRoutingNames().indexOf ("Series"));
+                p.set (P::filter2_type, (float) typeNames.indexOf ("LP24"));
+                p.set (P::filter2_cutoff, uni (900.0f, 2500.0f));
+                p.set (P::filter2_res, uni (0.1f, 0.3f));
+            }
+            p.set (P::filter2_env, juce::jmax (p.get (P::filter2_env), sweep));
+            const int cutoff2 = modTargetForParam ((int) P::filter2_cutoff);
+            for (int i = 0; i < kNumModSlots; ++i)
+                if ((int) p.get (modSourceParam (i)) == SrcVelocity && (int) p.get (modDestParam (i)) == target (P::filter_cutoff))
+                    p.set (modDestParam (i), (float) (cutoff2 > 0 ? cutoff2 : TargetAmp));
+        }
+    }
+
+    // 4c. A 24 dB high-pass or band-pass as the main filter, on any kind. Six of the seven rated
+    // sounds built that way were trash (the first tuning sessions): the steep slope leaves a
+    // sliver of the spectrum. The 12 dB version keeps the idea and most of the sound.
+    {
+        const auto& typeNames = filterTypeNames();
+        const auto typeName = typeNames[juce::jlimit (0, typeNames.size() - 1, (int) p.get (P::filter_type))];
+        if (typeName == "HP24") p.set (P::filter_type, (float) typeNames.indexOf ("HP12"));
+        if (typeName == "BP24") p.set (P::filter_type, (float) typeNames.indexOf ("BP12"));
+    }
+
+    // 4d. The filter has somewhere to go. A low-pass cutoff is where the sweep starts, so a
+    // negative envelope needs room below it and a positive one room above it, and where the
+    // envelope settles (cutoff x 2^(depth x sustain)) must still let the note through. The
+    // rated "Resonant Pulse" sat at 164 Hz with a -2.6 octave dive: nothing was left to hear.
+    {
+        const auto& typeNames = filterTypeNames();
+        const auto typeName = typeNames[juce::jlimit (0, typeNames.size() - 1, (int) p.get (P::filter_type))];
+        if (typeName.startsWith ("LP"))
+        {
+            const float depth = p.get (P::filter_env), sus = juce::jlimit (0.0f, 1.0f, p.get (P::fenv_sustain));
+            float cutoff = p.get (P::filter_cutoff);
+            const float floorHz = bass ? 90.0f : (keys || lead) ? 400.0f : 220.0f;   // keys and leads live on their harmonics
+            if (depth < -0.25f)
+            {
+                const float dip = cutoff * std::exp2 (depth);                  // the attack's lowest point
+                if (dip < floorHz) cutoff = floorHz * std::exp2 (-depth);
+            }
+            const float rest = cutoff * std::exp2 (depth * sus);               // where the held note sits
+            if (rest < floorHz) cutoff *= floorHz / rest;
+            if (depth > 1.5f && cutoff > 5000.0f) cutoff = uni (1200.0f, 3000.0f);   // a sweep that starts open does nothing
+            p.set (P::filter_cutoff, juce::jlimit (20.0f, 12000.0f, cutoff));
+        }
+    }
+
+}
+
 void enrichPatch (Patch& p, juce::int64 seed)
 {
     juce::Random rng (seed);
@@ -1413,6 +1519,8 @@ void enrichPatch (Patch& p, juce::int64 seed)
         p.set (P::fenv_sustain, uni (0.05f, 0.3f));
         if (p.get (P::filter_cutoff) > 4000.0f) p.set (P::filter_cutoff, uni (800.0f, 2500.0f));   // room for the envelope to open
     }
+
+    guardFilters (p, seed ^ 0x5f3759df);
 
     // 5. Glide only where it belongs.
     if (! lead && ! bass && p.get (P::glide) > 0.0f)

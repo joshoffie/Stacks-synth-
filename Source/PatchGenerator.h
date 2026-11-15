@@ -99,6 +99,13 @@ juce::StringArray tasteFeatures (const Patch&);
 // only touches what is missing, so a deliberate design stays as it is.
 void enrichPatch (Patch&, juce::int64 seed);
 
+// The filter rules on their own (enrichPatch calls them): a struck sound's
+// high-pass or band-pass stays low with the sweep on a low-pass filter 2; a
+// 24 dB high-pass or band-pass main filter becomes 12 dB; a low-pass cutoff is
+// moved so its envelope has somewhere to go and the held note still comes
+// through. What the tuning sessions and the audio audit found broken, as code.
+void guardFilters (Patch&, juce::int64 seed);
+
 // Honours what a prompt asks for by name: "lush chorus", "with delay", "tape",
 // "shimmer", "distorted", "wide", "sub bass", "portamento", "punchy", "riser",
 // "arp". Raises the settings those words call for and never lowers what the

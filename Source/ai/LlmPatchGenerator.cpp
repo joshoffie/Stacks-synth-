@@ -500,8 +500,12 @@ juce::String LlmPatchGenerator::systemPrompt (bool designWaves)
       << "What makes a sound finished rather than a sketch: at least two sources (oscB at an octave or a fifth with oscB_level 0.3-0.7, or FM, sub_level or noise_level beside A) - one bare oscillator is thin; "
       << "pads and leads want unison_voices 3-6 with unison_detune 12-30 and unison_spread 0.5-0.9; every sound a Velocity connection (Cutoff 0.2-0.5, or Amp 0.3-0.5) so playing it matters; "
       << "the filter envelope positive and decisive on plucks, keys and basses (filter_env 2-4, fenv_decay 0.1-0.5, fenv_sustain 0-0.3), gentle or negative only on pads; "
+      << "that sweep belongs on a low-pass: struck sounds (plucks, keys, basses, bells) take an LP12 or LP24 main filter; a high-pass or band-pass main filter is for pads and textures, "
+      << "and on a struck sound it stays low and still (filter_cutoff 100-300, filter_env 0) or the note loses its body; HP24 and BP24 as the main filter leave a sliver of the sound - use HP12 or BP12 when you need one; "
+      << "a negative filter_env is rare: a pad or texture that darkens as it blooms, with filter_cutoff above 1500 so the dive has somewhere to go (a cutoff under 400 with a negative envelope is mud); "
       << "glide only on leads and basses; char_drift 0.1-0.3 and char_sat 0.1-0.3 for analog life; and a space that fits: plucks, keys and leads a synced delay (delay_mode Ping-Pong, delay_sync 1/8 or 1/8D, delay_mix 0.2-0.35) with a short reverb (0.1-0.25), "
       << "pads a long reverb (reverb_mix 0.35-0.5, reverb_size 0.6-0.9) with chorus or hyper_amount, basses nearly dry.\n"
+      << "Where the low-pass sits decides how much of the wavetable is heard: keys and leads filter_cutoff 1500-5000, pads 600-2500, plucks 400-1200 with the envelope opening 2-4 octaves, basses 80-800; under 400 only the fundamental is left. "
       << "By kind: pads aenv_attack 0.3-2 and aenv_release 1.5-4, unison 3-5, a slow LFO on A Morph or Cutoff; "
       << "plucks aenv_decay 0.1-0.5, aenv_sustain 0-0.1, aenv_release 0.1-0.4, filter_env 2-4 with fenv_decay 0.05-0.4, a transient (noise_level 0.1-0.3 with Mod Env > Noise, or Mod Env > Pitch 0.2 with menv_decay 0.05); "
       << "basses sub_level 0.4-0.8, filter_cutoff 80-800, oscA_coarse -12, unison 1, a short filter envelope, dry; "
@@ -524,7 +528,7 @@ juce::String LlmPatchGenerator::systemPrompt (bool designWaves)
       << "\"lfo1_shape\":\"<shape>\",\"lfo1_rate\":<Hz>,\"lfo1_sync\":\"<Free or a note value>\",\"mod2_source\":\"LFO 1\",\"mod2_dest\":\"<a target from the LFO list>\",\"mod2_amount\":<-1..1>,"
       << "<any extra settings and connections>}";
     if (designWaves)
-        s << ",\"waveA\":{\"name\":\"<two words>\",\"tail\":<0-9>,\"spectra\":[[<16 digits>],[<16 digits>],[<16 digits>]]}";
+        s << ",\"waveA\":{\"name\":\"<two words>\",\"tail\":<0-9>,\"scatter\":<0-9>,\"spectra\":[[<16 digits>],[<16 digits>],[<16 digits>]]}";
     s << "}]}\n"
       << "category is one of Pad, Pluck, Bass, Keys, Lead, Bell, Texture, Drone. tags are three lowercase words a producer would search for (mood, texture, use: warm, analog, intro). "
       << "params always starts with these core settings in this exact order: " << juce::StringArray (coreParamIds().data(), (int) coreParamIds().size()).joinIntoString (", ")
@@ -535,6 +539,7 @@ juce::String LlmPatchGenerator::systemPrompt (bool designWaves)
           << "Each spectrum lists the levels of harmonics 1-16 as digits 0-9 (9 = full, every step down is 4 dB quieter, 0 = silent); "
           << "give 2 to 4 spectra that differ - the Morph knob sweeps from the first to the last. "
           << "tail = how much the harmonics above 16 keep going (0 = mellow, 9 = as bright as a saw). "
+          << "scatter = how the harmonics' phases line up: 0 keeps them in step (a sharp peak, buzzy and cutting, like a saw or a pulse), 4-6 rounds the wave off, 9 scrambles them (smooth and soft, like strings, organ or glass, the same brightness with less bite); basses and plucks low, pads and keys higher. "
           << "Recipes: saw 9,8,7,6,5,5,5,4,4,4,4,3,3,3,3,3 - square 9,0,7,0,6,0,5,0,5,0,4,0,4,0,4,0 - hollow 9,2,8,2,5,1,3,1,2,0,1,0,1,0,0,0 - "
           << "glassy bell 9,0,0,6,0,0,5,0,0,0,4,0,0,0,0,3 (sparse partials) - vocal 5,8,9,9,6,3,2,1,1,0,0,0,0,0,0,0 (a bump is a formant) - "
           << "organ 9,8,0,7,0,0,0,6,0,0,0,0,0,0,0,0. Invent your own that fits the sound and give it a two-word name; never copy a recipe exactly. "
@@ -766,7 +771,7 @@ juce::String LlmPatchGenerator::grammar (int patchCount, bool designWaves)
       << "int ::= [0-9]{1,2}\n"
       << "sint ::= \"-\"? [0-9]{1,2}\n";
     if (designWaves)
-        g << "wave ::= " << lit ("{\"name\":") << " name " << lit (",\"tail\":") << " digit " << lit (",\"spectra\":[")
+        g << "wave ::= " << lit ("{\"name\":") << " name " << lit (",\"tail\":") << " digit " << lit (",\"scatter\":") << " digit " << lit (",\"spectra\":[")
           << " spectrum (" << lit (",") << " spectrum){1,3} " << lit ("]}") << "\n"
           << "spectrum ::= " << lit ("[") << " digit (" << lit (",") << " digit){15} " << lit ("]") << "\n"
           << "digit ::= [0-9]\n";
@@ -829,7 +834,7 @@ juce::StringArray LlmPatchGenerator::extractWrites (const std::string& obj, std:
             value = obj.substr (v, end - v);
             pos = end;
         }
-        if (key == "name" || key == "description" || key == "category" || key == "parent" || key == "patches" || key == "params" || key == "tail") continue;
+        if (key == "name" || key == "description" || key == "category" || key == "parent" || key == "patches" || key == "params" || key == "tail" || key == "scatter") continue;
         if (reported.count (key)) continue;
         reported.insert (key);
         fresh.add (juce::String::fromUTF8 (key.c_str()) + "\t" + juce::String::fromUTF8 (value.c_str()).trim());
