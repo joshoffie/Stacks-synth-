@@ -24,6 +24,14 @@ namespace
     }
 
     struct Count { int withTrash = 0, withOthers = 0; };
+
+    // "pads", "basses", "keys": the kind in the plural, for the summary and the prompt.
+    juce::String plural (const juce::String& kind)
+    {
+        if (kind == "keys") return kind;
+        if (kind == "bass") return "basses";
+        return kind + "s";
+    }
 }
 
 juce::String tasteKind (const juce::String& category)
@@ -179,7 +187,7 @@ juce::String TasteProfile::promptLines() const
     for (const auto& a : avoids) byKind[a.kind].addIfNotAlreadyThere (a.feature);
     juce::String s = "This player has rated what you made before. ";
     for (const auto& kv : byKind)
-        s << (kv.first.isEmpty() ? juce::String ("Avoid on every kind: ") : "Avoid on " + kv.first + "s: ") << kv.second.joinIntoString ("; ") << ". ";
+        s << (kv.first.isEmpty() ? juce::String ("Avoid on every kind: ") : "Avoid on " + plural (kv.first) + ": ") << kv.second.joinIntoString ("; ") << ". ";
     return s.trimEnd() + "\n";
 }
 
@@ -191,15 +199,15 @@ juce::String TasteProfile::summary() const
     if (! avoids.empty())
     {
         juce::StringArray parts;
-        for (const auto& a : avoids) parts.add ((a.kind.isEmpty() ? juce::String() : a.kind + "s: ") + a.feature);
+        for (const auto& a : avoids) parts.add ((a.kind.isEmpty() ? juce::String() : plural (a.kind) + ": ") + a.feature);
         s << " Steering away from " << parts.joinIntoString (", ") << ".";
     }
     juce::StringArray up, down;
     for (const auto& kindEntry : recipeWeights)
         for (const auto& kv : kindEntry.second)
         {
-            if (kv.second >= 1.25f) up.add (kv.first + " on " + kindEntry.first + "s");
-            if (kv.second <= 0.7f)  down.add (kv.first + " on " + kindEntry.first + "s");
+            if (kv.second >= 1.25f) up.add (kv.first + " on " + plural (kindEntry.first));
+            if (kv.second <= 0.7f)  down.add (kv.first + " on " + plural (kindEntry.first));
         }
     if (! up.isEmpty())   s << " Drawing a little more often: " << up.joinIntoString (", ") << ".";
     if (! down.isEmpty()) s << " Drawing less often: " << down.joinIntoString (", ") << ".";
