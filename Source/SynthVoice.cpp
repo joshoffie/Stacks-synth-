@@ -21,15 +21,14 @@ void Ladder::setMode (int type) noexcept
     if (type == mode)
         return;
     mode = type;
-    // The six responses as taps on the four stages (juce::dsp::LadderFilter's table), with its 1.2 output gain.
+    // The six responses as taps on the input and the four stage outputs.
     static const float taps[6][5] = { { 0.0f, 0.0f, 1.0f, 0.0f, 0.0f },      // LP12
                                       { 0.0f, 0.0f, 0.0f, 0.0f, 1.0f },      // LP24
                                       { 1.0f, -2.0f, 1.0f, 0.0f, 0.0f },     // HP12
                                       { 1.0f, -4.0f, 6.0f, -4.0f, 1.0f },    // HP24
                                       { 0.0f, 1.0f, -1.0f, 0.0f, 0.0f },     // BP12
                                       { 0.0f, 0.0f, 1.0f, -2.0f, 1.0f } };   // BP24
-    for (int i = 0; i < 5; ++i) A[i] = 1.2f * taps[type][i];
-    comp = type == 2 || type == 3 ? 0.0f : 0.5f;
+    for (int i = 0; i < 5; ++i) A[i] = taps[type][i];
     reset();
 }
 
@@ -44,12 +43,13 @@ void Ladder::prepare (double sr, int maxBlock)
 Ladder::Coefs Ladder::coefsFor (float cutoffHz, float resonance, float drive) const noexcept
 {
     Coefs c;
-    c.a1 = std::exp (-twoPi * juce::jlimit (10.0f, 0.45f * (float) sampleRate, cutoffHz) / (float) sampleRate);
-    c.res = 0.1f + 0.9f * juce::jlimit (0.0f, 1.0f, resonance);
-    c.drive = juce::jmax (1.0f, drive);
-    c.gain = std::pow (c.drive, -2.642f) * 0.6103f + 0.3903f;
-    c.drive2 = c.drive * 0.04f + 0.96f;
-    c.gain2 = std::pow (c.drive2, -2.642f) * 0.6103f + 0.3903f;
+    const float fc = juce::jlimit (10.0f, 0.24f * (float) sampleRate, cutoffHz);   // 0.48 of the host's rate
+    c.g = std::tan (juce::MathConstants<float>::pi * fc / (float) sampleRate);
+    const float r = juce::jlimit (0.0f, 1.0f, resonance);
+    c.k = 4.0f * r * (1.0f + 0.1f * r);              // 4.4 at the top: past the edge, so it sings and the saturator sets the level
+    const float d = juce::jmax (1.0f, drive);
+    c.pre = 0.25f * d * (1.0f + 0.5f * c.k);         // drive, and half the passband the resonance takes away
+    c.post = 4.0f / (1.0f + 0.3f * (d - 1.0f));       // 1/0.25 at drive 1: unity and 0.5% compression; louder drives are held back
     return c;
 }
 
@@ -68,24 +68,30 @@ void Ladder::process (float* L, float* R, int n, float cutoffHz, float resonance
     for (int i = 0; i < m; ++i)
     {
         const float t = (float) (i + 1) * inv;
-        const float a1 = last.a1 + (target.a1 - last.a1) * t;
-        const float res = last.res + (target.res - last.res) * t;
-        const float gain = last.gain + (target.gain - last.gain) * t;
-        const float gain2 = last.gain2 + (target.gain2 - last.gain2) * t;
-        const float dr = last.drive + (target.drive - last.drive) * t;
-        const float dr2 = last.drive2 + (target.drive2 - last.drive2) * t;
-        const float g = 1.0f - a1, b0 = g * 0.76923076923f, b1 = g * 0.23076923076f;
+        const float g = last.g + (target.g - last.g) * t;
+        const float k = last.k + (target.k - last.k) * t;
+        const float pre = last.pre + (target.pre - last.pre) * t;
+        const float post = last.post + (target.post - last.post) * t;
+        const float G = g / (1.0f + g), G2 = G * G, G3 = G2 * G, G4 = G3 * G, oneMinusG = 1.0f - G;
         for (int c = 0; c < 2; ++c)
         {
             float* st = s[c];
-            const float dx = gain * saturate (dr * ch[c][i]);
-            const float a = dx + res * -4.0f * (gain2 * saturate (dr2 * st[4]) - dx * comp);
-            const float b = b1 * st[0] + a1 * st[1] + b0 * a;
-            const float cc = b1 * st[1] + a1 * st[2] + b0 * b;
-            const float d = b1 * st[2] + a1 * st[3] + b0 * cc;
-            const float e = b1 * st[3] + a1 * st[4] + b0 * d;
-            st[0] = a; st[1] = b; st[2] = cc; st[3] = d; st[4] = e;
-            ch[c][i] = a * A[0] + b * A[1] + cc * A[2] + d * A[3] + e * A[4];
+            const float in = saturate (ch[c][i] * pre) * post;
+            // What the four stages would add from their states alone, then the
+            // feedback solved for this sample; the loop's own saturation on top.
+            const float S1 = oneMinusG * st[0], S2 = oneMinusG * st[1], S3 = oneMinusG * st[2], S4 = oneMinusG * st[3];
+            const float sigma = G3 * S1 + G2 * S2 + G * S3 + S4;
+            const float y4lin = (G4 * in + sigma) / (1.0f + k * G4);
+            const float u = in - k * saturate (y4lin);
+            float x = u, y[4];
+            for (int j = 0; j < 4; ++j)
+            {
+                const float v = (x - st[j]) * G;
+                y[j] = v + st[j];
+                st[j] = y[j] + v;
+                x = y[j];
+            }
+            ch[c][i] = u * A[0] + y[0] * A[1] + y[1] * A[2] + y[2] * A[3] + y[3] * A[4];
         }
     }
     os->processSamplesDown (block);
@@ -127,6 +133,36 @@ void SynthVoice::updateEnvelopes (const SynthParams& p)
 
 void SynthVoice::startNote (int midiNoteNumber, float vel, juce::SynthesiserSound*, int currentPitchWheelPosition)
 {
+    // The Synthesiser set our channel before calling us: start with that
+    // channel's current slide and pressure (an MPE controller sends them first).
+    int midiChannel = 1;
+    for (int ch = 1; ch <= 16; ++ch)
+        if (isPlayingChannel (ch)) { midiChannel = ch; break; }
+
+    // A stolen voice is still fading what it was playing: the new note waits
+    // the few milliseconds the fade takes rather than starting on a cut.
+    if (fadePending)
+    {
+        pending = { midiNoteNumber, vel, currentPitchWheelPosition, midiChannel, true };
+        return;
+    }
+    beginNote (midiNoteNumber, vel, currentPitchWheelPosition, midiChannel);
+}
+
+void SynthVoice::hardReset() noexcept
+{
+    fadePending = false;
+    fadeRemaining = 0;
+    sampler.stop();
+    ampEnv.reset();
+    filterEnv.reset();
+    modEnv.reset();
+    for (auto& f : filters) f.reset();
+    gainsPrimed = false;
+}
+
+void SynthVoice::beginNote (int midiNoteNumber, float vel, int pitchWheel, int midiChannel)
+{
     const auto& p = *ctx.params;
 
     velocity = vel;
@@ -134,13 +170,8 @@ void SynthVoice::startNote (int midiNoteNumber, float vel, juce::SynthesiserSoun
     noteRandom = rng.nextFloat() * 2.0f - 1.0f;
     serial = ++ctx.voiceCounter;
     ctx.displayVoice.store (serial);
-    pitchWheelMoved (currentPitchWheelPosition);
-
-    // The Synthesiser set our channel before calling us: start with that
-    // channel's current slide and pressure (an MPE controller sends them first).
-    channel = 1;
-    for (int ch = 1; ch <= 16; ++ch)
-        if (isPlayingChannel (ch)) { channel = ch; break; }
+    pitchWheelMoved (pitchWheel);
+    channel = midiChannel;
     slide = ctx.channelSlide[channel - 1];
     aftertouch = ctx.channelPressure[channel - 1];
 
@@ -167,18 +198,15 @@ void SynthVoice::startNote (int midiNoteNumber, float vel, juce::SynthesiserSoun
     }
     ctx.lastNote.store (targetNote);
 
-    // Every note starts the oscillators somewhere new, like free-running analog
-    // oscillators do, so two notes never have the same attack and A against B
-    // never sits in the same comb twice. Unison copies keep their even spread
-    // around that start so the stack doesn't all hit one peak.
-    const int unison = juce::jlimit (1, kMaxUnison, p.geti (P::unison_voices));
-    const float startA = rng.nextFloat(), startB = rng.nextFloat(), startC = rng.nextFloat();
+    // Every note starts every oscillator and every unison copy somewhere new,
+    // like free-running analog oscillators do: two notes never have the same
+    // attack, A against B never sits in the same comb twice, and a stack never
+    // hits one peak together.
     for (int u = 0; u < kMaxUnison; ++u)
     {
-        const float ph = unison > 1 ? (float) u / (float) unison : 0.0f;
-        phaseA[u] = wrap01 (ph + startA);
-        phaseB[u] = wrap01 (ph + startB);
-        phaseC[u] = wrap01 (ph + startC);
+        phaseA[u] = rng.nextFloat();
+        phaseB[u] = rng.nextFloat();
+        phaseC[u] = rng.nextFloat();
     }
     subPhase = 0.0f;
     for (int k = 0; k < kNumLfos; ++k)
@@ -198,6 +226,7 @@ void SynthVoice::startNote (int midiNoteNumber, float vel, juce::SynthesiserSoun
     modEnv.noteOn();
 }
 
+
 void SynthVoice::stopNote (float, bool allowTailOff)
 {
     if (allowTailOff)
@@ -205,15 +234,20 @@ void SynthVoice::stopNote (float, bool allowTailOff)
         ampEnv.noteOff();
         filterEnv.noteOff();
         modEnv.noteOff();
+        return;
+    }
+    // Stolen, or a hard all-notes-off: the Synthesiser considers the voice free
+    // now, and may hand it a new note straight away (see startNote). What was
+    // sounding fades over kFadeSamples first instead of stopping in one sample.
+    clearCurrentNote();
+    pending.armed = false;
+    if (ampEnv.isActive() || sampler.isActive())
+    {
+        fadePending = true;
+        fadeRemaining = kFadeSamples;
     }
     else
-    {
-        clearCurrentNote();
-        sampler.stop();
-        ampEnv.reset();
-        filterEnv.reset();
-        modEnv.reset();
-    }
+        hardReset();
 }
 
 void SynthVoice::pitchWheelMoved (int newPitchWheelValue)
@@ -455,7 +489,7 @@ float SynthVoice::sourceValue (int source, const float* lfo, float filterEnvValu
 
 void SynthVoice::renderNextBlock (juce::AudioBuffer<float>& out, int startSample, int numSamples)
 {
-    if (! isVoiceActive())
+    if (! isVoiceActive() && ! fadePending)
         return;
 
     const auto& base = *ctx.params;
@@ -472,7 +506,18 @@ void SynthVoice::renderNextBlock (juce::AudioBuffer<float>& out, int startSample
 
     while (remaining > 0)
     {
-        const int n = juce::jmin (remaining, kSub);
+        if (fadePending && fadeRemaining <= 0)
+        {
+            // The old sound is gone: the note that took this voice begins now.
+            const auto next = pending;
+            hardReset();
+            if (! next.armed)
+                return;
+            beginNote (next.note, next.velocity, next.wheel, next.channel);
+            if (! isVoiceActive())
+                return;
+        }
+        const int n = fadePending ? juce::jmin (remaining, kSub, fadeRemaining) : juce::jmin (remaining, kSub);
 
         // ---- envelopes & LFOs for this sub-block ------------------------------
         float envF = 0.0f, envM = 0.0f;
@@ -561,20 +606,27 @@ void SynthVoice::renderNextBlock (juce::AudioBuffer<float>& out, int startSample
         const bool split        = routing == 3;
         const bool useC         = levelC > 0.0001f;
         const float fmDepth     = fm * fm * 2.0f;        // cycles of phase excursion
-        const float unisonComp  = 1.0f / std::sqrt ((float) unison);
 
+        // The copies sit like a JP-8000 stack: the outer ones carry the full
+        // detune and the inner ones bunch toward the centre (|x|^1.6), the outer
+        // ones a fifth quieter, the pan spread stays even.
         float gainL[kMaxUnison], gainR[kMaxUnison], detuneRatio[kMaxUnison], morphAu[kMaxUnison], morphBu[kMaxUnison], morphCu[kMaxUnison];
+        float levelSum = 0.0f;
         for (int u = 0; u < unison; ++u)
         {
             const float offset = unison > 1 ? -1.0f + 2.0f * (float) u / (float) (unison - 1) : 0.0f;
+            const float curved = offset < 0.0f ? -std::pow (-offset, 1.6f) : std::pow (offset, 1.6f);
+            const float level  = 1.0f - 0.2f * std::abs (offset);
             morphAu[u] = juce::jlimit (0.0f, 1.0f, morphA + 0.5f * uniMorph * offset);   // Uni Morph: each copy at its own table position
             morphBu[u] = juce::jlimit (0.0f, 1.0f, morphB + 0.5f * uniMorph * offset);
             morphCu[u] = juce::jlimit (0.0f, 1.0f, morphC + 0.5f * uniMorph * offset);
             const float upan   = offset * spread;
-            gainL[u] = unison > 1 ? std::sqrt (0.5f * (1.0f - upan)) * juce::MathConstants<float>::sqrt2 : 1.0f;
-            gainR[u] = unison > 1 ? std::sqrt (0.5f * (1.0f + upan)) * juce::MathConstants<float>::sqrt2 : 1.0f;
-            detuneRatio[u] = std::exp2 (offset * detuneCents / 1200.0f);
+            gainL[u] = unison > 1 ? level * std::sqrt (0.5f * (1.0f - upan)) * juce::MathConstants<float>::sqrt2 : 1.0f;
+            gainR[u] = unison > 1 ? level * std::sqrt (0.5f * (1.0f + upan)) * juce::MathConstants<float>::sqrt2 : 1.0f;
+            detuneRatio[u] = std::exp2 (curved * detuneCents / 1200.0f);
+            levelSum += level * level;
         }
+        const float unisonComp = 1.0f / std::sqrt (juce::jmax (1.0f, levelSum));
 
         // ---- glide --------------------------------------------------------
         if (glideInc != 0.0f)
@@ -733,10 +785,16 @@ void SynthVoice::renderNextBlock (juce::AudioBuffer<float>& out, int startSample
         auto* outL = out.getWritePointer (0, pos);
         auto* outR = numOut > 1 ? out.getWritePointer (1, pos) : nullptr;
 
+        float fade = 1.0f, fadeStep = 0.0f;
+        if (fadePending)
+        {
+            fade = (float) fadeRemaining / (float) kFadeSamples;
+            fadeStep = -1.0f / (float) kFadeSamples;
+        }
         for (int i = 0; i < n; ++i)
         {
-            gL += stepL; gR += stepR;
-            const float e = ampEnv.getNextSample();
+            gL += stepL; gR += stepR; fade += fadeStep;
+            const float e = ampEnv.getNextSample() * fade;
             if (outR != nullptr)
             {
                 outL[i] += scratchL[i] * e * gL;
@@ -754,6 +812,11 @@ void SynthVoice::renderNextBlock (juce::AudioBuffer<float>& out, int startSample
         remaining -= n;
         juce::ignoreUnused (blockEnd);
 
+        if (fadePending)
+        {
+            fadeRemaining -= n;
+            continue;   // the fade's end (and the pending note) is handled at the top of the loop
+        }
         if (! ampEnv.isActive())
         {
             clearCurrentNote();

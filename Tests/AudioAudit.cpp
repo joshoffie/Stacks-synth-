@@ -58,6 +58,12 @@ namespace
             for (int k = 0; k < kNumLfos; ++k)
                 lfoTables.set (k, (int) p.get (lfoShapeParam (k)), LfoPoints::fromJson (p.lfoShapes[(size_t) k]));
             synth.allNotesOff (0, false);
+            {
+                // A hard stop fades over a few milliseconds now: let that run out so no render starts on the last one's tail.
+                juce::AudioBuffer<float> flush (2, blockSize);
+                juce::MidiBuffer none;
+                for (int i = 0; i < 4; ++i) { flush.clear(); synth.renderNextBlock (flush, none, 0, blockSize); }
+            }
             distortion.reset(); eq.reset(); compressor.reset(); chorus.reset(); delay.reset(); reverb.reset(); hyper.reset(); tape.reset();
             for (auto& ph : lfoPhase) ph = 0.0f;
             for (auto& h : lfoHeld) h = 0.0f;
@@ -83,6 +89,28 @@ namespace
                 block.clear();
                 juce::AudioBuffer<float> part (block.getArrayOfWritePointers(), 2, 0, n);
                 processBlock (part, midi, withEffects);
+                for (int c = 0; c < 2; ++c) out.copyFrom (c, pos, part, c, 0, n);
+            }
+            return out;
+        }
+
+        // Any sequence of note-ons and note-offs, (sample, note) pairs, rendered for `totalSeconds`.
+        juce::AudioBuffer<float> renderEvents (const std::vector<std::pair<int, int>>& ons, const std::vector<std::pair<int, int>>& offs, double totalSeconds)
+        {
+            const int total = (int) std::lround (totalSeconds * sampleRate);
+            juce::AudioBuffer<float> out (2, total);
+            out.clear();
+            juce::AudioBuffer<float> block (2, blockSize);
+            juce::MidiBuffer midi;
+            for (int pos = 0; pos < total; pos += blockSize)
+            {
+                const int n = juce::jmin (blockSize, total - pos);
+                midi.clear();
+                for (const auto& e : ons)  if (e.first >= pos && e.first < pos + n) midi.addEvent (juce::MidiMessage::noteOn (1, e.second, 0.8f), e.first - pos);
+                for (const auto& e : offs) if (e.first >= pos && e.first < pos + n) midi.addEvent (juce::MidiMessage::noteOff (1, e.second), e.first - pos);
+                block.clear();
+                juce::AudioBuffer<float> part (block.getArrayOfWritePointers(), 2, 0, n);
+                processBlock (part, midi, false);
                 for (int c = 0; c < 2; ++c) out.copyFrom (c, pos, part, c, 0, n);
             }
             return out;
@@ -382,6 +410,29 @@ namespace
         if (r.m.endDb > -50.0f) f.add ("still ringing");
         return f;
     }
+}
+
+float stealJumpRatio()
+{
+    const double sr = 48000.0;
+    OfflineSynth synth (sr, 64);
+    Patch pad;
+    pad.set (P::oscA_wave, (float) waveNames().indexOf ("Sine")); pad.set (P::oscA_morph, 0.0f); pad.set (P::oscA_level, 0.8f);
+    pad.set (P::oscB_level, 0.0f); pad.set (P::sub_level, 0.0f); pad.set (P::noise_level, 0.0f); pad.set (P::fm_amount, 0.0f);
+    pad.set (P::filter_type, 0.0f); pad.set (P::filter_cutoff, 20000.0f); pad.set (P::filter_res, 0.0f); pad.set (P::filter_env, 0.0f); pad.set (P::filter_keytrack, 0.0f);
+    pad.set (P::aenv_attack, 0.005f); pad.set (P::aenv_decay, 1.0f); pad.set (P::aenv_sustain, 1.0f); pad.set (P::aenv_release, 3.0f);
+    pad.set (P::unison_voices, 1.0f); pad.set (P::char_drift, 0.0f); pad.set (P::char_sat, 0.0f); pad.set (P::char_env_var, 0.0f);
+    pad.set (P::reverb_mix, 0.0f); pad.set (P::chorus_mix, 0.0f); pad.set (P::delay_mix, 0.0f); pad.set (P::master_gain, 0.0f);
+    for (int i = 0; i < kNumModSlots; ++i) pad.set (modSourceParam (i), 0.0f);
+    synth.load (pad);
+    // 24 notes 40 ms apart, each let go 30 ms later, every one on a fresh pitch; voices 17 on steal.
+    std::vector<std::pair<int, int>> ons, offs;   // (sample, note)
+    for (int i = 0; i < 24; ++i) { ons.push_back ({ (int) (i * 0.04 * sr), 48 + (i * 7) % 24 }); offs.push_back ({ (int) ((i * 0.04 + 0.03) * sr), 48 + (i * 7) % 24 }); }
+    auto b = synth.renderEvents (ons, offs, 1.6);
+    float peak = 0.0f, jump = 0.0f;
+    const float* x = b.getReadPointer (0);
+    for (int i = 1; i < b.getNumSamples(); ++i) { peak = juce::jmax (peak, std::abs (x[i])); jump = juce::jmax (jump, std::abs (x[i] - x[i - 1])); }
+    return peak > 0.0f ? jump / peak : 0.0f;
 }
 
 int levelPatches (const juce::StringArray& args)

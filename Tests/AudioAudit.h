@@ -22,4 +22,10 @@ int audioAudit (const juce::StringArray& args);
 // target (-10 dBFS by default) within Master's range. Only master_gain changes.
 int levelPatches (const juce::StringArray& args);
 
+// Twenty-four quick notes of a long-release sine pad on sixteen voices, so the
+// last eight steal. Returns the largest sample-to-sample jump in the output as a
+// fraction of the peak: a one-sample cut reads near 1, a fade near the sine's
+// own slope (0.03). Printed and checked by the engine tests.
+float stealJumpRatio();
+
 } // namespace stacks

@@ -99,6 +99,7 @@ Two more commands act on a library rather than measure it:
 
     StacksTests --retouch guards [--dry-run]     # the filter guards (guardFilters) over the factory
     StacksTests --level Factory [--target -10] [--dry-run]   # Master per preset so one note peaks at the target
+    StacksTests --regrow <presets> --out Tuning/regrown      # three new candidates per preset from its own prompt, levelled; the ear picks
 
 ## Sessions
 

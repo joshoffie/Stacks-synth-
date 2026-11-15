@@ -158,22 +158,80 @@ decides whether the new envelopes and the filter guards feel right. The first
 session should be an A/B of the factory in the new build, with the tuning rig
 on (1 to 5).
 
+## 2b. Round two, the same night (the "do this" list)
+
+Engine (`Source/SynthVoice.*`):
+
+- **Click-free voice steal.** A stolen voice (or a hard all-notes-off) no
+  longer stops in one sample: `stopNote` arms a 128-sample fade of what was
+  sounding, `startNote` parks the new note, and the render loop begins it when
+  the fade is done. Measured by a new engine test: twenty-four quick notes of
+  a sine pad on sixteen voices, largest sample-to-sample jump 0.09 of the
+  peak (a cut reads near 1, the sine's own slope 0.03).
+- **Zero-delay-feedback ladder.** The four TPT stages and the feedback are
+  solved within the sample, so the resonance peak sits on the cutoff (977 Hz
+  for 1 kHz, 5.9 kHz for 6 kHz, 11.5 kHz for 12 kHz; the one-sample-delayed
+  loop drifted well below). Unity drive is close to linear: a 0.5 sine comes
+  back at 0.498 with the third harmonic at -52 dB (the old ladder compressed
+  peaks by a sixth). Resonance reaches 4.4 at the top so it sings (late peak
+  0.68 on an impulse, bounded); half the passband loss is made up. With the
+  oversampling kept, the designed table's alias reading went from -75 to
+  -90 dB, the factory's worst from -59 to -88.
+- **Unison like a stack.** Inner copies bunch toward the centre in pitch
+  (|x|^1.6, the JP-8000 shape), outer copies a fifth quieter, every copy at
+  its own start phase, pan spread even.
+
+Generation (`Source/ai/LlmPatchGenerator.cpp`, `Source/PatchGenerator.*`):
+
+- **Built-in tables on A.** `waveA` is optional in the grammar; each fresh or
+  Far slot is told either to design its table or to take the built-in that
+  fits its recipe (two saws: Saw, FM: Sine, PWM: Pulse, formant and vocal:
+  Formant, wavefold: Fold, hard sync: Sync, wide glassy: Glass, organ: Organ),
+  half and half per batch. A table the model designs anyway for a built-in
+  slot is dropped. The benchmark now rewards a share near one half instead
+  of one.
+- **Two new recipes**: "two filters" (Parallel routing, a resonant LP24
+  with its envelope beside a BP12 with a slow LFO on Cutoff 2) and "warped"
+  (Bend or Mirror swept by the mod envelope and a slow LFO).
+- **Reverb by kind**: the prompt names Hall or Lush for pads and drones,
+  Plate or Room for plucks, keys and basses, Shimmer for textures and glowing
+  bells; a big pad on a Plate moves to Hall or Lush half the time.
+
+Factory: re-levelled for the new filter (96 presets moved, none now silent;
+9 remain at Master's limit). `--regrow` grew three candidates each for the
+fifty presets the audit read as weakest, into `Tuning/regrown/` for a
+listening pass (nothing in `Factory/` replaced; see that folder's README).
+
+| measure | before everything | after round one | after round two |
+|---|---|---|---|
+| median peak | -18.1 dBFS | -10.0 | -10.1 |
+| RMS spread, 10th to 90th percentile | 41.3 dB | 17.4 | 17.4 |
+| median attack to 90% | 82 ms | 46 | 42 |
+| designed table at C7, energy between harmonics | -50 dB | -75 | -90 |
+| worst alias in the factory | -33 dB (measure skirt) / about -50 | -59 | -88 |
+| voice steal, largest jump / peak | about 1 (a cut) | about 1 | 0.09 |
+| resonance peak for a 6 kHz cutoff | below the cutoff | below the cutoff | 5.9 kHz |
+
+Still open from the list below: items 3's remaining half (a drive law and
+compensation are in; the filter character beyond that is taste), 4, 5, 10,
+12, 13, 14, and 6 and 11 wait for the ear.
+
 ## 3. Next, ranked
 
 ### Engine
 
-1. **Voice stealing without the click** (half a day). The Synthesiser cuts a
+1. *(done in round two)* **Voice stealing without the click** (half a day). The Synthesiser cuts a
    stolen voice to zero in one sample. Keep a short "dying" buffer per voice
    or a shared steal-tail bus: when a voice is stolen, render its next 5 ms
    with a fade and mix that under the new note. Done when a four-note chord
    with a 4 s release re-struck quickly has no clicks in the audit (add a
    chord mode to `--audit`).
-2. **Unison that sounds like a stack** (half a day). Detune is spread
+2. *(done in round two)* **Unison that sounds like a stack** (half a day). Detune is spread
    linearly and every copy has the same level; Serum-class unison spreads the
    inner voices tighter than the outer ones, drops the outer levels a little
    and randomises each copy's start phase. Measure: the "supersaw" presets'
    width and crest in the audit; the ear for the rest.
-3. **Filter character** (one to two days). The ladder's one-sample feedback
+3. *(the ZDF ladder, the drive law and half the compensation are done in round two)* **Filter character** (one to two days). The ladder's one-sample feedback
    delay detunes the resonance above about 5 kHz; drive at 1.0 already
    compresses peaks by 17% (tanh at unity), so "Clean" is not clean. Options:
    a zero-delay-feedback ladder (Zavalishin), a drive law whose unity setting
@@ -194,18 +252,18 @@ on (1 to 5).
    broken-sound floor, not a taste. Decide with the tuning rig: rate the dark
    pads; if they come back 1-2, raise the pad floor to 400 Hz in `guardFilters`
    and re-run `--retouch guards` and `--level`. Zero code otherwise.
-7. **Built-in tables on A** (half a day). The grammar makes `waveA` mandatory
+7. *(done in round two)* **Built-in tables on A** (half a day). The grammar makes `waveA` mandatory
    when designing is on, so every AI patch is a designed table. Make it
    optional with a target share ("design a table for about half the patches;
    the others pick a built-in that fits") and check the benchmark's
    `customShare` lands near 0.5 rather than 1.0. The ten built-ins have phase
    structure the designed ones never get.
-8. **Recipes that touch the unused half of the synth** (two hours). Filter 2
+8. *(done in round two, without weights)* **Recipes that touch the unused half of the synth** (two hours). Filter 2
    is used in 2 of 263 generations, warps in 5. Two new fresh recipes ("two
    filters in parallel, one resonant", "warped: Bend or Mirror on A swept by
    the mod env") and a recipe weight floor so each is tried. Tuning rig
    decides their weights after a session.
-9. **Reverb type by kind** (one hour): Plate in 77% of patches. A line in the
+9. *(done in round two)* **Reverb type by kind** (one hour): Plate in 77% of patches. A line in the
    prompt (Hall or Lush for pads and drones, Room or Plate for plucks and keys,
    Shimmer for textures) plus a guard that moves a pad with size > 0.6 off
    Plate half the time.
@@ -216,7 +274,7 @@ on (1 to 5).
 
 ### Factory
 
-11. **Re-grow the weakest third** (an evening of machine time). After one
+11. *(candidates grown in round two from the audit's weakest fifty; the ear chooses)* **Re-grow the weakest third** (an evening of machine time). After one
     rating session on the retouched factory, the presets rated 1-2 get
     regenerated with the current prompt and guards (`--factory` takes a prompt
     index), then audited and levelled. The library should then also carry
@@ -244,6 +302,7 @@ StacksTests --retouch guards --dry-run                             # what the fi
 StacksTests --retouch guards                                        # move them
 StacksTests --level Factory --dry-run                               # what the level pass would set
 StacksTests --level Factory --target -10                            # set it
+StacksTests --regrow <presets> --out Tuning/regrown --count 3       # new candidates from each preset's prompt, levelled
 ```
 
 The audit renders one note (MIDI 60, velocity 0.8) held 1.5 s then released,

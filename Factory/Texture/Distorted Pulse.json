@@ -248,7 +248,7 @@
     "fx_on_reverb": "On",
     "fx_pos_comp": 7,
     "fx_on_comp": "On",
-    "master_gain": 2.5253
+    "master_gain": -4.412
   },
   "waveA": {
     "name": "Distorted Pulse",

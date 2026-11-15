@@ -128,6 +128,34 @@ namespace
         return true;
     }
 
+    // Half of a batch designs its own table for oscillator A, the other half
+    // takes a built-in: the designed ones are all additive with aligned or
+    // scattered phases, the built-ins have shapes they never reach.
+    std::vector<int> pickDesignSlots (int count)
+    {
+        juce::Random rng ((juce::int64) juce::Time::getHighResolutionTicks() ^ 0x9e3779b9);
+        std::vector<int> slots ((size_t) juce::jmax (0, count), 0);
+        for (int i = 0; i < (count + 1) / 2 && i < count; ++i) slots[(size_t) i] = 1;
+        for (int i = count - 1; i > 0; --i) std::swap (slots[(size_t) i], slots[(size_t) rng.nextInt (i + 1)]);
+        return slots;
+    }
+
+    // What a Far descendant's oscillator A takes when it is not designing a table.
+    const char* farBuiltIn (int slot)
+    {
+        static const char* const tables[] = { "Saw", "Triangle", "Pulse", "Organ", "Formant", "Glass", "Fold", "Sync" };
+        return tables[((slot % 8) + 8) % 8];
+    }
+
+    // The sentence that tells one slot whether to design a table or name a built-in.
+    juce::String designInstruction (const GenerationRequest& req, int slot, const char* builtIn)
+    {
+        if (! req.designWaves) return {};
+        const bool design = slot >= (int) req.designSlots.size() || req.designSlots[(size_t) slot] != 0;
+        return design ? juce::String (" Design its wavetable (waveA).")
+                      : juce::String (" Oscillator A takes the built-in ") + builtIn + " table (oscA_wave " + builtIn + "): write no waveA for this one.";
+    }
+
     // One concrete direction of change per descendant. Small models asked to
     // "vary" a parent hand back near-copies; told exactly what to change they
     // don't. The Variation knob decides how far the list is allowed to go.
@@ -196,7 +224,7 @@ namespace
             {
                 const auto order = shuffled (std::begin (reimagine), std::end (reimagine));
                 for (int i = 0; i < req.count; ++i)
-                    s << "  Patch " << (i + 1) << ": " << order[(size_t) i % order.size()] << ".\n";
+                    s << "  Patch " << (i + 1) << ": " << order[(size_t) i % order.size()] << "." << designInstruction (req, i, farBuiltIn (i)) << "\n";
                 break;
             }
         }
@@ -207,22 +235,25 @@ namespace
     // more than "pluck" to go on, a small model writes the same pluck five
     // times; handed a different recipe per patch it does not. Each recipe has
     // a short tag that travels on the patch, so ratings can be counted per recipe.
-    struct Engine { const char* tag; const char* text; };
+    // `builtIn` is the table oscillator A takes when the slot is told not to design one.
+    struct Engine { const char* tag; const char* text; const char* builtIn; };
     const std::vector<Engine>& freshEngines()
     {
         static const std::vector<Engine> engines = {
-            { "two saws",     "two Saw-family tables an octave apart: oscB_coarse -12 with oscB_level 0.5-0.7 and oscB_fine 4-9, unison_voices 3-5 with unison_detune 12-25, Velocity > Cutoff" },
-            { "fm",           "FM: oscB_wave Sine as a silent modulator (oscB_level 0.3-0.5, oscB_coarse 7, 12 or 19), fm_amount 0.3-0.7, Mod Env > FM B>A 0.4-0.6 with menv_decay 0.1-0.4, no unison" },
-            { "pwm",          "a Pulse table with PWM: oscA_warp PWM with oscA_warp_amt 0.5, LFO 1 Triangle at 0.2-0.5 Hz > A Warp Amt 0.4, sub_level 0.3-0.5, oscB_level 0" },
-            { "formant",      "Formant or Glass table with LFO 1 slow on A Morph (0.05-0.2 Hz, 0.3-0.5), filter_type Notch or BP12 with filter_res 0.3-0.5, chorus_mode Ensemble" },
-            { "three layers", "three layers: A, oscB a different family at oscB_coarse 12 (oscB_level 0.3-0.5), sub_level 0.4-0.7; a resonant low-pass (filter_res 0.4-0.6) with a long filter envelope" },
-            { "noise body",   "noise and body: noise_level 0.2-0.4 with Mod Env > Noise 0.6-0.8 (menv_decay 0.03-0.08), a Sine or Triangle A, filter_type BP12 or BP24" },
-            { "organ tube",   "Organ or a hollow table through Tube distortion (dist_mode Tube, dist_mix 0.3-0.5) and tape_amount 0.3-0.6, dry (reverb_mix under 0.15), Key > Cutoff 0.3" },
-            { "wavefold",     "wavefolded: Fold table or oscA_warp Fold with oscA_warp_amt 0.4-0.7, filter_drive 2-4, Mod Env > A Warp Amt 0.4-0.6, reverb_type Plate" },
-            { "rhythmic",     "rhythmic: LFO 1 Square or Random with lfo1_sync 1/8 or 1/16 on Cutoff or Amp 0.4-0.6, delay_mode Ping-Pong with delay_sync 1/8D and delay_mix 0.25-0.4" },
-            { "wide glassy",  "wide and glassy: unison_voices 6 with unison_detune 20-30, hyper_amount 0.4-0.6, reverb_type Shimmer with reverb_shimmer 0.4-0.6, a Glass or sparse designed table" },
-            { "hard sync",    "hard sync: oscA_wave Sync, or oscA_warp Sync with oscA_warp_amt 0.3-0.6 swept by Filter Env > A Warp Amt 0.5, filter_type LP24, filter_env 3-4" },
-            { "vocal",        "a vocal reading: Formant table with oscA_morph swept by Mod Wheel 0.6 and LFO 2 at 0.1 Hz (0.2), filter_type Formant with filter_res 0.4, chorus_mode Dimension" },
+            { "two saws",     "two Saw-family tables an octave apart: oscB_coarse -12 with oscB_level 0.5-0.7 and oscB_fine 4-9, unison_voices 3-5 with unison_detune 12-25, Velocity > Cutoff", "Saw" },
+            { "fm",           "FM: oscB_wave Sine as a silent modulator (oscB_level 0.3-0.5, oscB_coarse 7, 12 or 19), fm_amount 0.3-0.7, Mod Env > FM B>A 0.4-0.6 with menv_decay 0.1-0.4, no unison", "Sine" },
+            { "pwm",          "a Pulse table with PWM: oscA_warp PWM with oscA_warp_amt 0.5, LFO 1 Triangle at 0.2-0.5 Hz > A Warp Amt 0.4, sub_level 0.3-0.5, oscB_level 0", "Pulse" },
+            { "formant",      "Formant or Glass table with LFO 1 slow on A Morph (0.05-0.2 Hz, 0.3-0.5), filter_type Notch or BP12 with filter_res 0.3-0.5, chorus_mode Ensemble", "Formant" },
+            { "three layers", "three layers: A, oscB a different family at oscB_coarse 12 (oscB_level 0.3-0.5), sub_level 0.4-0.7; a resonant low-pass (filter_res 0.4-0.6) with a long filter envelope", "Triangle" },
+            { "noise body",   "noise and body: noise_level 0.2-0.4 with Mod Env > Noise 0.6-0.8 (menv_decay 0.03-0.08), a Sine or Triangle A, filter_type BP12 or BP24", "Triangle" },
+            { "organ tube",   "Organ or a hollow table through Tube distortion (dist_mode Tube, dist_mix 0.3-0.5) and tape_amount 0.3-0.6, dry (reverb_mix under 0.15), Key > Cutoff 0.3", "Organ" },
+            { "wavefold",     "wavefolded: Fold table or oscA_warp Fold with oscA_warp_amt 0.4-0.7, filter_drive 2-4, Mod Env > A Warp Amt 0.4-0.6, reverb_type Plate", "Fold" },
+            { "rhythmic",     "rhythmic: LFO 1 Square or Random with lfo1_sync 1/8 or 1/16 on Cutoff or Amp 0.4-0.6, delay_mode Ping-Pong with delay_sync 1/8D and delay_mix 0.25-0.4", "Saw" },
+            { "wide glassy",  "wide and glassy: unison_voices 6 with unison_detune 20-30, hyper_amount 0.4-0.6, reverb_type Shimmer with reverb_shimmer 0.4-0.6, a Glass or sparse designed table", "Glass" },
+            { "hard sync",    "hard sync: oscA_wave Sync, or oscA_warp Sync with oscA_warp_amt 0.3-0.6 swept by Filter Env > A Warp Amt 0.5, filter_type LP24, filter_env 3-4", "Sync" },
+            { "vocal",        "a vocal reading: Formant table with oscA_morph swept by Mod Wheel 0.6 and LFO 2 at 0.1 Hz (0.2), filter_type Formant with filter_res 0.4, chorus_mode Dimension", "Formant" },
+            { "two filters",  "two filters: filter_routing Parallel, filter_type LP24 at filter_cutoff 400-900 with filter_res 0.5-0.7 and filter_env 1-2, filter2_type BP12 at filter2_cutoff 1500-3000 with filter2_res 0.3 and LFO 1 slow > Cutoff 2 (0.3), a Saw-family A with oscB an octave up at oscB_level 0.3", "Saw" },
+            { "warped",       "warped: oscA_warp Bend or Mirror with oscA_warp_amt 0.3-0.6, Mod Env > A Warp Amt 0.4-0.6 (menv_decay 0.2-0.5) and LFO 1 slow > A Warp Amt 0.2, filter_type LP12 open (filter_cutoff 3000-6000), oscB an octave down at 0.3", "Triangle" },
         };
         return engines;
     }
@@ -249,9 +280,12 @@ namespace
         const int kindOffset = rng.nextInt (8);
         juce::String s;
         for (int i = 0; i < req.count; ++i)
+        {
+            const auto& engine = freshEngines()[(size_t) juce::jlimit (0, (int) freshEngines().size() - 1, recipes[(size_t) i])];
             s << "  Patch " << (i + 1) << (hinted ? juce::String() : juce::String (" (a ") + kinds[(kindOffset + i) % 8] + ")")
-              << ": " << freshEngines()[(size_t) juce::jlimit (0, (int) freshEngines().size() - 1, recipes[(size_t) i])].text
-              << (hinted ? " - still the kind of sound the direction asks for" : "") << ".\n";
+              << ": " << engine.text << (hinted ? " - still the kind of sound the direction asks for" : "") << "."
+              << designInstruction (req, i, engine.builtIn) << "\n";
+        }
         return s;
     }
 
@@ -494,7 +528,7 @@ juce::String LlmPatchGenerator::systemPrompt (bool designWaves)
       << "an LFO on Chorus Mix, Reverb Mix or Shimmer (0.2-0.4) makes the effects breathe. Never put a Square, Saw, Ramp or Random LFO on Pitch. "
       << "Velocity > Cutoff 0.2-0.5 makes playing dynamics matter; Mod Env (menv_decay 0.2-1, menv_sustain 0) > FM B>A or A Morph 0.3-0.6 gives an evolving attack; Mod Wheel > Cutoff 0.3-0.6 is live control. "
       << "Every patch has connection 1 from a performance source or envelope and connection 2 from an LFO - pick the LFO's target, shape and rate to suit the sound (slow and smooth for pads, synced and stepped for rhythm, 4-7 Hz Sine on Pitch or Amp for vibrato or tremolo); add a third or fourth connection if the sound needs it. Every connection should be clearly audible and musical.\n"
-      << "Effects: reverb_type Shimmer with reverb_shimmer 0.3-0.7 gives a glowing octave-up halo (pads, textures); Hall for long tails, Room for short; "
+      << "Effects: reverb_type by kind - Hall or Lush for pads and drones, Plate or Room for plucks, keys and basses, Shimmer (with reverb_shimmer 0.3-0.7, a glowing octave-up halo) for textures and bells that glow; Plate is not the answer to everything; "
       << "chorus_mode Ensemble is a lush string-machine, Dimension is wide and subtle, Flanger needs chorus_feedback 0.4-0.8; "
       << "delay_mode Ping-Pong with delay_sync 1/8 or 1/8D suits plucks and leads, Tape is dark and wobbly.\n"
       << "What makes a sound finished rather than a sketch: at least two sources (oscB at an octave or a fifth with oscB_level 0.3-0.7, or FM, sub_level or noise_level beside A) - one bare oscillator is thin; "
@@ -535,7 +569,7 @@ juce::String LlmPatchGenerator::systemPrompt (bool designWaves)
       << ", then connection 1 (Velocity, Key, Mod Wheel, Aftertouch, Filter Env, Mod Env or Random), then connection 2 (LFO 1 or LFO 2, with its shape, rate and sync), then any extra settings that define the sound "
       << "(more connections, oscA_coarse, noise, chorus and delay, effect details, glide, filter drive...). Every parameter you omit keeps its base value. ";
     if (designWaves)
-        s << "\nWavetable design: every patch ends with \"waveA\", a brand-new wavetable for oscillator A (oscA_wave then becomes Custom). "
+        s << "\nWavetable design: a patch may end with \"waveA\", a brand-new wavetable for oscillator A (oscA_wave then becomes Custom); the batch says which patches design one and which take a built-in table instead, and a built-in has shapes a designed table cannot. "
           << "Each spectrum lists the levels of harmonics 1-16 as digits 0-9 (9 = full, every step down is 4 dB quieter, 0 = silent); "
           << "give 2 to 4 spectra that differ - the Morph knob sweeps from the first to the last. "
           << "tail = how much the harmonics above 16 keep going (0 = mellow, 9 = as bright as a saw). "
@@ -570,7 +604,7 @@ juce::String LlmPatchGenerator::userPrompt (const GenerationRequest& req)
             s << "Sound brief (your own notes on that direction - turn it into settings): " << req.brief << "\n";
         s << variationPhrase (req.variation, false) << "\n";
         if (req.designWaves)
-            s << "Design a new wavetable (waveA) for each one.\n";
+            s << "Design a new wavetable (waveA) only for the patches told to above; the others keep the built-in table they were given on A and carry no waveA.\n";
     }
     else if (growModeFor (req.variation) == GrowMode::Far)
     {
@@ -593,7 +627,7 @@ juce::String LlmPatchGenerator::userPrompt (const GenerationRequest& req)
           << " and takes its own direction:\n" << descendantDirections (req);
         s << "Name each one with two fresh words; one word may echo the favourite's name.\n";
         if (req.designWaves)
-            s << "Design a new wavetable (waveA) for each patch: a new shape, in the spirit of the favourite's source but not its spectrum.\n";
+            s << "Where a patch is told to design its wavetable (waveA), make it a new shape in the spirit of the favourite's source but not its spectrum; the others keep the built-in table they were given and carry no waveA.\n";
         if (req.hint.trim().isNotEmpty())
             s << "Direction from the user: \"" << req.hint.trim() << "\". Follow it closely.\n";
         if (req.brief.isNotEmpty())
@@ -654,7 +688,7 @@ juce::String LlmPatchGenerator::grammar (int patchCount, bool designWaves)
       << "patch ::= " << lit ("{\"name\":") << " name " << lit (",\"category\":") << " category "
       << lit (",\"tags\":[") << " tag " << lit (",") << " tag " << lit (",") << " tag " << lit ("]")
       << lit (",\"description\":") << " desc " << lit (",\"parent\":") << " int " << lit (",\"params\":{") << " params " << lit ("}")
-      << (designWaves ? " " + lit (",\"waveA\":") + " wave (" + lit (",\"waveB\":") + " wave)? (" + lit (",\"waveC\":") + " wave)?" : juce::String())
+      << (designWaves ? " (" + lit (",\"waveA\":") + " wave)? (" + lit (",\"waveB\":") + " wave)? (" + lit (",\"waveC\":") + " wave)?" : juce::String())
       << " " << lit ("}") << "\n"
       << "params ::= core (" << lit (",") << " param)*\n";
 
@@ -856,8 +890,10 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
     // ask of a small model mid-JSON. So first it writes a few sentences about
     // what that should sound like in synth terms, and designs from those.
     GenerationRequest req = request;
-    if (req.parents.empty())
+    if (req.parents.empty() && req.recipes.empty())
         req.recipes = pickRecipes (req.count);   // chosen once, so the prompt on disk, the prompt sent and the tags on the patches agree
+    if ((req.parents.empty() || growModeFor (req.variation) == GrowMode::Far) && req.designSlots.empty())
+        req.designSlots = pickDesignSlots (req.count);
     if (req.hint.trim().isNotEmpty() && ! progress.cancelled())
     {
         const auto hint = req.hint.trim();
@@ -924,6 +960,22 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
         auto patch = Patch::fromVar (v, base);
         if (! patch)
             return;
+
+        // A slot told to use a built-in table on A gives up any table the model designed anyway.
+        {
+            const int slot = (int) out.size();
+            const bool fresh = req.parents.empty(), far = mode == GrowMode::Far;
+            if ((fresh || far) && slot < (int) req.designSlots.size() && req.designSlots[(size_t) slot] == 0)
+            {
+                patch->waves[0] = WaveSpec();
+                if ((int) patch->get (P::oscA_wave) >= WavetableBank::kNumBuiltIn)
+                {
+                    const char* name = fresh && slot < (int) req.recipes.size() ? freshEngines()[(size_t) juce::jlimit (0, (int) freshEngines().size() - 1, req.recipes[(size_t) slot])].builtIn : farBuiltIn (slot);
+                    patch->set (P::oscA_wave, (float) juce::jmax (0, waveNames().indexOf (name)));
+                }
+                if (auto* obj = v.getDynamicObject()) obj->removeProperty (Patch::waveKey (0));
+            }
+        }
 
         // A designed table switches its oscillator to Custom; Custom without a table falls back to a saw.
         if (auto* obj = v.getDynamicObject())

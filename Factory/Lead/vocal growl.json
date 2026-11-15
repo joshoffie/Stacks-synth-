@@ -248,7 +248,7 @@
     "fx_on_reverb": "On",
     "fx_pos_comp": 7,
     "fx_on_comp": "On",
-    "master_gain": -0.7793
+    "master_gain": 0.3534
   },
   "waveA": {
     "name": "Growl Formant",

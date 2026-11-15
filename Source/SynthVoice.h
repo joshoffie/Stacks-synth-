@@ -122,13 +122,16 @@ private:
     Stage stage = Stage::idle;
 };
 
-// The four-pole transistor ladder (the structure of juce::dsp::LadderFilter:
-// four one-pole stages, saturated feedback, the six responses as taps), with
-// three differences that matter for how it sounds: the cutoff and resonance
-// ramp across each call instead of gliding over 50 ms, so a filter envelope
-// with a 10 ms decay really snaps; it runs at twice the sample rate, so what
-// the saturators add above Nyquist folds back 30 dB quieter on bright notes;
-// and the saturator is a smooth rational tanh rather than a lookup table.
+// The four-pole transistor ladder, solved with zero-delay feedback: the four
+// TPT one-pole stages and the feedback around them are resolved within the
+// sample (Zavalishin), so the resonance peak sits on the cutoff all the way up
+// instead of drifting below it as a one-sample-delayed loop does. The cutoff,
+// resonance and drive ramp across each call rather than gliding over 50 ms, so
+// a filter envelope with a 10 ms decay really snaps; it runs at twice the
+// sample rate so what the saturators add above Nyquist folds back far quieter;
+// drive 1 is close to linear (the old ladder compressed peaks by a sixth at
+// unity) and the feedback is tamed by a rational tanh, which is what limits
+// self-oscillation. Half the passband loss that resonance causes is made up.
 class Ladder
 {
 public:
@@ -153,13 +156,13 @@ public:
     }
 
 private:
-    struct Coefs { float a1 = 0.5f, res = 0.1f, gain = 1.0f, gain2 = 1.0f, drive = 1.0f, drive2 = 1.0f; };
+    struct Coefs { float g = 0.1f, k = 0.0f, pre = 0.25f, post = 4.0f; };   // tan(pi fc/fs), feedback 0..4, the drive's input scale and make-up
     Coefs coefsFor (float cutoffHz, float resonance, float drive) const noexcept;
 
     double sampleRate = 48000.0;   // the rate the ladder runs at: twice the host's
     int mode = -1;
-    float A[5] { 0.0f, 0.0f, 0.0f, 0.0f, 1.2f }, comp = 0.5f;
-    float s[2][5] {};
+    float A[5] { 0.0f, 0.0f, 0.0f, 0.0f, 1.0f };   // taps on [input, y1, y2, y3, y4]
+    float s[2][4] {};                               // the four stage states per channel
     Coefs last;
     bool primed = false;
     std::unique_ptr<juce::dsp::Oversampling<float>> os;   // 2x: the saturators' products above Nyquist fold back far quieter
@@ -188,6 +191,8 @@ private:
 
     float lfoValue (int shape, float phase, float held) const noexcept;
     void updateEnvelopes (const SynthParams&);
+    void beginNote (int midiNoteNumber, float velocity, int pitchWheel, int midiChannel);   // what startNote does once the voice is free
+    void hardReset() noexcept;   // everything silent and at rest, instantly (only ever after a fade)
 
     float readWave (int osc, int wave, float mip, float morph, float phase) const noexcept;
     float lfoValueFor (int k, const SynthParams& p, int sampleInBlock, int blockLen, float& heldOut) noexcept;
@@ -240,6 +245,14 @@ private:
     float currentNote = 60.0f, targetNote = 60.0f, glideInc = 0.0f;
     float lastGainL = 0.0f, lastGainR = 0.0f;   // the output gains of the previous sub-block, ramped from
     bool gainsPrimed = false;
+
+    // A stolen voice (or a hard all-notes-off) is not cut in one sample: the
+    // sound it was making fades over kFadeSamples, and the note that took the
+    // voice begins when the fade is done.
+    static constexpr int kFadeSamples = 128;
+    bool fadePending = false;
+    int fadeRemaining = 0;
+    struct PendingNote { int note = 60; float velocity = 1.0f; int wheel = 8192; int channel = 1; bool armed = false; } pending;
 
     float phaseA[kMaxUnison] {}, phaseB[kMaxUnison] {}, phaseC[kMaxUnison] {};
     float subPhase = 0.0f;

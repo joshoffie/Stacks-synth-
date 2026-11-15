@@ -1540,6 +1540,9 @@ void enrichPatch (Patch& p, juce::int64 seed)
     {
         if (rev < 0.25f) p.set (P::reverb_mix, uni (0.3f, 0.5f));
         if (p.get (P::reverb_size) < 0.5f) p.set (P::reverb_size, uni (0.6f, 0.85f));
+        // Plate in three generations of four: a big pad takes a Hall or a Lush half the time.
+        if (reverbTypeNames()[juce::jlimit (0, reverbTypeNames().size() - 1, (int) p.get (P::reverb_type))] == "Plate" && p.get (P::reverb_size) >= 0.6f && rng.nextBool())
+            p.set (P::reverb_type, (float) reverbTypeNames().indexOf (rng.nextBool() ? "Hall" : "Lush"));
         if (cho < 0.15f && p.get (P::hyper_amount) < 0.1f && (int) p.get (P::unison_voices) < 3) p.set (P::chorus_mix, uni (0.2f, 0.4f));
     }
     else if (pluck || keys || lead)

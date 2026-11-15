@@ -24,6 +24,7 @@
 #include "ai/SampleAnalyser.h"
 #include "ai/SongAnalyser.h"
 #include "AudioAudit.h"
+#include "SynthVoice.h"
 
 using namespace stacks;
 
@@ -205,6 +206,72 @@ static void testMipBandLimiting()
         const auto back = analyseWave ([&] (float m, float ph) { return st->read (0, m, ph); }, "back");
         CHECK_NEAR (back.frames[0][1], spec.frames[0][1], 0.08);   // the magnitudes survive the phase scatter
     }
+}
+
+// The ladder: its resonance sits on the cutoff, unity drive is close to
+// linear, full resonance self-oscillates without running away; a stolen voice
+// fades instead of clicking.
+static void testEngine()
+{
+    section ("engine: ladder and voice stealing");
+    const double sr = 48000.0;
+    auto spectrumPeakHz = [&] (Ladder& ladder, float cutoff, float res)
+    {
+        constexpr int size = 1 << 15;
+        juce::Random noise (7);
+        std::vector<float> l ((size_t) size), r ((size_t) size);
+        for (int i = 0; i < size; i += 32)
+        {
+            for (int j = i; j < i + 32; ++j) { l[(size_t) j] = noise.nextFloat() * 0.2f - 0.1f; r[(size_t) j] = l[(size_t) j]; }
+            ladder.process (l.data() + i, r.data() + i, 32, cutoff, res, 1.0f);
+        }
+        juce::dsp::FFT fft (15);
+        std::vector<float> buf ((size_t) size * 2, 0.0f);
+        for (int i = size / 2; i < size; ++i) buf[(size_t) (i - size / 2)] = l[(size_t) i];   // the settled half
+        fft.performFrequencyOnlyForwardTransform (buf.data());
+        int best = 1;
+        for (int k = 2; k < size / 4; ++k) if (buf[(size_t) k] > buf[(size_t) best]) best = k;
+        return (float) best * (float) sr / (float) size;
+    };
+    for (float cutoff : { 1000.0f, 6000.0f, 12000.0f })
+    {
+        Ladder ladder; ladder.prepare (sr, 32); ladder.setMode (1);
+        const float peak = spectrumPeakHz (ladder, cutoff, 0.9f);
+        std::printf ("  LP24 res 0.9 at %5.0f Hz: resonance peak at %5.0f Hz\n", cutoff, peak);
+        CHECK (std::abs (peak - cutoff) / cutoff < 0.08f);
+    }
+    {
+        // Unity drive, open filter: a 0.5 sine comes through within 3% with the third harmonic under -40 dB.
+        Ladder ladder; ladder.prepare (sr, 32); ladder.setMode (0);
+        constexpr int size = 1 << 14;
+        std::vector<float> l ((size_t) size), r ((size_t) size);
+        for (int i = 0; i < size; ++i) l[(size_t) i] = r[(size_t) i] = 0.5f * std::sin (6.2831853f * 200.0f * (float) i / (float) sr);
+        for (int i = 0; i < size; i += 32) ladder.process (l.data() + i, r.data() + i, 32, 20000.0f, 0.0f, 1.0f);
+        float peak = 0.0f; for (int i = size / 2; i < size; ++i) peak = juce::jmax (peak, std::abs (l[(size_t) i]));
+        juce::dsp::FFT fft (14);
+        std::vector<float> buf ((size_t) size * 2, 0.0f);
+        for (int i = 0; i < size; ++i) buf[(size_t) i] = l[(size_t) i];
+        fft.performFrequencyOnlyForwardTransform (buf.data());
+        const int k1 = (int) std::lround (200.0 * size / sr), k3 = 3 * k1;
+        const float thirdDb = 20.0f * std::log10 (buf[(size_t) k3] / juce::jmax (1.0e-9f, buf[(size_t) k1]));
+        std::printf ("  unity drive: 0.5 in, %.3f out, third harmonic %.0f dB\n", peak, thirdDb);
+        CHECK (std::abs (peak - 0.5f) < 0.03f && thirdDb < -40.0f);
+    }
+    {
+        // Full resonance: it sings at the cutoff and stays bounded.
+        Ladder ladder; ladder.prepare (sr, 32); ladder.setMode (1);
+        constexpr int size = 1 << 15;
+        std::vector<float> l ((size_t) size, 0.0f), r ((size_t) size, 0.0f);
+        l[0] = r[0] = 0.5f;
+        for (int i = 0; i < size; i += 32) ladder.process (l.data() + i, r.data() + i, 32, 2000.0f, 1.0f, 1.0f);
+        float late = 0.0f; bool finite = true;
+        for (int i = size / 2; i < size; ++i) { late = juce::jmax (late, std::abs (l[(size_t) i])); finite = finite && std::isfinite (l[(size_t) i]); }
+        std::printf ("  self-oscillation at res 1: late peak %.2f\n", late);
+        CHECK (finite && late > 0.05f && late < 3.0f);
+    }
+    const float jump = stealJumpRatio();
+    std::printf ("  voice stealing: largest jump %.3f of the peak (a cut is near 1, a sine's own slope 0.03)\n", jump);
+    CHECK (jump < 0.12f);
 }
 
 static void testParameterTable()
@@ -403,6 +470,7 @@ static void testGrammarAndPrompt()
     const auto sys = LlmPatchGenerator::systemPrompt (true);
     CHECK (sys.contains ("waveA") && sys.contains ("spectra") && sys.contains ("Connections route modulation"));
     CHECK (sys.contains ("scatter = how the harmonics' phases line up") && sys.contains ("HP24 and BP24 as the main filter"));
+    CHECK (sys.contains ("reverb_type by kind") && sys.contains ("a built-in has shapes a designed table cannot"));
     CHECK (sys.contains ("oscA_wave, oscA_morph, oscA_level"));
     CHECK (! sys.contains ("Velvet Horizon") && sys.contains ("<wave>"));
     CHECK (! LlmPatchGenerator::systemPrompt (false).contains ("Wavetable design"));
@@ -682,6 +750,7 @@ static void testLlmGenerator()
     r.count = 2;
     r.hint = "in the style of MGMT";
     r.designWaves = true;
+    r.designSlots = { 1, 1 };   // both slots may design (the reply gives one a table and one a built-in)
     auto out = gen.generate (r, progress);
     CHECK (fake->calls == 2);                                   // the brief, then the patches
     CHECK (fake->lastUser.contains ("Sound brief") && fake->lastUser.contains ("detuned saw lead"));
@@ -734,6 +803,20 @@ static void testLlmGenerator()
     gen.generate (noWaves, progress);
     CHECK (! fake->lastGrammar.contains ("\nwave ::="));
     CHECK (! fake->lastUser.contains ("Sound brief"));
+    // A slot told to take a built-in drops the table the model designed anyway and names the recipe's table.
+    GenerationRequest builtIn = r;
+    builtIn.hint.clear();                // no brief pre-pass: the check above this block looks at the last prompt sent
+    builtIn.recipes = { 0, 0 };          // "two saws" -> Saw
+    builtIn.designSlots = { 0, 1 };
+    auto plain = gen.generate (builtIn, progress);
+    CHECK (fake->lastUser.contains ("Oscillator A takes the built-in Saw table") && fake->lastUser.contains ("Design its wavetable (waveA)"));
+    CHECK (fake->lastGrammar.contains ("(\",\\\"waveA\\\":\" wave)?"));
+    if (plain.size() == 2)
+    {
+        CHECK ((int) plain[0].get (P::oscA_wave) == waveNames().indexOf ("Saw") && plain[0].waves[0].isEmpty());
+        CHECK ((int) plain[1].get (P::oscA_wave) == waveNames().indexOf ("Glass"));
+    }
+    else CHECK (false);
 }
 
 //==============================================================================
@@ -954,7 +1037,8 @@ namespace bench
         {
             add (s.requested > 0 ? (double) s.delivered / s.requested : 0.0, 20);
             add (s.lfoShare, 8);
-            add (s.customShare, 8);
+            if (s.mode == "fresh" || s.variation >= 0.66f) add (1.5 - 2.0 * std::abs (s.customShare - 0.5), 8);   // half designed, half built-in
+            else                                              add (s.customShare, 8);
             add (s.uniqueNames, 6);
             add (s.sanity, 10);
             add (s.delivered > 0 ? 1.0 - (double) s.rawViolations / s.delivered : 0.0, 14);
@@ -2342,8 +2426,84 @@ static int buildFactory (int perPrompt, int firstPrompt = 0)
     return written > 0 ? 0 : 1;
 }
 
+// `StacksTests --regrow <preset.json | folder>... --out <dir> [--count N]`: grows N (default 3)
+// new candidates for each preset from the preset's own prompt with the current
+// engine, prompt and guards, writes them under <dir>/<Category>/ and levels them.
+// The source presets are not touched: the ear picks what replaces what.
+static int regrow (const juce::StringArray& args)
+{
+    juce::Array<juce::File> files;
+    juce::File outDir;
+    int count = 3;
+    for (int i = 0; i < args.size(); ++i)
+    {
+        const auto& a = args[i];
+        if (a == "--out" && i + 1 < args.size())        outDir = juce::File::getCurrentWorkingDirectory().getChildFile (args[++i]);
+        else if (a == "--count" && i + 1 < args.size()) count = juce::jlimit (1, 5, args[++i].getIntValue());
+        else
+        {
+            const auto f = juce::File::getCurrentWorkingDirectory().getChildFile (a);
+            if (f.isDirectory()) files.addArray (f.findChildFiles (juce::File::findFiles, true, "*.json"));
+            else if (f.existsAsFile()) files.add (f);
+        }
+    }
+    if (files.isEmpty() || outDir == juce::File()) { std::printf ("usage: StacksTests --regrow <preset.json | folder>... --out <dir> [--count N]\n"); return 2; }
+    std::optional<ModelInfo> chosen;
+    for (const auto& m : ModelManager::catalogue())
+        if (m.installed && (! chosen || m.id.containsIgnoreCase ("4b")))
+            chosen = m;
+    if (! chosen) { std::printf ("no built-in model is installed\n"); return 2; }
+    auto backend = std::make_shared<LlamaBackend> (chosen->file, chosen->label);
+    LlmPatchGenerator gen (backend, std::make_shared<RandomPatchGenerator>());
+    GenerationProgress quiet;
+    outDir.createDirectory();
+
+    int written = 0, seen = 0;
+    const double t0 = juce::Time::getMillisecondCounterHiRes();
+    for (const auto& file : files)
+    {
+        auto old = Patch::fromJson (file.loadFileAsString());
+        if (! old) continue;
+        ++seen;
+        GenerationRequest r;
+        r.count = count;
+        r.hint = old->prompt.isNotEmpty() ? old->prompt : (old->category + " like " + old->name).toLowerCase();
+        r.designWaves = true;
+        r.variation = 0.55f;
+        auto out = gen.generate (r, quiet);
+        int kept = 0;
+        for (auto& p : out)
+        {
+            const bool audible = p.get (P::oscA_level) + p.get (P::oscB_level) + p.get (P::sub_level) > 0.1f;
+            if (! audible) continue;
+            p.prompt = r.hint;
+            p.parentName = old->name;   // what it is a candidate to replace
+            p.favourite = false;
+            p.filePath.clear();
+            if (p.tags.isEmpty()) p.tags = autoTags (p);
+            applyPromptCues (r.hint, p);
+            ensureMacroRoutings (p);
+            const auto folder = outDir.getChildFile (old->category.isNotEmpty() ? old->category : juce::String ("Other"));
+            folder.createDirectory();
+            folder.getChildFile (juce::File::createLegalFileName (old->name + " - " + juce::String (kept + 1) + " " + p.name) + ".json").replaceWithText (p.toJson());
+            ++kept; ++written;
+        }
+        std::printf ("%-30s %-40s kept %d of %d   (%d so far, %.0f min)\n", old->name.substring (0, 30).toRawUTF8(), r.hint.substring (0, 40).toRawUTF8(), kept, (int) out.size(), written, (juce::Time::getMillisecondCounterHiRes() - t0) / 60000.0);
+        std::fflush (stdout);
+    }
+    std::printf ("\nregrown %d candidates for %d presets in %s; levelling them\n", written, seen, outDir.getFullPathName().toRawUTF8());
+    levelPatches ({ outDir.getFullPathName() });
+    return written > 0 ? 0 : 1;
+}
+
 int main (int argc, char** argv)
 {
+    if (argc > 1 && juce::String (argv[1]) == "--regrow")
+    {
+        juce::StringArray rest;
+        for (int i = 2; i < argc; ++i) rest.add (juce::String::fromUTF8 (argv[i]));
+        return regrow (rest);
+    }
     if (argc > 2 && (juce::String (argv[1]) == "--song" || juce::String (argv[1]) == "--recreate"))
         return audioMode (argv[1], juce::File::getCurrentWorkingDirectory().getChildFile (juce::String::fromUTF8 (argv[2])), argc > 3 && juce::String (argv[3]) == "nomodel");
     if (argc > 1 && juce::String (argv[1]) == "--retouch")
@@ -2376,6 +2536,7 @@ int main (int argc, char** argv)
     testWaveSpecDigits();
     testSpectralTables();
     testMipBandLimiting();
+    testEngine();
     testParameterTable();
     testPatchJson();
     testTuningGuard();
