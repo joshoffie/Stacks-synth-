@@ -47,7 +47,7 @@
     "noise_level": 0.0,
     "fm_amount": 0.3,
     "filter_type": "LP24",
-    "filter_cutoff": 80.0,
+    "filter_cutoff": 360.0,
     "filter_res": 0.5,
     "filter_drive": 1.0,
     "filter_env": -2.0,
@@ -159,6 +159,7 @@
     "unison_spread": 0.7,
     "unison_morph": 0.0,
     "glide": 0.0,
+    "life": "Off",
     "bend_range": 2,
     "macro1": 0.0,
     "macro2": 0.0,
@@ -247,7 +248,7 @@
     "fx_on_reverb": "On",
     "fx_pos_comp": 7,
     "fx_on_comp": "On",
-    "master_gain": -6.0
+    "master_gain": 6.0
   },
   "waveA": {
     "name": "Sub Growl Core",
