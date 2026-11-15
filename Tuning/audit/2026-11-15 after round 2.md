@@ -1,4 +1,4 @@
-# Audio audit 2026-11-15 13.18
+# Audio audit 2026-11-15 14.34
 
 One note (MIDI 60, velocity 0.8) held 1.5 s then released, 4 s in all, at 48 kHz through the voices and the effect chain. onset = the first millisecond's peak against the note's peak (0 = a hard edge); attack = time to 90% of the held level; release = time from note-off to -40 dB; shape = t(-6 dB) / t(-30 dB) of the release (0.2 exponential, 0.5 linear); onset, attack, release and shape are measured on the dry voice, the rest after the effects; alias = oscillator A alone at C7, energy between the harmonics against the harmonics.
 
@@ -16,7 +16,7 @@ One note (MIDI 60, velocity 0.8) held 1.5 s then released, 4 s in all, at 48 kHz
 | Neuro Grit Bass | Bass | -29.2 | -7.3 | -30.2 | 28.0 | 0 | 0.00 | 721.731 | 0.0 | 15.5 | 0.06 | -89.4 |  |
 | Pulse Bounce | Bass | -33.9 | -6.4 | -34.2 | 24.0 | 0 | 0.00 | 729.726 | 0.3 | 1.4 | 0.03 | -90.2 | quiet, no low end |
 | Rubbery FM Bass | Bass | -32.5 | -11.0 | -35.5 | 42.0 | 0 | 0.00 | 611.828 | 0.0 | 24.4 | 0.03 | -89.2 | quiet |
-| Slow Tape Hum | Bass | -22.7 | -13.3 | -51.5 | 680.0 | 2500 | 0.00 | 470.063 | 0.0 | 70.1 | 0.07 | -89.1 | still ringing |
+| Slow Tape Hum | Bass | -22.7 | -13.2 | -51.5 | 680.0 | 2500 | 0.00 | 469.88 | 0.0 | 70.1 | 0.07 | -89.1 | still ringing |
 | Vibrant Bass | Bass | -37.1 | -8.6 | -28.2 | 8.0 | 0 | 0.00 | 572.93 | 0.0 | 1.1 | 0.10 | -91.3 | quiet, no low end |
 | Vintage Engine | Bass | -21.2 | -9.5 | -65.8 | 1396.0 | 2500 | 0.07 | 431.302 | 0.0 | 42.5 | 0.05 | -90.4 | still ringing |
 | Warm Analog Bass | Bass | -14.4 | -9.9 | -46.8 | 288.0 | 802 | 0.26 | 370.894 | 0.3 | 42.6 | 0.10 | -91.5 |  |
@@ -76,7 +76,7 @@ One note (MIDI 60, velocity 0.8) held 1.5 s then released, 4 s in all, at 48 kHz
 | Metallic Glitch | Lead | -31.9 | -9.1 | -14.6 | 4.0 | 208 | 0.10 | 413.113 | 0.0 | 0.0 | 0.01 | -89.0 | quiet |
 | Metallic Pulse | Lead | -25.7 | -11.0 | -69.8 | 1228.0 | 1102 | 0.22 | 2016.94 | 7.9 | 31.5 | 0.36 | -88.3 |  |
 | Metallic Rumble | Lead | -33.2 | -9.7 | -21.6 | 12.0 | 0 | 0.00 | 13.2019 | 0.0 | 100.0 | 0.02 | -89.3 | quiet, dies early, dull |
-| Psychedelic Vibrato | Lead | -37.9 | -11.6 | -24.0 | 20.0 | 0 | 0.00 | 998.226 | 5.1 | 0.0 | 0.17 | -90.3 | quiet, dies early |
+| Psychedelic Vibrato | Lead | -37.9 | -11.5 | -24.0 | 20.0 | 0 | 0.00 | 1000.06 | 5.1 | 0.0 | 0.17 | -90.3 | quiet, dies early |
 | Resonant Pulse | Lead | -29.6 | -8.4 | -29.0 | 16.0 | 0 | 0.00 | 711.358 | 0.0 | 0.1 | 0.32 | -91.1 | dies early |
 | Screaming Distortion | Lead | -32.1 | -10.2 | -33.0 | 20.0 | 0 | 0.00 | 13.2019 | 0.0 | 100.0 | 0.13 | -88.8 | quiet, dies early, dull |
 | Shimmering Lead | Lead | -26.9 | -10.0 | -31.9 | 38.0 | 1000 | 0.22 | 1646.55 | 0.2 | 0.1 | 0.41 | -89.5 |  |
@@ -100,14 +100,14 @@ One note (MIDI 60, velocity 0.8) held 1.5 s then released, 4 s in all, at 48 kHz
 | Distant Chorus | Pad | -21.6 | -10.7 | -51.2 | 316.0 | 2466 | 0.30 | 455.773 | 0.0 | 0.5 | 0.32 | -88.2 |  |
 | Gentle Vibrato Pad | Pad | -18.3 | -9.0 | -44.8 | 120.0 | 2500 | 0.19 | 372.137 | 0.0 | 1.5 | 0.20 | -90.8 | still ringing |
 | Glacial Sweep | Pad | -19.6 | -10.6 | -39.3 | 92.0 | 794 | 0.19 | 394.787 | 0.0 | 3.0 | 0.20 | -91.1 |  |
-| Glassy Bell | Pad | -17.7 | -9.5 | -58.2 | 1162.0 | 2500 | 0.48 | 379.557 | 0.1 | 0.8 | 0.06 | -91.3 | linear tail, still ringing |
+| Glassy Bell | Pad | -17.7 | -9.5 | -58.2 | 1162.0 | 2500 | 0.48 | 379.621 | 0.1 | 0.8 | 0.06 | -91.3 | linear tail, still ringing |
 | Glassy Drift | Pad | -21.5 | -10.3 | -59.7 | 698.0 | 2062 | 0.03 | 319.919 | 0.1 | 0.0 | 0.35 | -91.4 | dull |
 | Glitchy Vibe | Pad | -22.6 | -8.2 | -49.6 | 214.0 | 1398 | 0.24 | 577.126 | 0.2 | 10.1 | 0.21 | -90.2 |  |
 | Glowing Formant Pad | Pad | -29.2 | -17.7 | -87.7 | 366.0 | 2500 | 0.00 | 206.318 | 0.0 | 42.6 | 0.15 | -89.1 | dull, still ringing |
 | Glowing Halo Pad | Pad | -24.0 | -14.1 | -54.8 | 516.0 | 2500 | 0.00 | 398.416 | 0.0 | 1.5 | 0.38 | -91.3 | still ringing |
 | Silent Drift | Pad | -22.3 | -10.5 | -55.1 | 436.0 | 1148 | 0.21 | 752.618 | 0.7 | 0.0 | 0.20 | -91.4 |  |
 | Tape Memory | Pad | -20.2 | -11.5 | -51.5 | 280.0 | 2210 | 0.00 | 188.263 | 0.0 | 56.6 | 0.11 | -90.7 | dull, still ringing |
-| Tapered Glow | Pad | -18.8 | -10.2 | -66.6 | 950.0 | 2490 | 0.20 | 279.265 | 0.0 | 0.1 | 0.08 | -90.9 | dull, still ringing |
+| Tapered Glow | Pad | -18.8 | -10.2 | -66.6 | 950.0 | 2490 | 0.20 | 279.263 | 0.0 | 0.1 | 0.08 | -90.9 | dull, still ringing |
 | Vocal Lullaby | Pad | -21.2 | -8.6 | -52.2 | 392.0 | 2500 | 0.08 | 607.543 | 0.0 | 34.5 | 0.42 | -90.1 | still ringing |
 | Vocal Pulse | Pad | -22.4 | -9.3 | -147.5 | 346.0 | 1588 | 0.09 | 617.978 | 0.0 | 49.3 | 0.30 | -91.0 |  |
 | Warm Analog Pad | Pad | -17.9 | -7.6 | -46.1 | 150.0 | 2500 | 0.00 | 268.544 | 0.0 | 5.5 | 0.15 | -89.8 | dull, still ringing |
@@ -140,11 +140,11 @@ One note (MIDI 60, velocity 0.8) held 1.5 s then released, 4 s in all, at 48 kHz
 | Soft Click | Pluck | -33.9 | -11.2 | -14.9 | 8.0 | 0 | 0.00 | 0 | 0.0 | 0.0 | 0.06 | -91.5 | quiet, dull |
 | Sub Pluck | Pluck | -36.5 | -9.6 | -17.9 | 8.0 | 0 | 0.00 | 0 | 0.0 | 0.0 | 0.10 | -90.3 | quiet, dull |
 | Tape Bell | Pluck | -34.3 | -9.8 | -30.0 | 30.0 | 0 | 0.00 | 931.294 | 0.1 | 0.1 | 0.24 | -91.4 | quiet |
-| Tape Dust | Pluck | -29.1 | -9.9 | -27.7 | 6.0 | 0 | 0.00 | 408.935 | 0.0 | 0.0 | 0.11 | -91.3 |  |
-| Vintage Tape Pulse | Pluck | -23.3 | -8.7 | -40.2 | 88.0 | 1082 | 0.15 | 1271.38 | 0.2 | 47.8 | 0.11 | -89.0 |  |
+| Tape Dust | Pluck | -29.1 | -9.9 | -27.7 | 6.0 | 0 | 0.00 | 408.997 | 0.0 | 0.0 | 0.11 | -91.3 |  |
+| Vintage Tape Pulse | Pluck | -23.3 | -8.7 | -40.2 | 88.0 | 1082 | 0.15 | 1271.88 | 0.2 | 47.9 | 0.11 | -89.0 |  |
 | Vocal Kalimba | Pluck | -33.7 | -8.1 | -27.8 | 12.0 | 0 | 0.00 | 0 | 0.0 | 0.0 | 0.06 | -88.3 | quiet, dull |
 | Warm Chime | Pluck | -32.5 | -10.4 | -23.6 | 20.0 | 0 | 0.00 | 271.95 | 0.0 | 0.7 | 0.01 | -91.4 | quiet, dull |
-| Wobbly Tape Pluck | Pluck | -35.3 | -10.2 | -24.2 | 6.0 | 0 | 0.00 | 321.808 | 0.0 | 0.7 | 0.11 | -91.4 | quiet, dull |
+| Wobbly Tape Pluck | Pluck | -35.3 | -10.2 | -24.2 | 6.0 | 0 | 0.00 | 321.87 | 0.0 | 0.7 | 0.11 | -91.4 | quiet, dull |
 | Glitch Pulse | Pluck | -48.1 | -11.3 | -22.0 | 2.0 | 0 | 0.00 | 0 | 0.0 | 0.0 | 0.00 | -89.9 | quiet, dull |
 | Harp String | Pluck | -31.3 | -11.9 | -29.4 | 26.0 | 0 | 0.00 | 263.472 | 0.0 | 0.0 | 0.15 | -89.2 | quiet, dull |
 | Metallic House Pulse | Pluck | -19.8 | -8.7 | -16.9 | 8.0 | 62 | 0.17 | 1278.91 | 4.0 | 6.2 | 0.00 | -91.3 |  |
@@ -170,6 +170,6 @@ One note (MIDI 60, velocity 0.8) held 1.5 s then released, 4 s in all, at 48 kHz
 | Pulse Texture | Texture | -30.1 | -9.1 | -34.1 | 96.0 | 0 | 0.00 | 631.424 | 0.0 | 0.8 | 0.09 | -90.0 | quiet, dies early |
 | Tide Pulse | Texture | -27.6 | -11.8 | -37.4 | 74.0 | 0 | 0.00 | 322.996 | 0.0 | 31.9 | 0.23 | -91.4 | dies early, dull |
 
-165 patches at MIDI 60, 6.61021 s.
+165 patches at MIDI 60, 7.35618 s.
 median rms -26.3 dB (10-90% spread 17.4 dB), median peak -10.1 dB, median attack 42 ms, median release 384 ms, median release shape 0.02, median centroid 412.583 Hz, median width 0.12, median alias -90.5 dB, worst alias -87.7 dB.
 flags: dc offset 1, dies early 25, dull 54, fizzy 2, hard edge 1, linear tail 2, no low end 7, quiet 62, still ringing 29

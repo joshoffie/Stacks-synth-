@@ -28,4 +28,8 @@ int levelPatches (const juce::StringArray& args);
 // own slope (0.03). Printed and checked by the engine tests.
 float stealJumpRatio();
 
+// Oscillator A alone at C7 with the given warp and amount (the audit's alias
+// measure): energy between the harmonics against the harmonics, in dB.
+float warpAliasDb (int warp, float amount, const char* table);
+
 } // namespace stacks

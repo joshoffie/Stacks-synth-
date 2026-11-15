@@ -435,6 +435,17 @@ float stealJumpRatio()
     return peak > 0.0f ? jump / peak : 0.0f;
 }
 
+float warpAliasDb (int warp, float amount, const char* table)
+{
+    OfflineSynth synth (48000.0, 256);
+    Patch p;
+    p.set (P::oscA_wave, (float) juce::jmax (0, waveNames().indexOf (table)));
+    p.set (P::oscA_morph, 0.5f);
+    p.set (P::oscA_warp, (float) warp);
+    p.set (P::oscA_warp_amt, amount);
+    return aliasIndex (synth, p, 48000.0);
+}
+
 int levelPatches (const juce::StringArray& args)
 {
     juce::Array<juce::File> files;

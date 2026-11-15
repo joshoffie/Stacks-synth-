@@ -269,6 +269,15 @@ static void testEngine()
         std::printf ("  self-oscillation at res 1: late peak %.2f\n", late);
         CHECK (finite && late > 0.05f && late < 3.0f);
     }
+    // Warps run the oscillators at twice the rate: what a fold, a sync reset or a bend adds above Nyquist folds back far quieter.
+    struct WarpCase { int warp; float amount; const char* table; const char* name; };
+    for (const auto& w : { WarpCase { WarpFold, 0.6f, "Fold", "Fold 0.6 on Fold" }, WarpCase { WarpSync, 0.5f, "Saw", "Sync 0.5 on Saw" },
+                           WarpCase { WarpBend, 0.5f, "Saw", "Bend 0.5 on Saw" }, WarpCase { WarpPwm, 0.5f, "Pulse", "PWM 0.5 on Pulse" }, WarpCase { WarpMirror, 0.6f, "Saw", "Mirror 0.6 on Saw" } })
+    {
+        const float a = warpAliasDb (w.warp, w.amount, w.table);
+        std::printf ("  warp alias %-18s %6.1f dB\n", w.name, a);
+        CHECK (a < -30.0f);
+    }
     const float jump = stealJumpRatio();
     std::printf ("  voice stealing: largest jump %.3f of the peak (a cut is near 1, a sine's own slope 0.03)\n", jump);
     CHECK (jump < 0.12f);

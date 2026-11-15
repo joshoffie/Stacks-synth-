@@ -197,6 +197,16 @@ Generation (`Source/ai/LlmPatchGenerator.cpp`, `Source/PatchGenerator.*`):
   Plate or Room for plucks, keys and basses, Shimmer for textures and glowing
   bells; a big pad on a Plate moves to Hall or Lush half the time.
 
+- **The warps were the last aliasing source.** The regrown candidates' audit
+  caught it: a Fold warp at 0.6 read -3 dB of alias (as loud as the harmonics),
+  Sync -25, Mirror -21, Bend -26, PWM -21; everything with the warp off sat at
+  -86. The oscillators now run at twice the rate while a warp other than
+  Quantize is on (the buses are decimated after), Mirror is redefined so the
+  phase has no jump at the wrap (the peak slides from the end to the middle),
+  Sync crossfades into its reset over the last tenth of the master cycle, and
+  Fold is anti-aliased by its antiderivative (first-order ADAA). Measured in
+  the engine test: Fold 0.6 -34 dB, Sync -53, Bend -65, PWM -40, Mirror -61.
+
 Factory: re-levelled for the new filter (96 presets moved, none now silent;
 9 remain at Master's limit). `--regrow` grew three candidates each for the
 fifty presets the audit read as weakest, into `Tuning/regrown/` for a
@@ -211,6 +221,7 @@ listening pass (nothing in `Factory/` replaced; see that folder's README).
 | worst alias in the factory | -33 dB (measure skirt) / about -50 | -59 | -88 |
 | voice steal, largest jump / peak | about 1 (a cut) | about 1 | 0.09 |
 | resonance peak for a 6 kHz cutoff | below the cutoff | below the cutoff | 5.9 kHz |
+| Fold warp at 0.6, energy between harmonics | -3 dB | -3 dB | -34 dB |
 
 Still open from the list below: items 3's remaining half (a drive law and
 compensation are in; the filter character beyond that is taste), 4, 5, 10,

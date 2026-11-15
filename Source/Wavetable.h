@@ -224,7 +224,8 @@ inline float warpPhase (int mode, float p, float amt) noexcept
         case WarpBend:   { const float x0 = 0.5f - 0.48f * amt;                                     // phase distortion: the pivot slides toward the start
                            return p < x0 ? 0.5f * p / x0 : 0.5f + 0.5f * (p - x0) / (1.0f - x0); }
         case WarpPwm:    return std::min (0.9995f, p / (1.0f - 0.95f * amt));                       // the wave is squeezed into the first part of the cycle
-        case WarpMirror: { const float q = p < 0.5f ? 2.0f * p : 2.0f * (1.0f - p); return p + amt * (q - p); }   // forward, then backward
+        case WarpMirror: { const float c = 1.0f - 0.5f * amt;                                    // forward to the peak, then backward to the start:
+                           return p < c ? p / c : (1.0f - p) / (1.0f - c); }                       // the peak slides from the end (identity) to the middle, no jump at the wrap
         default:         return p;
     }
 }
@@ -248,5 +249,26 @@ inline float warpSample (int mode, float s, float amt) noexcept
 
 // Sync reads the table that many times faster, so it needs a higher mip level.
 inline float warpRateFactor (int mode, float amt) noexcept { return mode == WarpSync ? 1.0f + 7.0f * amt : 1.0f; }
+
+// The fold warp with first-order antiderivative anti-aliasing: the output is
+// the average of the fold over the step from the previous input to this one,
+// which is what a band-limited fold would have done, instead of the fold of
+// one point. `prev` is the previous input, kept per oscillator copy.
+inline float foldAntiderivative (float s, float g) noexcept
+{
+    const float t = (s * g + 1.0f) * 0.5f;
+    const float tp = t - 2.0f * std::floor (t * 0.5f);           // 0..2: the fold's period in t
+    const float H = tp <= 1.0f ? tp * tp - tp : 3.0f * tp - tp * tp - 2.0f;
+    return 2.0f * H / g;
+}
+inline float foldAdaa (float s, float& prev, float amt) noexcept
+{
+    const float g = 1.0f + 4.0f * amt;
+    const float d = s - prev;
+    const float y = std::abs (d) < 1.0e-4f ? warpSample (WarpFold, 0.5f * (s + prev), amt)
+                                           : (foldAntiderivative (s, g) - foldAntiderivative (prev, g)) / d;
+    prev = s;
+    return y;
+}
 
 } // namespace stacks

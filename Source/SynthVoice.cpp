@@ -118,6 +118,8 @@ void SynthVoice::setCurrentPlaybackSampleRate (double newRate)
         return;
 
     for (auto& f : filters) f.prepare (newRate, kSub);
+    oscOversampling = std::make_unique<juce::dsp::Oversampling<float>> (4, 1, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true);
+    oscOversampling->initProcessing ((size_t) kSub);
     ampEnv.setSampleRate (newRate);
     filterEnv.setSampleRate (newRate);
     modEnv.setSampleRate (newRate);
@@ -207,6 +209,7 @@ void SynthVoice::beginNote (int midiNoteNumber, float vel, int pitchWheel, int m
         phaseA[u] = rng.nextFloat();
         phaseB[u] = rng.nextFloat();
         phaseC[u] = rng.nextFloat();
+        foldPrevA[u] = foldPrevB[u] = foldPrevC[u] = 0.0f;
     }
     subPhase = 0.0f;
     for (int k = 0; k < kNumLfos; ++k)
@@ -330,6 +333,27 @@ float SynthVoice::readWave (int osc, int wave, float mip, float morph, float pha
     if (auto* table = ctx.user != nullptr ? ctx.user->active (slot) : nullptr)
         return table->read (mip, morph, phase);
     return std::sin (twoPi * phase);
+}
+
+float SynthVoice::readWarped (int osc, int wave, float mip, float morph, int warp, float phase, float amt, float& foldPrev) const noexcept
+{
+    if (warp == WarpSync && amt > 0.001f)
+    {
+        // Hard sync, with the jump at the reset crossfaded away: over the last
+        // tenth of the master cycle the slave blends into a copy of itself that
+        // lands on phase 0 exactly when the master wraps.
+        const float r = 1.0f + 7.0f * amt;
+        const float q = wrap01 (phase * r);
+        const float a = readWave (osc, wave, mip, morph, q);
+        if (phase < 0.9f) return a;
+        const float t = (phase - 0.9f) * 10.0f;
+        const float b = readWave (osc, wave, mip, morph, wrap01 (q - wrap01 (r)));
+        return a + t * (b - a);
+    }
+    const float sample = readWave (osc, wave, mip, morph, warpPhase (warp, phase, amt));
+    if (warp == WarpFold && amt > 0.001f)
+        return foldAdaa (sample, foldPrev, amt);
+    return warpSample (warp, sample, amt);
 }
 
 void SynthVoice::FilterUnit::prepare (double sampleRate, int blockSize)
@@ -674,17 +698,33 @@ void SynthVoice::renderNextBlock (juce::AudioBuffer<float>& out, int startSample
         // ---- oscillators -> the filter buses (pre-filter) -------------------
         // Bus 1 (scratch) feeds filter 1, bus 2 (scratch2) feeds filter 2. Only
         // Split routing separates them: A, sub and noise on bus 1, B and C on bus 2.
+        // While a warp other than Quantize is on, the oscillators run at twice
+        // the rate into the oversampler's buffer and the buses are decimated after:
+        // a sync reset, a phase bend or a fold is not band-limited on its own.
         auto* scratch2L = scratch2.getWritePointer (0);
         auto* scratch2R = scratch2.getWritePointer (1);
-        for (int i = 0; i < n; ++i)
+        auto warps = [] (int mode, float amt) { return mode != WarpOff && mode != WarpQuantize && amt > 0.001f; };
+        const bool oversample = oscOversampling != nullptr
+                             && (warps (warpA, warpAmtA) || (warps (warpB, warpAmtB) && (levelB > 0.0001f || fm > 0.001f)) || (useC && warps (warpC, warpAmtC)));
+        const int factor = oversample ? 2 : 1;
+        float* busPtrs[4] = { scratchL, scratchR, scratch2L, scratch2R };
+        juce::dsp::AudioBlock<float> buses (busPtrs, 4, (size_t) n);
+        float* oL = scratchL; float* oR = scratchR; float* o2L = scratch2L; float* o2R = scratch2R;
+        if (oversample)
+        {
+            buses.clear();
+            auto up = oscOversampling->processSamplesUp (buses);
+            oL = up.getChannelPointer (0); oR = up.getChannelPointer (1); o2L = up.getChannelPointer (2); o2R = up.getChannelPointer (3);
+        }
+        const float rateScale = 1.0f / (float) factor;
+        for (int i = 0; i < n * factor; ++i)
         {
             float l1 = 0.0f, r1 = 0.0f, l2 = 0.0f, r2 = 0.0f;
             for (int u = 0; u < unison; ++u)
             {
-                const float sB = warpSample (warpB, readWave (1, waveB, mipB, morphBu[u], warpPhase (warpB, phaseB[u], warpAmtB)), warpAmtB);
-                const float pa = warpPhase (warpA, wrap01 (phaseA[u] + fmDepth * sB), warpAmtA);
-                const float sA = warpSample (warpA, readWave (0, waveA, mipA, morphAu[u], pa), warpAmtA);
-                const float sC = useC ? warpSample (warpC, readWave (2, waveC, mipC, morphCu[u], warpPhase (warpC, phaseC[u], warpAmtC)), warpAmtC) : 0.0f;
+                const float sB = readWarped (1, waveB, mipB, morphBu[u], warpB, phaseB[u], warpAmtB, foldPrevB[u]);
+                const float sA = readWarped (0, waveA, mipA, morphAu[u], warpA, wrap01 (phaseA[u] + fmDepth * sB), warpAmtA, foldPrevA[u]);
+                const float sC = useC ? readWarped (2, waveC, mipC, morphCu[u], warpC, phaseC[u], warpAmtC, foldPrevC[u]) : 0.0f;
                 const float a  = sA * levelA;
                 const float bc = sB * levelB + sC * levelC;
                 if (split)
@@ -699,20 +739,22 @@ void SynthVoice::renderNextBlock (juce::AudioBuffer<float>& out, int startSample
                     r1 += s * gainR[u];
                 }
 
-                phaseA[u] = wrap01 (phaseA[u] + incA[u]);
-                phaseB[u] = wrap01 (phaseB[u] + incB[u]);
-                phaseC[u] = wrap01 (phaseC[u] + incC[u]);
+                phaseA[u] = wrap01 (phaseA[u] + incA[u] * rateScale);
+                phaseB[u] = wrap01 (phaseB[u] + incB[u] * rateScale);
+                phaseC[u] = wrap01 (phaseC[u] + incC[u] * rateScale);
             }
 
             const float mono = std::sin (twoPi * subPhase) * subLevel
                              + (rng.nextFloat() * 2.0f - 1.0f) * noiseLevel;
-            subPhase += subInc; if (subPhase >= 1.0f) subPhase -= 1.0f;
+            subPhase += subInc * rateScale; if (subPhase >= 1.0f) subPhase -= 1.0f;
 
-            scratchL[i] = l1 * unisonComp + mono;
-            scratchR[i] = r1 * unisonComp + mono;
-            scratch2L[i] = l2 * unisonComp;
-            scratch2R[i] = r2 * unisonComp;
+            oL[i] = l1 * unisonComp + mono;
+            oR[i] = r1 * unisonComp + mono;
+            o2L[i] = l2 * unisonComp;
+            o2R[i] = r2 * unisonComp;
         }
+        if (oversample)
+            oscOversampling->processSamplesDown (buses);
 
         // ---- the sample oscillator joins bus 1 ---------------------------------
         if (sampler.isActive() && p.geti (P::smp_mode) > 0)

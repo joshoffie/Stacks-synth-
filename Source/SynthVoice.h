@@ -195,6 +195,10 @@ private:
     void hardReset() noexcept;   // everything silent and at rest, instantly (only ever after a fade)
 
     float readWave (int osc, int wave, float mip, float morph, float phase) const noexcept;
+    // One warped sample: Sync crossfades into the reset over the last tenth of
+    // the master cycle, Fold is anti-aliased by its antiderivative, the rest
+    // reshape the phase.
+    float readWarped (int osc, int wave, float mip, float morph, int warp, float phase, float amt, float& foldPrev) const noexcept;
     float lfoValueFor (int k, const SynthParams& p, int sampleInBlock, int blockLen, float& heldOut) noexcept;
     float sourceValue (int source, const float* lfo, float filterEnvValue, float modEnvValue) const noexcept;
 
@@ -231,6 +235,9 @@ private:
     FilterUnit filters[2];
     SampleVoice sampler;
     juce::AudioBuffer<float> scratch { 2, kSub }, scratch2 { 2, kSub };   // the filter 1 bus and the filter 2 bus (Parallel / Split)
+    // A warp (sync, bend, PWM, mirror, fold) is not band-limited: the oscillators
+    // run at twice the rate while one is on and the two buses are decimated here.
+    std::unique_ptr<juce::dsp::Oversampling<float>> oscOversampling;
     juce::Random rng;
 
     int serial = -1;               // this note's serial, see VoiceContext::displayVoice
@@ -255,6 +262,7 @@ private:
     struct PendingNote { int note = 60; float velocity = 1.0f; int wheel = 8192; int channel = 1; bool armed = false; } pending;
 
     float phaseA[kMaxUnison] {}, phaseB[kMaxUnison] {}, phaseC[kMaxUnison] {};
+    float foldPrevA[kMaxUnison] {}, foldPrevB[kMaxUnison] {}, foldPrevC[kMaxUnison] {};   // the fold warp's previous inputs
     float subPhase = 0.0f;
     float lfoNotePhase[kNumLfos] {}, lfoHeld[kNumLfos] {};
     SynthParams local;              // this sub-block's modulated copy of the parameters
