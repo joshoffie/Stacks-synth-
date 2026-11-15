@@ -20,7 +20,7 @@ namespace
     public:
         explicit TuningBadge (StacksAudioProcessor& p) : processor (p)
         {
-            setTooltip ("Tuning rig: with a sound playing press 1 (trash) to 5 (whoa); 3 is fine. Click to open the ratings folder.");
+            setTooltip ("While a sound plays, press 1 (trash) to 5 (whoa); 3 is fine. Your ratings steer the sounds Stacks makes for you. Click to see what it has learned, or to start over.");
             setMouseCursor (juce::MouseCursor::PointingHandCursor);
             startTimerHz (10);
         }
@@ -39,16 +39,44 @@ namespace
             g.setColour (colour);
             g.setFont (StacksLookAndFeel::font (10.0f, true).withExtraKerningFactor (0.08f));
             static const char* const words[] = { "", "TRASH", "MEH", "FINE", "GOOD", "WHOA" };
+            const int rated = processor.tasteProfile().rated;
             const auto text = flash ? juce::String (words[juce::jlimit (0, 5, last.verdict)]) + " " + juce::String (last.verdict)
-                                    : "TUNING " + juce::String::charToString (0xb7) + " " + juce::String (processor.ratingsThisSession()) + " rated";
+                                    : rated == 0 ? juce::String ("RATE IT 1-5") : juce::String (rated) + " RATED";
             g.drawText (text, getLocalBounds(), juce::Justification::centred, false);
         }
 
         void mouseDown (const juce::MouseEvent&) override
         {
-            auto folder = StacksAudioProcessor::ratingsFolder();
-            folder.createDirectory();
-            folder.revealToUser();
+            // What the ratings have taught this copy, in plain words, and the way back to day one.
+            juce::PopupMenu m;
+            juce::StringArray sentences;
+            for (const auto& part : juce::StringArray::fromTokens (processor.tasteProfile().summary(), ".", ""))
+                if (part.trim().isNotEmpty()) sentences.add (part.trim() + ".");
+            for (const auto& line : sentences)
+                m.addItem (juce::PopupMenu::Item (line).setEnabled (false));
+            m.addSeparator();
+            m.addItem (1, "Start over: forget my ratings...", processor.tasteProfile().rated > 0);
+            m.addItem (2, "Show the ratings folder");
+            juce::Component::SafePointer<TuningBadge> safe (this);
+            m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this), [safe] (int r)
+            {
+                if (safe == nullptr) return;
+                if (r == 2) { auto folder = StacksAudioProcessor::ratingsFolder(); folder.createDirectory(); folder.revealToUser(); }
+                if (r == 1) safe->confirmForget();
+            });
+        }
+
+        void confirmForget()
+        {
+            juce::Component::SafePointer<TuningBadge> safe (this);
+            juce::NativeMessageBox::showAsync (juce::MessageBoxOptions()
+                                                   .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                                                   .withTitle ("Forget your ratings?")
+                                                   .withMessage ("Stacks goes back to generating as it did on the first day. Your ratings move to a Forgotten folder in your library, so nothing is lost.")
+                                                   .withButton ("Forget")
+                                                   .withButton ("Keep")
+                                                   .withAssociatedComponent (this),
+                                               [safe] (int result) { if (safe != nullptr && result == 0) safe->processor.forgetRatings(); });   // 0 is the first button
         }
 
     private:
@@ -110,7 +138,6 @@ StacksAudioProcessorEditor::StacksAudioProcessorEditor (StacksAudioProcessor& p)
     redoButton.setTooltip ("Redo (Shift+Cmd+Z)");
     redoButton.onClick = [this] { synthProcessor.redo(); };
     content.addAndMakeVisible (redoButton);
-    if (synthProcessor.tuningMode())
     {
         tuningBadge = std::make_unique<TuningBadge> (synthProcessor);
         content.addAndMakeVisible (*tuningBadge);
@@ -240,6 +267,8 @@ void StacksAudioProcessorEditor::maybeStartTour()
                   { in (homeView, homeView.tourArea ("grow")), "Grow from this one makes five new sounds based on it." },
                   { in (homeView, homeView.tourArea ("save")), "Save preset keeps the sound in your library." },
                   { in (homeView, homeView.tourArea ("open")), "Open the synth to change every detail." } };
+        if (tuningBadge != nullptr)
+            steps.push_back ({ whole (*tuningBadge), "Press 1 (trash) to 5 (whoa) while a sound plays. Your ratings steer the sounds Stacks makes for you; the pill tells you what it has learned." });
     }
     else if (! showingHome && ! synthProcessor.tourSeen ("synth"))
     {
@@ -281,7 +310,7 @@ bool StacksAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
     if (cmd && key.getKeyCode() == 'Z')  { synthProcessor.undo(); return true; }
     if (cmd && key.getKeyCode() == 'Y')  { synthProcessor.redo(); return true; }
     // The tuning rig: 1 to 5 rate the playing sound (main row or number pad).
-    if (synthProcessor.tuningMode() && ! key.getModifiers().isAnyModifierKeyDown())
+    if (! key.getModifiers().isAnyModifierKeyDown())
     {
         const auto text = key.getTextCharacter();
         const int code = key.getKeyCode();

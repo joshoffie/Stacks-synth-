@@ -25,6 +25,7 @@
 #include "ai/SongAnalyser.h"
 #include "AudioAudit.h"
 #include "SynthVoice.h"
+#include "Taste.h"
 
 using namespace stacks;
 
@@ -281,6 +282,153 @@ static void testEngine()
     const float jump = stealJumpRatio();
     std::printf ("  voice stealing: largest jump %.3f of the peak (a cut is near 1, a sine's own slope 0.03)\n", jump);
     CHECK (jump < 0.12f);
+}
+
+// Taste: what a player's ratings may and may not do to generation. Dislikes
+// pull harder than likes, nothing moves before the ratings support it, the
+// pull is bounded, and forgetting takes it all back.
+static void testTasteProfile()
+{
+    section ("taste: a player's ratings steer generation within bounds");
+    auto rating = [] (Patch p, int verdict, const char* category, const char* recipe = "")
+    {
+        p.category = category; p.recipe = recipe;
+        TasteRating r;
+        r.key = juce::String::toHexString (juce::JSON::toString (p.paramsToVar()).hashCode64()) + juce::String (verdict);
+        r.category = category; r.recipe = recipe; r.verdict = verdict; r.features = tasteFeatures (p);
+        return r;
+    };
+    const float hp24 = (float) filterTypeNames().indexOf ("HP24"), lp12 = (float) filterTypeNames().indexOf ("LP12");
+
+    // 1. Twelve trash pads, all through HP24; eighteen good pads, none: the kind avoids HP24 and nothing else.
+    std::vector<TasteRating> ratings;
+    // (cutoffs and unison spread the same way on both sides, so the filter type is the only thing the trash shares)
+    for (int i = 0; i < 12; ++i) { Patch p; p.set (P::filter_type, hp24); p.set (P::filter_cutoff, 300.0f * std::pow (2.0f, 0.4f * (float) i)); p.set (P::unison_voices, (float) (1 + i % 4)); ratings.push_back (rating (p, 1 + (i % 2), "Pad", i % 2 ? "fm" : "noise body")); }
+    for (int i = 0; i < 18; ++i) { Patch p; p.set (P::filter_type, lp12); p.set (P::filter_cutoff, 300.0f * std::pow (2.0f, 0.27f * (float) i)); p.set (P::unison_voices, (float) (1 + i % 4)); ratings.push_back (rating (p, 3 + (i % 3), "Pad", i % 3 == 0 ? "fm" : i % 3 == 1 ? "two saws" : "")); }
+    auto t = TasteProfile::fromRatings (ratings);
+    CHECK (t.rated == 30 && t.trash == 12 && t.whoa == 12);
+    bool avoidsHp = false, avoidsLp = false;
+    for (const auto& a : t.avoids) { if (a.feature == "filter: HP24") avoidsHp = true; if (a.feature == "filter: LP12") avoidsLp = true; }
+    CHECK (avoidsHp && ! avoidsLp);
+    CHECK ((int) t.avoids.size() <= 2 * TasteProfile::kMaxAvoidsPerKind);
+    std::printf ("  avoids: ");
+    for (const auto& a : t.avoids) std::printf ("[%s%s%s x%.1f] ", a.kind.toRawUTF8(), a.kind.isEmpty() ? "" : ": ", a.feature.toRawUTF8(), a.lift);
+    std::printf ("\n");
+    // the pulls: "noise body" was rated 1 six times -> the floor; "fm" mixed (six 2s, six 3-5s) stays near even; "two saws" rated 4 six times -> up, under the cap
+    std::printf ("  weights: noise body %.2f, fm %.2f, two saws %.2f, never-rated %.2f\n", t.weightFor ("noise body"), t.weightFor ("fm"), t.weightFor ("two saws"), t.weightFor ("vocal"));
+    CHECK (std::abs (t.weightFor ("noise body") - TasteProfile::kFloor) < 1.0e-4f);
+    CHECK (t.weightFor ("two saws") > 1.15f && t.weightFor ("two saws") <= TasteProfile::kCap);
+    CHECK (t.weightFor ("vocal") == 1.0f);
+    CHECK (t.promptLines().contains ("Avoid on pads") && t.promptLines().contains ("HP24") && ! t.promptLines().containsIgnoreCase ("prefer") && ! t.promptLines().containsIgnoreCase ("like"));
+    CHECK (t.summary().contains ("Rated 30 sounds") && t.summary().contains ("HP24"));
+
+    // 2. Below the bar nothing moves: four trash, or five trash with only three others.
+    std::vector<TasteRating> few (ratings.begin(), ratings.begin() + 4);
+    for (int i = 12; i < 30; ++i) few.push_back (ratings[(size_t) i]);
+    CHECK (TasteProfile::fromRatings (few).avoids.empty());
+    std::vector<TasteRating> fewOthers (ratings.begin(), ratings.begin() + 12);
+    for (int i = 12; i < 15; ++i) fewOthers.push_back (ratings[(size_t) i]);
+    CHECK (TasteProfile::fromRatings (fewOthers).avoids.empty());
+    CHECK (TasteProfile().isEmpty() && TasteProfile().summary().contains ("No ratings yet"));
+
+    // 3. A trait that is everywhere is not a dislike: the trash and the good share it alike.
+    {
+        std::vector<TasteRating> same;
+        for (int i = 0; i < 20; ++i) { Patch p; p.set (P::filter_type, hp24); same.push_back (rating (p, i < 10 ? 1 : 4, "Lead")); }
+        CHECK (TasteProfile::fromRatings (same).avoids.empty());
+    }
+
+    // 4. The draw: a loved recipe never takes more than a third of the slots, a hated one still turns up, every recipe is tried.
+    {
+        std::vector<juce::String> tags;
+        for (int i = 0; i < 14; ++i) tags.push_back ("r" + juce::String (i));
+        TasteProfile w;
+        w.recipeWeights["r0"] = TasteProfile::kCap;
+        w.recipeWeights["r1"] = TasteProfile::kFloor;
+        juce::Random rng (99);
+        std::map<int, int> counts;
+        const int batches = 2000;
+        for (int b = 0; b < batches; ++b)
+            for (int i : drawRecipes (5, tags, w, rng)) ++counts[i];
+        const double slots = 5.0 * batches;
+        std::printf ("  draw shares: loved %.1f%%, hated %.1f%%, even would be %.1f%%; recipes seen %d of 14\n", 100.0 * counts[0] / slots, 100.0 * counts[1] / slots, 100.0 / 14, (int) counts.size());
+        CHECK (counts[0] / slots < 0.33 && counts[0] / slots > 1.0 / 14);
+        CHECK (counts[1] / slots > 0.025 && counts[1] / slots < 1.0 / 14);
+        CHECK ((int) counts.size() == 14);
+        // no taste: an even draw without replacement
+        TasteProfile none;
+        std::map<int, int> even;
+        for (int b = 0; b < batches; ++b) for (int i : drawRecipes (5, tags, none, rng)) ++even[i];
+        for (const auto& kv : even) CHECK (std::abs (kv.second / slots - 1.0 / 14) < 0.015);
+    }
+
+    // 5. Steering: a pad through HP24 leaves with a low-pass; a pad with nothing avoided is untouched.
+    {
+        Patch pad; pad.category = "Pad"; pad.set (P::filter_type, hp24); pad.set (P::filter_cutoff, 700.0f);
+        CHECK (t.avoidedTraitsIn (pad).contains ("filter: HP24"));
+        CHECK (steerAwayFromAvoided (pad, t, 5) == 0);
+        CHECK (filterTypeNames()[(int) pad.get (P::filter_type)].startsWith ("LP"));
+        Patch fine; fine.category = "Pad"; fine.set (P::filter_type, lp12);
+        const auto before = fine.toJson();
+        CHECK (steerAwayFromAvoided (fine, t, 6) == 0 && fine.toJson() == before);
+        Patch lead; lead.category = "Lead"; lead.set (P::filter_type, hp24);   // the avoid was learned on pads
+        CHECK (t.avoidedTraitsIn (lead).isEmpty());
+    }
+
+    // 6. Over time: a player who hates Triangle LFOs on pads. Random pads carry one about half the time;
+    //    with the profile applied the share collapses, and the pads stay as varied as before.
+    {
+        std::vector<TasteRating> hate;
+        for (int i = 0; i < 10; ++i) { Patch p; p.set (lfoShapeParam (0), (float) ShapeTriangle); p.set (modSourceParam (0), (float) SrcLfo1); p.set (modDestParam (0), (float) modTargetForParam ((int) P::oscA_morph)); p.set (modAmountParam (0), 0.3f); p.set (P::filter_cutoff, 600.0f + 40.0f * (float) i); hate.push_back (rating (p, 1, "Pad")); }
+        for (int i = 0; i < 10; ++i) { Patch p; p.set (lfoShapeParam (0), (float) ShapeSine); p.set (modSourceParam (0), (float) SrcLfo1); p.set (modDestParam (0), (float) modTargetForParam ((int) P::oscA_morph)); p.set (modAmountParam (0), 0.3f); p.set (P::filter_cutoff, 600.0f + 40.0f * (float) i); hate.push_back (rating (p, 4, "Pad")); }
+        const auto profile = TasteProfile::fromRatings (hate);
+        bool avoidsTriangle = false;
+        for (const auto& a : profile.avoids) avoidsTriangle = avoidsTriangle || a.feature == "lfo shape: Triangle";
+        CHECK (avoidsTriangle);
+        RandomPatchGenerator gen;
+        GenerationProgress quiet;
+        auto share = [&] (const TasteProfile& taste, int& distinctWaves)
+        {
+            int withTriangle = 0, total = 0;
+            std::set<juce::String> waves;
+            for (int b = 0; b < 12; ++b)
+            {
+                GenerationRequest r; r.count = 5; r.hint = "pad"; r.designWaves = false; r.taste = taste;
+                for (const auto& p : gen.generate (r, quiet)) { ++total; if (tasteFeatures (p).contains ("lfo shape: Triangle")) ++withTriangle; waves.insert (tasteFeatures (p)[0]); }
+            }
+            distinctWaves = (int) waves.size();
+            return total > 0 ? (double) withTriangle / total : 0.0;
+        };
+        int wavesBefore = 0, wavesAfter = 0;
+        const double before = share (TasteProfile(), wavesBefore), after = share (profile, wavesAfter);
+        std::printf ("  pads with a Triangle LFO: %.0f%% before, %.0f%% with the profile; distinct A waves %d -> %d\n", 100.0 * before, 100.0 * after, wavesBefore, wavesAfter);
+        CHECK (before > 0.25 && after < 0.1);
+        CHECK (wavesAfter >= 3);
+    }
+
+    // 7. The log on disk: seen lines skipped, the first rig's 1 read as 1, the latest verdict per sound wins.
+    {
+        auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("stacks-taste-test");
+        dir.deleteRecursively(); dir.createDirectory();
+        Patch a; a.category = "Keys"; a.set (P::filter_cutoff, 1234.0f);
+        Patch b; b.category = "Bass"; b.set (P::filter_cutoff, 222.0f);
+        auto line = [] (const Patch& p, int verdict, const char* key, bool scale)
+        {
+            auto* o = new juce::DynamicObject();
+            o->setProperty ("verdict", verdict); if (scale) o->setProperty ("scale", 5);
+            o->setProperty ("key", key); o->setProperty ("patch", p.toVar());
+            return juce::JSON::toString (juce::var (o), true) + "\n";
+        };
+        dir.getChildFile ("Mac-2026-11-15.jsonl").replaceWithText (line (a, 0, "ka", true) + line (a, 1, "ka", false) + line (b, 2, "kb", true) + line (b, 5, "kb", true));
+        const auto read = readRatingLogs (dir);
+        CHECK ((int) read.size() == 2);
+        int ka = -1, kb = -1;
+        for (const auto& r : read) { if (r.key == "ka") ka = r.verdict; if (r.key == "kb") kb = r.verdict; }
+        CHECK (ka == 1 && kb == 5);
+        CHECK (TasteProfile::fromFolder (dir).rated == 2);
+        dir.deleteRecursively();
+        CHECK (TasteProfile::fromFolder (dir).isEmpty());   // forgotten: nothing to read
+    }
 }
 
 static void testParameterTable()
@@ -2079,7 +2227,7 @@ static juce::String buildRatingsReport (const std::vector<juce::File>& files, in
 static int ratingsReport (const juce::StringArray& args)
 {
     juce::StringArray places = args;
-    if (places.isEmpty()) places.add (ModelManager::appDataDirectory().getChildFile ("ratings").getFullPathName());
+    if (places.isEmpty()) places.add (juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("Stacks Patches").getChildFile ("Taste").getFullPathName());
     std::vector<juce::File> files;
     for (const auto& place : places)
     {
@@ -2507,6 +2655,20 @@ static int regrow (const juce::StringArray& args)
 
 int main (int argc, char** argv)
 {
+    if (argc > 1 && juce::String (argv[1]) == "--taste")
+    {
+        // `--taste [folder]`: what a player's ratings have taught their copy, in the words the pill and Settings use, plus the numbers.
+        const auto folder = argc > 2 ? juce::File::getCurrentWorkingDirectory().getChildFile (juce::String::fromUTF8 (argv[2]))
+                                     : juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("Stacks Patches").getChildFile ("Taste");
+        const auto t = TasteProfile::fromFolder (folder);
+        std::printf ("%s\n%s\n", folder.getFullPathName().toRawUTF8(), t.summary().toRawUTF8());
+        for (const auto& a : t.avoids)
+            std::printf ("  avoid %-8s %-28s %d of %d trash, %d of %d others, x%.1f\n", a.kind.isEmpty() ? "(all)" : a.kind.toRawUTF8(), a.feature.toRawUTF8(), a.trash, a.ofTrash, a.others, a.ofOthers, a.lift);
+        for (const auto& kv : t.recipeWeights)
+            std::printf ("  recipe %-14s weight %.2f\n", kv.first.toRawUTF8(), kv.second);
+        std::printf ("%s", t.promptLines().toRawUTF8());
+        return 0;
+    }
     if (argc > 1 && juce::String (argv[1]) == "--regrow")
     {
         juce::StringArray rest;
@@ -2546,6 +2708,7 @@ int main (int argc, char** argv)
     testSpectralTables();
     testMipBandLimiting();
     testEngine();
+    testTasteProfile();
     testParameterTable();
     testPatchJson();
     testTuningGuard();

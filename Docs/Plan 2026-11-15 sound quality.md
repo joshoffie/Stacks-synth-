@@ -266,6 +266,16 @@ sound the synth generates, the five a Home tile grows as much as a Lab batch or
 a grow; and a tuned copy is **strictly personal**, there is no sharing or
 export of a taste profile.
 
+**Built the same evening** (`Source/Taste.*`, `Docs/Taste.md`): the profile
+(avoided traits with the five-and-five rule, recipe weights floored at 0.4 and
+capped at 1.7, one even draw in five), applied to every generation request;
+the pill for everyone with the summary and the reset behind a click; a Taste
+section in Settings with "Start over: forget my ratings"; ratings stored in
+the library's Taste folder (the rig's logs moved over once); a tour step. The
+taste tests measure the bounds: a loved recipe takes 10% of slots against 7%
+even, a hated one still 4%, an avoided trait falls from 47% of pads to 0%
+with the pads as varied as before, nothing moves under the thresholds.
+
 ## 3. Next, ranked
 
 ### Engine

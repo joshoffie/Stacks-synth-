@@ -103,12 +103,14 @@ Two more commands act on a library rather than measure it:
 
 ## Where this is going
 
-Decided 15 Nov 2026: the rig ships. Every player rates 1 to 5 and their own
-Stacks nudges its generation toward their taste, within the same bounds as
-above (recipe weights with a floor and a wildcard, avoid-lines from their own
-ACT traits, never examples of liked patches), with a reset and a plain-words
-view of what it has learned. Until that is built, this document describes the
-internal rig; the policy section is what the shipped version will automate.
+Decided and built 15 Nov 2026: the rig ships. Every player rates 1 to 5 and
+their own Stacks nudges its generation toward their taste, within the same
+bounds as above (recipe weights with a floor and a wildcard, avoid-lines from
+their own ACT traits, never examples of liked patches), with a reset and a
+plain-words view of what it has learned. `Docs/Taste.md` describes the shipped
+behaviour; `StacksTests --taste [folder]` prints what a folder of ratings has
+taught. Ratings now live in the library's Taste folder, where the report
+reads them by default.
 
 ## Sessions
 

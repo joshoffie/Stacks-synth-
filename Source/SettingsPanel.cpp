@@ -133,6 +133,19 @@ SettingsPanel::SettingsPanel (StacksAudioProcessor& p) : processor (p)
     };
     addAndMakeVisible (tipsButton);
 
+    tasteTitle.setText ("Your taste", juce::dontSendNotification);
+    tasteTitle.setFont (StacksLookAndFeel::font (12.0f, true));
+    tasteTitle.setColour (juce::Label::textColourId, colours::muted);
+    addAndMakeVisible (tasteTitle);
+    tasteLabel.setFont (StacksLookAndFeel::font (12.0f));
+    tasteLabel.setColour (juce::Label::textColourId, colours::text);
+    tasteLabel.setJustificationType (juce::Justification::topLeft);
+    tasteLabel.setMinimumHorizontalScale (1.0f);
+    addAndMakeVisible (tasteLabel);
+    forgetButton.setTooltip ("Stacks goes back to generating as it did on the first day. The ratings move to a Forgotten folder in your library.");
+    forgetButton.onClick = [this] { confirmForget(); };
+    addAndMakeVisible (forgetButton);
+
     sizeLabel.setText ("Window size", juce::dontSendNotification);
     sizeLabel.setFont (StacksLookAndFeel::font (12.0f, true));
     sizeLabel.setColour (juce::Label::textColourId, colours::muted);
@@ -163,7 +176,7 @@ juce::DialogWindow* SettingsPanel::show (StacksAudioProcessor& p, juce::Componen
 {
     juce::DialogWindow::LaunchOptions o;
     o.content.setOwned (new SettingsPanel (p));
-    o.content->setSize (640, 300);   // calm, MPE, microtuning, the tips, the window size
+    o.content->setSize (640, 430);   // calm, MPE, microtuning, the tips, the window size, your taste
     o.dialogTitle = "Stacks settings";
     o.dialogBackgroundColour = colours::background;
     o.escapeKeyTriggersCloseButton = true;
@@ -208,6 +221,11 @@ void SettingsPanel::resized()
     r.removeFromTop (12);
     tipsButton.setBounds (r.removeFromTop (26).removeFromLeft (180));
     r.removeFromTop (12);
+    tasteTitle.setBounds (r.removeFromTop (18));
+    tasteLabel.setBounds (r.removeFromTop (58));
+    r.removeFromTop (4);
+    forgetButton.setBounds (r.removeFromTop (26).removeFromLeft (240));
+    r.removeFromTop (12);
     sizeLabel.setBounds (r.removeFromTop (18));
     auto sizes = r.removeFromTop (26);
     for (auto* b : { &sizeSmall, &sizeMedium, &sizeLarge, &sizeFit }) { b->setBounds (sizes.removeFromLeft (96)); sizes.removeFromLeft (6); }
@@ -216,6 +234,24 @@ void SettingsPanel::resized()
     // saveGuideButton.setBounds (r.removeFromBottom (26).removeFromLeft (200));
     // r.removeFromBottom (8);
     // guide.setBounds (r);
+}
+
+void SettingsPanel::confirmForget()
+{
+    juce::Component::SafePointer<SettingsPanel> safe (this);
+    juce::NativeMessageBox::showAsync (juce::MessageBoxOptions()
+                                           .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                                           .withTitle ("Forget your ratings?")
+                                           .withMessage ("Stacks goes back to generating as it did on the first day. Your ratings move to a Forgotten folder in your library, so nothing is lost.")
+                                           .withButton ("Forget")
+                                           .withButton ("Keep")
+                                           .withAssociatedComponent (this),
+                                       [safe] (int result)   // 0 is the first button
+                                       {
+                                           if (safe == nullptr || result != 0) return;
+                                           safe->processor.forgetRatings();
+                                           safe->refresh();
+                                       });
 }
 
 void SettingsPanel::rebuildMenu()
@@ -279,6 +315,8 @@ void SettingsPanel::engineChosen()
 
 void SettingsPanel::refresh()
 {
+    tasteLabel.setText (processor.tasteProfile().summary(), juce::dontSendNotification);
+    forgetButton.setEnabled (processor.tasteProfile().rated > 0);
     const auto choice = processor.engine();
     calmToggle.setToggleState (processor.calmMode(), juce::dontSendNotification);
     mpeToggle.setToggleState (processor.mpeMode(), juce::dontSendNotification);

@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "Patch.h"
+#include "Taste.h"
 
 namespace stacks
 {
@@ -20,6 +21,7 @@ struct GenerationRequest
     juce::String brief;           // the AI's own description of what the hint should sound like (filled in by the generator)
     std::vector<int> recipes;     // fresh batches: per slot, the engine recipe it was given (an index into the generator's list; the generator fills it)
     std::vector<int> designSlots; // fresh and Far batches: per slot, 1 = design a table for oscillator A, 0 = a built-in table (the generator fills it: half and half)
+    TasteProfile taste;           // what this player's ratings say: traits to steer away from, recipe weights (empty = the factory build's behaviour)
     int generation = 1;
 };
 

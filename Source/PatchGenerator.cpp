@@ -827,6 +827,8 @@ std::vector<Patch> RandomPatchGenerator::generate (const GenerationRequest& req,
         applyHint (p, hintLower, rng);
         if (req.parents.empty())
             enrichPatch (p, (juce::int64) (ticks ^ salt) + (juce::int64) i * 131);   // a sketch becomes a finished sound
+        if (! req.taste.isEmpty())
+            steerAwayFromAvoided (p, req.taste, (juce::int64) (ticks ^ salt) + (juce::int64) i * 977);   // the player's trash traits
         keepPatchInTune (p);
         ensureMacroRoutings (p);
         p.set (P::master_gain, -6.0f);

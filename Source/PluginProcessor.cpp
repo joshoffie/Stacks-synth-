@@ -63,7 +63,8 @@ StacksAudioProcessor::StacksAudioProcessor()
       generator (randomGenerator)
 {
     loadThemeFile (libraryRoot().getChildFile ("theme.json"));   // optional recolouring, before any window exists
-    tuning = ModelManager::appDataDirectory().getChildFile ("tuning.on").existsAsFile();   // the tuning rig, for whoever rates sounds for us
+    tuning = ModelManager::appDataDirectory().getChildFile ("tuning.on").existsAsFile();   // the tuning rig's extra logging (every candidate seen), for whoever tunes the defaults
+    refreshTaste();   // the player's ratings so far
     voiceContext.mts = MTS_RegisterClient();                      // MTS-ESP: retunes to a running master, 12-TET otherwise
     const auto& specs = paramSpecs();
     for (int i = 0; i < kNumParams; ++i)
@@ -1576,6 +1577,7 @@ void StacksAudioProcessor::cancelGeneration()
 
 void StacksAudioProcessor::startGeneration (GenerationRequest req)
 {
+    req.taste = taste;   // every sound this copy writes answers to its player's ratings
     if (labState.generating)
         return;
 
@@ -1885,9 +1887,43 @@ void StacksAudioProcessor::finishGeneration (int token)
 }
 
 //==============================================================================
+// Ratings live with the player's library, so a backup carries them. The rig's
+// first logs sat in app support; they are moved over once.
 juce::File StacksAudioProcessor::ratingsFolder()
 {
-    return ModelManager::appDataDirectory().getChildFile ("ratings");
+    const auto folder = libraryRoot().getChildFile ("Taste");
+    const auto old = ModelManager::appDataDirectory().getChildFile ("ratings");
+    if (old.isDirectory())
+    {
+        folder.createDirectory();
+        for (const auto& f : old.findChildFiles (juce::File::findFiles, false, "*.jsonl"))
+            if (! folder.getChildFile (f.getFileName()).exists())
+                f.moveFileTo (folder.getChildFile (f.getFileName()));
+        if (old.findChildFiles (juce::File::findFiles, false, "*.jsonl").isEmpty())
+            old.getChildFile ("report.md").moveFileTo (folder.getChildFile ("report.md"));
+    }
+    return folder;
+}
+
+void StacksAudioProcessor::refreshTaste()
+{
+    taste = TasteProfile::fromFolder (ratingsFolder());
+}
+
+void StacksAudioProcessor::forgetRatings()
+{
+    auto folder = ratingsFolder();
+    const auto away = folder.getChildFile ("Forgotten " + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H.%M"));
+    for (const auto& f : folder.findChildFiles (juce::File::findFiles, false, "*.jsonl"))
+    {
+        away.createDirectory();
+        f.moveFileTo (away.getChildFile (f.getFileName()));
+    }
+    taste = TasteProfile();
+    lastRatingMade = {};
+    ratedThisSession = 0;
+    labState.status = "Ratings forgotten: Stacks generates as it did on the first day";
+    labBroadcaster.sendChangeMessage();
 }
 
 // One line of the rig's log: the verdict, where the sound came from, and the
@@ -1933,13 +1969,14 @@ void StacksAudioProcessor::appendRatingLine (const juce::var& line) const
 
 void StacksAudioProcessor::rateCurrent (int verdict)
 {
-    if (! tuning || verdict < 1 || verdict > 5)
+    if (verdict < 1 || verdict > 5)
         return;
     auto line = ratingLine (currentPatch(), verdict, loadedKey);
     line.getDynamicObject()->setProperty ("edited", currentIsEdited());   // rated as it arrived, or after knobs moved
     appendRatingLine (line);
     lastRatingMade = { verdict, juce::Time::getMillisecondCounterHiRes() };
     ++ratedThisSession;
+    refreshTaste();   // the next batch already knows
     labBroadcaster.sendChangeMessage();
 }
 

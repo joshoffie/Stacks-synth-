@@ -130,6 +130,7 @@ endif()
 
 set(STACKS_SOURCES
     Source/Parameters.cpp
+    Source/Taste.cpp
     Source/Wavetable.cpp
     Source/SynthVoice.cpp
     Source/Patch.cpp
@@ -219,6 +220,7 @@ target_sources(StacksTests PRIVATE
     Source/Wavetable.cpp
     Source/Patch.cpp
     Source/PatchGenerator.cpp
+    Source/Taste.cpp
     Source/QuickTweak.cpp
     Source/Arpeggiator.cpp
     Source/Effects.cpp

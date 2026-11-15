@@ -258,17 +258,15 @@ namespace
         return engines;
     }
 
-    // A shuffled run of recipes for `count` slots (cycling when there are more slots than recipes).
-    std::vector<int> pickRecipes (int count)
+    // Recipes for `count` slots, drawn without replacement: evenly for a player
+    // with no taste yet, by the player's recipe weights otherwise, always with
+    // one even draw in every run of five.
+    std::vector<int> pickRecipes (int count, const TasteProfile& taste = {})
     {
         juce::Random rng ((juce::int64) juce::Time::getHighResolutionTicks());
-        std::vector<int> order ((size_t) freshEngines().size());
-        for (size_t i = 0; i < order.size(); ++i) order[i] = (int) i;
-        for (int i = (int) order.size() - 1; i > 0; --i)
-            std::swap (order[(size_t) i], order[(size_t) rng.nextInt (i + 1)]);
-        std::vector<int> picked;
-        for (int i = 0; i < count; ++i) picked.push_back (order[(size_t) i % order.size()]);
-        return picked;
+        std::vector<juce::String> tags;
+        for (const auto& e : freshEngines()) tags.push_back (e.tag);
+        return drawRecipes (count, tags, taste, rng);
     }
 
     juce::String freshDirections (const GenerationRequest& req)
@@ -665,6 +663,7 @@ juce::String LlmPatchGenerator::userPrompt (const GenerationRequest& req)
             s << "Sound brief (your own notes on that direction - turn it into settings): " << req.brief << "\n";
     }
 
+    s << req.taste.promptLines();   // what this player's ratings say to steer clear of (never what to copy)
     s << "The \"patches\" array must contain exactly " << req.count << " entries - do not stop early.\n"
       << "/no_think";
     return s;
@@ -891,7 +890,7 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
     // what that should sound like in synth terms, and designs from those.
     GenerationRequest req = request;
     if (req.parents.empty() && req.recipes.empty())
-        req.recipes = pickRecipes (req.count);   // chosen once, so the prompt on disk, the prompt sent and the tags on the patches agree
+        req.recipes = pickRecipes (req.count, req.taste);   // chosen once, so the prompt on disk, the prompt sent and the tags on the patches agree
     if ((req.parents.empty() || growModeFor (req.variation) == GrowMode::Far) && req.designSlots.empty())
         req.designSlots = pickDesignSlots (req.count);
     if (req.hint.trim().isNotEmpty() && ! progress.cancelled())
@@ -1105,6 +1104,9 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
             enrichPatch (*patch, (juce::int64) juce::Time::getHighResolutionTicks() + (juce::int64) out.size() * 131);
             keepPatchInTune (*patch);
         }
+        // The player's taste: whatever this sound carries of their trash traits is nudged away (fresh and grown alike).
+        if (! req.taste.isEmpty())
+            steerAwayFromAvoided (*patch, req.taste, (juce::int64) juce::Time::getHighResolutionTicks() + (juce::int64) out.size() * 977);
 
         ensureMacroRoutings (*patch);
         patch->set (P::master_gain, -6.0f);

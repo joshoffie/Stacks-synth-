@@ -5,6 +5,7 @@
 #include "Parameters.h"
 #include "Wavetable.h"
 #include "SynthVoice.h"
+#include "Taste.h"
 #include "Patch.h"
 #include "LfoTable.h"
 #include "PatchGenerator.h"
@@ -145,6 +146,9 @@ public:
     // --ratings` reads. The findings become guards, prompt lines and recipe
     // weights in the next build; the shipped plug-in never learns at runtime.
     bool tuningMode() const                                { return tuning; }
+    // Taste: what the player's ratings have taught this copy. Every generation request carries it.
+    const TasteProfile& tasteProfile() const               { return taste; }
+    void forgetRatings();                                  // Settings > Start over: the logs move to a Forgotten folder, the profile is empty again
     void rateCurrent (int verdict);                        // 1 trash .. 3 fine .. 5 whoa
     struct Rating { int verdict = 0; double atMs = 0.0; };
     Rating lastRating() const                              { return lastRatingMade; }
@@ -408,6 +412,8 @@ private:
     std::atomic<int> tweakToken { 0 };
     void applyTweak (const std::vector<TweakChange>&, const juce::String& summary);
     bool tuning = false;
+    TasteProfile taste;
+    void refreshTaste();
     Rating lastRatingMade;
     int ratedThisSession = 0;
     juce::var ratingLine (const Patch&, int verdict, const juce::String& key = {}) const;
