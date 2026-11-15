@@ -1,6 +1,6 @@
 # Regrown candidates (15 Nov 2026)
 
-New candidates for the fifty factory presets the audio audit read as weakest
+New candidates for the fifty factory presets (plus six rated 1 the same afternoon) the audio audit read as weakest
 (too quiet even at Master's limit, a bass without low end, a sustained kind
 that dies before the key lifts, keys, leads and bells left with only their
 fundamental, fizz). Each preset got three candidates from its own prompt with
@@ -65,3 +65,9 @@ Made with `StacksTests --regrow <files> --out Tuning/regrown --count 3`.
 | Airborne Chime | bell | still quiet |
 | Glassy Whisper | bell | still quiet |
 | Glowing Formant Pad | pad | still quiet |
+| Metallic Glitch | lead | rated 1 on 15 Nov |
+| Digital Pulse | lead | rated 1 on 15 Nov |
+| Shimmering Lead | lead | rated 1 on 15 Nov |
+| Vocal Pulse | pad | rated 1 on 15 Nov |
+| Warm Analog | pad | rated 1 on 15 Nov |
+| Warm Bell Pad | pad | rated 1 on 15 Nov |

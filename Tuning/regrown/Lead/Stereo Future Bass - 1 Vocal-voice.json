@@ -249,7 +249,7 @@
     "fx_on_reverb": "On",
     "fx_pos_comp": 7,
     "fx_on_comp": "On",
-    "master_gain": -15.465400000000001
+    "master_gain": -10.606
   },
   "waveA": {
     "name": "Vocal-formant",
