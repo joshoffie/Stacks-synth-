@@ -261,6 +261,11 @@ an internal tool into a feature, with design work ahead:
 - the pooled ratings from testers keep feeding the baked-in guards exactly as
   now, so the shipped defaults keep improving too.
 
+Two answers from Josh (15 Nov, later): a player's ratings shape **every** new
+sound the synth generates, the five a Home tile grows as much as a Lab batch or
+a grow; and a tuned copy is **strictly personal**, there is no sharing or
+export of a taste profile.
+
 ## 3. Next, ranked
 
 ### Engine
