@@ -1125,7 +1125,10 @@ std::vector<Patch> LlmPatchGenerator::generate (const GenerationRequest& request
         }
         // The player's taste: whatever this sound carries of their trash traits is nudged away (fresh and grown alike).
         if (! req.taste.isEmpty())
+        {
             steerAwayFromAvoided (*patch, req.taste, (juce::int64) juce::Time::getHighResolutionTicks() + (juce::int64) out.size() * 977);
+            leanTowardFavoured (*patch, req.taste, (juce::int64) juce::Time::getHighResolutionTicks() + (juce::int64) out.size() * 1013);   // one in three gets one liked trait it lacked
+        }
 
         ensureMacroRoutings (*patch);
         patch->set (P::master_gain, -6.0f);

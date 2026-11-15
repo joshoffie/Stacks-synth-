@@ -321,7 +321,8 @@ static void testTasteProfile()
     CHECK (t.weightFor ("pad", "two saws") > 1.15f && t.weightFor ("pad", "two saws") <= TasteProfile::kCap);
     CHECK (t.weightFor ("pad", "vocal") == 1.0f);
     CHECK (t.weightFor ("bass", "two saws") == 1.0f && t.weightFor ("bass", "noise body") == 1.0f);   // learned on pads: basses are untouched
-    CHECK (t.promptLines().contains ("Avoid on pads") && t.promptLines().contains ("HP24") && ! t.promptLines().containsIgnoreCase ("prefer") && ! t.promptLines().containsIgnoreCase ("like"));
+    CHECK (t.promptLines().contains ("Avoid on pads") && t.promptLines().contains ("HP24") && ! t.promptLines().containsIgnoreCase ("example") && ! t.promptLines().containsIgnoreCase ("copy"));
+    CHECK (t.promptLines().contains ("tend to like, on pads: filter: LP12") && t.promptLines().contains ("not every time"));   // the good pads all had LP12: a lean, in words that leave room
     CHECK (t.summary().contains ("Rated 30 sounds (12 trash, 6 fine, 12 whoa)") && t.summary().contains ("HP24"));
 
     // 2. Below the bar nothing moves: four trash, or five trash with only three others.
@@ -410,6 +411,103 @@ static void testTasteProfile()
         std::printf ("  pads with a Triangle LFO: %.0f%% before, %.0f%% with the profile; distinct A waves %d -> %d\n", 100.0 * before, 100.0 * after, wavesBefore, wavesAfter);
         CHECK (before > 0.25 && after < 0.1);
         CHECK (wavesAfter >= 3);
+    }
+
+    // 6a. The other direction, gently: a player whose whoa pads all had a big Hall. Favoured, never avoided; one pad in three
+    //     that lacks it is given it, so the share rises but never takes over, and nothing else about the pads moves.
+    {
+        std::vector<TasteRating> love;
+        for (int i = 0; i < 10; ++i) { Patch p; p.set (P::reverb_type, (float) reverbTypeNames().indexOf ("Hall")); p.set (P::reverb_mix, 0.3f); p.set (P::reverb_size, 0.8f); p.set (P::filter_cutoff, 600.0f + 60.0f * (float) i); love.push_back (rating (p, 5, "Pad")); }
+        for (int i = 0; i < 10; ++i) { Patch p; p.set (P::reverb_type, (float) reverbTypeNames().indexOf ("Plate")); p.set (P::reverb_mix, 0.3f); p.set (P::reverb_size, 0.3f); p.set (P::filter_cutoff, 600.0f + 60.0f * (float) i); love.push_back (rating (p, 3, "Pad")); }
+        const auto profile = TasteProfile::fromRatings (love);
+        bool favoursHall = false, favoursBig = false;
+        for (const auto& f : profile.favours) { if (f.feature == "reverb: Hall medium") favoursHall = true; if (f.feature == "reverb size: big") favoursBig = true; }
+        CHECK (favoursHall && favoursBig && profile.avoids.empty());
+        CHECK (profile.promptLines().contains ("tend to like, on pads") && profile.promptLines().contains ("not every time"));
+        CHECK (profile.summary().contains ("Leaning toward"));
+        Patch plain; plain.category = "Pad"; plain.set (P::reverb_mix, 0.3f);   // a plate: lacks both favoured traits
+        int leaned = 0, hallAfter = 0;
+        for (int i = 0; i < 300; ++i)
+        {
+            Patch copy = plain;
+            if (leanTowardFavoured (copy, profile, 1000 + i)) ++leaned;
+            if (tasteFeatures (copy).contains ("reverb: Hall medium")) ++hallAfter;
+        }
+        std::printf ("  lean: %d of 300 plain pads were given one favoured trait (%d now have the Hall)\n", leaned, hallAfter);
+        CHECK (leaned > 60 && leaned < 140);          // about one in three, never most
+        CHECK (hallAfter > 20 && hallAfter < 100);     // one of the two traits at a time
+        Patch already = plain; already.set (P::reverb_type, (float) reverbTypeNames().indexOf ("Hall")); already.set (P::reverb_size, 0.85f);
+        const auto before = already.toJson();
+        for (int i = 0; i < 20; ++i) leanTowardFavoured (already, profile, 50 + i);
+        CHECK (already.toJson() == before);            // nothing to lean toward: untouched
+        // A trait the trash shares too is never favoured: the avoid wins.
+        std::vector<TasteRating> both = love;
+        for (int i = 0; i < 10; ++i) { Patch p; p.set (P::reverb_type, (float) reverbTypeNames().indexOf ("Hall")); p.set (P::reverb_mix, 0.3f); p.set (P::reverb_size, 0.8f); p.set (P::filter_type, hp24); both.push_back (rating (p, 1, "Pad")); }
+        const auto mixed = TasteProfile::fromRatings (both);
+        bool hallFavoured = false;
+        for (const auto& f : mixed.favours) hallFavoured = hallFavoured || f.feature == "reverb: Hall medium";
+        CHECK (! hallFavoured);
+    }
+
+    // 6b. Everything a sound is made of is a trait, and every trait with a knob behind it has a nudge that removes it.
+    {
+        Patch rich;
+        rich.category = "Pad";
+        rich.set (P::oscB_level, 0.5f); rich.set (P::oscB_coarse, -12.0f); rich.set (P::oscC_level, 0.3f); rich.set (P::oscC_coarse, 12.0f);
+        rich.set (P::fm_amount, 0.2f); rich.set (P::sub_level, 0.4f); rich.set (P::noise_level, 0.2f);
+        rich.set (P::unison_voices, 4.0f); rich.set (P::unison_detune, 15.0f); rich.set (P::unison_spread, 0.7f); rich.set (P::unison_morph, 0.3f);
+        rich.set (P::oscA_warp, (float) WarpBend); rich.set (P::oscA_warp_amt, 0.4f); rich.set (P::oscA_coarse, -12.0f);
+        rich.set (P::filter_routing, 1.0f); rich.set (P::filter2_cutoff, 2000.0f); rich.set (P::filter_env, 2.0f); rich.set (P::fenv_decay, 0.3f);
+        rich.set (P::filter_drive, 2.5f); rich.set (P::filter_keytrack, 0.3f); rich.set (P::filter_model, 1.0f); rich.set (P::char_drift, 0.2f); rich.set (P::char_sat, 0.2f);
+        rich.set (modSourceParam (0), (float) SrcLfo1); rich.set (modDestParam (0), (float) modTargetForParam ((int) P::oscA_morph)); rich.set (modAmountParam (0), 0.3f);
+        rich.set (modSourceParam (1), (float) SrcModEnv); rich.set (modDestParam (1), (float) modTargetForParam ((int) P::fm_amount)); rich.set (modAmountParam (1), 0.3f);
+        rich.set (P::lfo1_rate, 1.0f); rich.set (P::lfo1_mode, 1.0f);
+        rich.set (P::reverb_mix, 0.4f); rich.set (P::reverb_size, 0.8f); rich.set (P::reverb_shimmer, 0.4f);
+        rich.set (P::delay_mix, 0.3f); rich.set (P::delay_feedback, 0.5f); rich.set (P::chorus_mix, 0.3f);
+        rich.set (P::dist_mix, 0.3f); rich.set (P::dist_drive, 20.0f); rich.set (P::hyper_amount, 0.4f); rich.set (P::tape_amount, 0.4f);
+        rich.set (P::eq_low_gain, 3.0f); rich.set (P::eq_high_gain, -3.0f); rich.set (P::comp_mix, 0.5f); rich.set (P::arp_mode, 1.0f); rich.set (P::glide, 0.1f);
+        rich.waves[0] = *WaveSpec::fromJson (R"json({"name":"Rich","tail":2,"scatter":0,"spectra":[[9,8,7,6,5,5,5,4,4,4,4,3,3,3,3,3]]})json");
+        rich.set (P::oscA_wave, (float) kCustomWave);
+        const auto features = tasteFeatures (rich);
+        std::printf ("  a rich pad has %d traits\n", features.size());
+        CHECK (features.size() >= 55);
+        for (auto* must : { "A morph: mid", "A interval: -12", "B level: mid", "detune: normal", "spread: wide", "uni morph", "table: full", "table phases: aligned", "table tail: dull",
+                            "drive: driven", "keytrack: some", "circuit: Warm", "drift: some", "warmth: some", "filter 2 type: LP24", "fenv decay: 100-500ms", "menv decay: 100-500ms",
+                            "lfo rate: medium", "lfo: note mode", "reverb size: big", "shimmer", "delay feedback: some", "chorus: Chorus", "distortion drive: medium", "hyper: medium", "tape: medium",
+                            "eq: low boost", "eq: high cut", "compressed", "arp", "glide", "warp: Bend", "osc C" })
+            CHECK (features.contains (must));
+        int stubborn = 0;
+        for (const auto& feature : features)
+        {
+            const auto prefix = feature.upToFirstOccurrenceOf (":", false, false);
+            if (prefix == "envelope" || prefix == "recipe" || prefix == "attack" || prefix == "decay" || prefix == "sustain" || prefix == "release") continue;   // classes and bands the fallbacks reshape
+            Patch copy = rich;
+            nudgeAway (copy, feature, 11);
+            if (tasteFeatures (copy).contains (feature)) { ++stubborn; std::printf ("  still carries %s after a nudge\n", feature.toRawUTF8()); }
+        }
+        CHECK (stubborn == 0);
+        // and the way back: from a plain pad, each trait of the rich one can be added by a single nudge (classes and a few aggregates aside)
+        Patch plain; plain.category = "Pad";
+        int missing = 0;
+        for (const auto& feature : features)
+        {
+            const auto prefix = feature.upToFirstOccurrenceOf (":", false, false);
+            if (prefix == "envelope" || prefix == "recipe" || prefix == "table" || feature == "osc C" || prefix == "osc C" || feature == "sample" || feature == "osc B: off" || prefix == "table phases" || prefix == "table tail" || prefix == "B warp" || feature == "fenv: lifts a HP/BP" || feature == "wave A: designed") continue;
+            Patch copy = plain;
+            if (prefix == "B level" || prefix == "B morph") copy.set (P::oscB_level, 0.4f);
+            if (prefix == "detune" || prefix == "spread") copy.set (P::unison_voices, 3.0f);
+            if (prefix == "lfo rate" || prefix == "lfo shape" || prefix == "lfo") { copy.set (modSourceParam (0), (float) SrcLfo1); copy.set (modDestParam (0), (float) modTargetForParam ((int) P::oscA_morph)); copy.set (modAmountParam (0), 0.3f); }
+            if (prefix == "menv decay") { copy.set (modSourceParam (1), (float) SrcModEnv); copy.set (modDestParam (1), (float) modTargetForParam ((int) P::fm_amount)); copy.set (modAmountParam (1), 0.3f); }
+            if (prefix == "fenv decay") copy.set (P::filter_env, 2.0f);
+            if (prefix == "cutoff 2") copy.set (P::filter_routing, 1.0f);
+            if (prefix == "reverb size" || prefix == "reverb damp") copy.set (P::reverb_mix, 0.3f);
+            if (prefix == "delay feedback" || prefix == "delay mix") copy.set (P::delay_mix, 0.3f);
+            if (prefix == "distortion drive") copy.set (P::dist_mix, 0.3f);
+            if (prefix == "eq") copy.set (P::eq_mid_gain, 2.0f);
+            nudgeToward (copy, feature, 13);
+            if (! tasteFeatures (copy).contains (feature)) { ++missing; std::printf ("  could not add %s\n", feature.toRawUTF8()); }
+        }
+        CHECK (missing == 0);
     }
 
     // 7. The log on disk: seen lines skipped, the first rig's 1 read as 1, the latest verdict per sound wins.
@@ -2669,7 +2767,9 @@ int main (int argc, char** argv)
         const auto t = TasteProfile::fromFolder (folder);
         std::printf ("%s\n%s\n", folder.getFullPathName().toRawUTF8(), t.summary().toRawUTF8());
         for (const auto& a : t.avoids)
-            std::printf ("  avoid %-8s %-28s %d of %d trash, %d of %d others, x%.1f\n", a.kind.isEmpty() ? "(all)" : a.kind.toRawUTF8(), a.feature.toRawUTF8(), a.trash, a.ofTrash, a.others, a.ofOthers, a.lift);
+            std::printf ("  avoid  %-8s %-28s %d of %d trash, %d of %d others, x%.1f\n", a.kind.isEmpty() ? "(all)" : a.kind.toRawUTF8(), a.feature.toRawUTF8(), a.trash, a.ofTrash, a.others, a.ofOthers, a.lift);
+        for (const auto& f : t.favours)
+            std::printf ("  favour %-8s %-28s %d of %d whoa, %d of %d others, x%.1f\n", f.kind.isEmpty() ? "(all)" : f.kind.toRawUTF8(), f.feature.toRawUTF8(), f.trash, f.ofTrash, f.others, f.ofOthers, f.lift);
         for (const auto& kindEntry : t.recipeWeights)
             for (const auto& kv : kindEntry.second)
                 std::printf ("  recipe %-8s %-14s weight %.2f\n", kindEntry.first.toRawUTF8(), kv.first.toRawUTF8(), kv.second);

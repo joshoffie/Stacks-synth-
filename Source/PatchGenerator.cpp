@@ -828,7 +828,10 @@ std::vector<Patch> RandomPatchGenerator::generate (const GenerationRequest& req,
         if (req.parents.empty())
             enrichPatch (p, (juce::int64) (ticks ^ salt) + (juce::int64) i * 131);   // a sketch becomes a finished sound
         if (! req.taste.isEmpty())
+        {
             steerAwayFromAvoided (p, req.taste, (juce::int64) (ticks ^ salt) + (juce::int64) i * 977);   // the player's trash traits
+            leanTowardFavoured (p, req.taste, (juce::int64) (ticks ^ salt) + (juce::int64) i * 1013);    // and, gently, their whoa traits
+        }
         keepPatchInTune (p);
         ensureMacroRoutings (p);
         p.set (P::master_gain, -6.0f);
@@ -1265,19 +1268,47 @@ juce::StringArray tasteFeatures (const Patch& p)
 
     // Sources
     f.add ("wave A: " + waveName (0));
+    f.add ("A morph: " + band (p.get (P::oscA_morph), { 0.33f, 0.66f }, { "low", "mid", "high" }));
+    {
+        const int c = juce::roundToInt (p.get (P::oscA_coarse));
+        if (c != 0) f.add ("A interval: " + juce::String (c));
+    }
     if (p.get (P::oscB_level) > 0.05f)
     {
         const int c = juce::roundToInt (p.get (P::oscB_coarse));
         f.add ("osc B: " + waveName (1) + (c == 0 ? " unison" : c == 12 || c == 24 ? " +" + juce::String (c) : c == -12 || c == -24 ? " " + juce::String (c) : c == 7 || c == 19 ? " fifth" : " other"));
+        f.add ("B level: " + band (p.get (P::oscB_level), { 0.3f, 0.6f }, { "quiet", "mid", "loud" }));
+        f.add ("B morph: " + band (p.get (P::oscB_morph), { 0.33f, 0.66f }, { "low", "mid", "high" }));
+        const int wB = (int) p.get (P::oscB_warp);
+        if (wB > 0 && p.get (P::oscB_warp_amt) > 0.05f) f.add ("B warp: " + warpNames()[juce::jlimit (0, warpNames().size() - 1, wB)]);
     }
     else f.add ("osc B: off");
-    if (p.get (P::oscC_level) > 0.05f) f.add ("osc C");
+    if (p.get (P::oscC_level) > 0.05f)
+    {
+        f.add ("osc C");
+        f.add ("osc C: " + waveName (2) + " " + juce::String (juce::roundToInt (p.get (P::oscC_coarse))));
+    }
     f.add ("fm: " + band (p.get (P::fm_amount), { 0.05f, 0.3f }, { "none", "light", "heavy" }));
     if (p.get (P::sub_level) > 0.2f) f.add ("sub");
     if (p.get (P::noise_level) > 0.1f) f.add ("noise");
+    if ((int) p.get (P::smp_mode) > 0) f.add ("sample");
     f.add ("unison: " + band ((float) p.get (P::unison_voices), { 1.5f, 4.5f }, { "1", "2-4", "5+" }));
+    if (p.get (P::unison_voices) > 1.5f)
+    {
+        f.add ("detune: " + band (p.get (P::unison_detune), { 8.0f, 20.0f }, { "tight", "normal", "wide" }));
+        f.add ("spread: " + band (p.get (P::unison_spread), { 0.4f }, { "narrow", "wide" }));
+        if (p.get (P::unison_morph) > 0.1f) f.add ("uni morph");
+    }
     const int warp = (int) p.get (P::oscA_warp);
     if (warp > 0 && p.get (P::oscA_warp_amt) > 0.05f) f.add ("warp: " + warpNames()[juce::jlimit (0, warpNames().size() - 1, warp)]);
+    if (! p.waves[0].isEmpty())
+    {
+        int lit = 0;
+        for (float a : p.waves[0].frames[0]) if (a > 0.02f) ++lit;
+        f.add ("table: " + juce::String (lit <= 6 ? "sparse" : "full"));
+        f.add ("table phases: " + juce::String (p.waves[0].scatter < 0.3f ? "aligned" : "round"));
+        f.add ("table tail: " + juce::String (p.waves[0].tail < 0.4f ? "dull" : "bright"));
+    }
 
     // Filter
     f.add ("filter: " + filterTypeNames()[juce::jlimit (0, filterTypeNames().size() - 1, (int) p.get (P::filter_type))]);
@@ -1285,10 +1316,21 @@ juce::StringArray tasteFeatures (const Patch& p)
         const auto ft = filterTypeNames()[juce::jlimit (0, filterTypeNames().size() - 1, (int) p.get (P::filter_type))];
         if ((ft.startsWith ("HP") || ft.startsWith ("BP")) && p.get (P::filter_env) > 0.5f) f.add ("fenv: lifts a HP/BP");   // the body goes at note-on
     }
-    if ((int) p.get (P::filter_routing) > 0) f.add ("filter 2: " + filterRoutingNames()[juce::jlimit (0, filterRoutingNames().size() - 1, (int) p.get (P::filter_routing))]);
+    if ((int) p.get (P::filter_routing) > 0)
+    {
+        f.add ("filter 2: " + filterRoutingNames()[juce::jlimit (0, filterRoutingNames().size() - 1, (int) p.get (P::filter_routing))]);
+        f.add ("filter 2 type: " + filterTypeNames()[juce::jlimit (0, filterTypeNames().size() - 1, (int) p.get (P::filter2_type))]);
+        f.add ("cutoff 2: " + band (p.get (P::filter2_cutoff), { 300.0f, 1000.0f, 4000.0f }, { "<300", "300-1k", "1k-4k", ">4k" }));
+    }
     f.add ("cutoff: " + band (p.get (P::filter_cutoff), { 300.0f, 1000.0f, 4000.0f }, { "<300", "300-1k", "1k-4k", ">4k" }));
     f.add ("resonance: " + band (p.get (P::filter_res), { 0.3f, 0.6f }, { "low", "mid", "high" }));
     f.add (juce::String ("filter env: ") + (filterEnvClass (p) == 0 ? "down" : filterEnvClass (p) == 2 ? "up" : "flat"));
+    if (std::abs (p.get (P::filter_env)) > 0.5f) f.add ("fenv decay: " + band (p.get (P::fenv_decay), { 0.1f, 0.5f }, { "<100ms", "100-500ms", ">500ms" }));
+    f.add ("drive: " + band (p.get (P::filter_drive), { 1.5f, 3.5f }, { "clean", "driven", "hot" }));
+    f.add ("keytrack: " + band (p.get (P::filter_keytrack), { 0.1f, 0.6f }, { "none", "some", "full" }));
+    f.add ("circuit: " + filterModelNames()[juce::jlimit (0, filterModelNames().size() - 1, (int) p.get (P::filter_model))]);
+    f.add ("drift: " + band (p.get (P::char_drift), { 0.05f, 0.4f }, { "none", "some", "much" }));
+    f.add ("warmth: " + band (p.get (P::char_sat), { 0.05f, 0.4f }, { "none", "some", "much" }));
 
     // Envelope
     f.add ("envelope: " + envelopeClass (p));
@@ -1311,7 +1353,10 @@ juce::StringArray tasteFeatures (const Patch& p)
             const int k = c.first - SrcLfo1;
             f.add ("lfo shape: " + lfoShapeNames()[juce::jlimit (0, lfoShapeNames().size() - 1, (int) p.get (lfoShapeParam (k)))]);
             f.add ((int) p.get (lfoSyncParam (k)) > 0 ? "lfo: synced" : "lfo: free");
+            if ((int) p.get (lfoSyncParam (k)) == 0) f.add ("lfo rate: " + band (p.get (lfoRateParam (k)), { 0.5f, 3.0f }, { "slow", "medium", "fast" }));
+            if ((int) p.get (lfoModeParam (k)) == 1) f.add ("lfo: note mode");
         }
+        if (c.first == SrcModEnv) f.add ("menv decay: " + band (p.get (P::menv_decay), { 0.1f, 0.5f }, { "<100ms", "100-500ms", ">500ms" }));
     }
     if (! lfo) f.add ("no lfo");
 
@@ -1321,9 +1366,34 @@ juce::StringArray tasteFeatures (const Patch& p)
     for (int e = 0; e < kNumFx; ++e)
         if (fxActive (p, e)) { f.add (juce::String ("fx: ") + fxNames[e]); ++active; }
     if (active == 0) f.add ("fx: none");
-    if (fxActive (p, 6)) f.add ("reverb: " + reverbTypeNames()[juce::jlimit (0, reverbTypeNames().size() - 1, (int) p.get (P::reverb_type))] + " " + band (p.get (P::reverb_mix), { 0.2f, 0.4f }, { "light", "medium", "wet" }));
-    if (fxActive (p, 5)) f.add ("delay: " + delayModeNames()[juce::jlimit (0, delayModeNames().size() - 1, (int) p.get (P::delay_mode))] + ((int) p.get (P::delay_sync) > 0 ? " synced" : " free"));
-    if (fxActive (p, 0)) f.add ("distortion: " + distModeNames()[juce::jlimit (0, distModeNames().size() - 1, (int) p.get (P::dist_mode))]);
+    if (fxActive (p, 6))
+    {
+        f.add ("reverb: " + reverbTypeNames()[juce::jlimit (0, reverbTypeNames().size() - 1, (int) p.get (P::reverb_type))] + " " + band (p.get (P::reverb_mix), { 0.2f, 0.4f }, { "light", "medium", "wet" }));
+        f.add ("reverb size: " + band (p.get (P::reverb_size), { 0.4f, 0.7f }, { "small", "medium", "big" }));
+        f.add ("reverb damp: " + band (p.get (P::reverb_damp), { 0.35f, 0.65f }, { "bright", "medium", "dark" }));
+        if (p.get (P::reverb_shimmer) > 0.1f) f.add ("shimmer");
+    }
+    if (fxActive (p, 5))
+    {
+        f.add ("delay: " + delayModeNames()[juce::jlimit (0, delayModeNames().size() - 1, (int) p.get (P::delay_mode))] + ((int) p.get (P::delay_sync) > 0 ? " synced" : " free"));
+        f.add ("delay feedback: " + band (p.get (P::delay_feedback), { 0.35f, 0.6f }, { "few", "some", "many" }));
+        f.add ("delay mix: " + band (p.get (P::delay_mix), { 0.2f, 0.4f }, { "light", "medium", "wet" }));
+    }
+    if (fxActive (p, 2)) f.add ("chorus: " + chorusModeNames()[juce::jlimit (0, chorusModeNames().size() - 1, (int) p.get (P::chorus_mode))]);
+    if (fxActive (p, 0))
+    {
+        f.add ("distortion: " + distModeNames()[juce::jlimit (0, distModeNames().size() - 1, (int) p.get (P::dist_mode))]);
+        f.add ("distortion drive: " + band (p.get (P::dist_drive), { 12.0f, 24.0f }, { "light", "medium", "heavy" }));
+    }
+    if (fxActive (p, 3)) f.add ("hyper: " + band (p.get (P::hyper_amount), { 0.3f, 0.6f }, { "light", "medium", "wide" }));
+    if (fxActive (p, 4)) f.add ("tape: " + band (p.get (P::tape_amount), { 0.3f, 0.6f }, { "light", "medium", "heavy" }));
+    if (fxActive (p, 1))
+    {
+        if (p.get (P::eq_low_gain) > 1.0f)  f.add ("eq: low boost");  else if (p.get (P::eq_low_gain) < -1.0f)  f.add ("eq: low cut");
+        if (p.get (P::eq_mid_gain) > 1.0f)  f.add ("eq: mid boost");  else if (p.get (P::eq_mid_gain) < -1.0f)  f.add ("eq: mid cut");
+        if (p.get (P::eq_high_gain) > 1.0f) f.add ("eq: high boost"); else if (p.get (P::eq_high_gain) < -1.0f) f.add ("eq: high cut");
+    }
+    if (fxActive (p, 7)) f.add ("compressed");
     if ((int) p.get (P::arp_mode) > 0) f.add ("arp");
     if (p.recipe.isNotEmpty()) f.add ("recipe: " + p.recipe);
     return f;

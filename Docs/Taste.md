@@ -10,7 +10,10 @@ exported, and Settings has **Start over: forget my ratings**.
 
 ## What the profile is allowed to do
 
-Two things, and only these two (`Source/Taste.h`):
+Three things, and only these three (`Source/Taste.h`), each reading every
+trait a sound has: its sources and designed table, filter and character,
+envelopes, every connection, every effect and its settings (69 traits for a
+full pad):
 
 1. **Steer away from what the player's trash shares.** For each kind of
    sound (pad, pluck, bass, keys, lead, bell, texture, drone) and across all
@@ -23,6 +26,13 @@ Two things, and only these two (`Source/Taste.h`):
    unison size, a neighbouring band of a knob, an effect switched off; traits
    with no single knob behind them take a directed idea move), and the model
    is told in one sentence what to avoid. This is the stronger pull.
+
+1b. **Lean toward what the player's whoa sounds share, gently.** The same
+   rule read from the 4s and 5s against the rest. One new sound in three of
+   that kind that lacks such a trait is given one (never more than one trait,
+   never two sounds in three), and the model is told what the player leans
+   toward, "when it fits, not every time". A trait the trash shares too is
+   never favoured: the avoid wins.
 
 2. **Weight the recipes gently, per kind.** A fresh batch draws its engine
    recipes (two saws, FM, PWM, formant, ...) by weight instead of evenly, each
@@ -57,6 +67,11 @@ takes it back there.
 - Over batches: random pads carry a Triangle LFO about half the time; for a
   player whose trash all had one, the share falls to 0% while the pads stay
   as varied (five distinct A tables either way).
+- The lean: for a player whose whoa pads all had a big Hall, about one plain
+  pad in three is given one of those two traits and no more; a pad that has
+  them is untouched; a trait the trash shares too is never favoured.
+- Every trait with a knob behind it can be removed by one nudge and added by
+  one nudge (checked over all 69 traits of a full pad).
 - The log on disk: seen lines are skipped, the first rig's 1 / 2 / 3 reads as
   1 / 3 / 5, the latest verdict per sound wins; an empty folder is an empty
   profile.
