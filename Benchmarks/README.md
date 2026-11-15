@@ -13,3 +13,5 @@ Run `StacksTests --bench <label>` after changing the prompt, grammar or guard. S
 | 2026-10-31 16.55 | 2026-10-31 grow modes | Qwen3 4B | 97.4 | fresh 3/3 3/3 3/3 3/3 3/3 |
 | 2026-11-14 22.48 | hp guard on struck sounds | Qwen3 4B | 97.2 | fresh 3/3 3/3 3/3 3/3 3/3 |
 | 2026-11-15 04.24 | exp envelopes, ramped ladder 2x, mip blend, scatter, filter guards | Qwen3 4B | 97.6 | fresh 3/3 3/3 3/3 3/3 3/3 |
+| 2026-11-15 14.45 | round two: zdf ladder, steal fade, unison stack, built-in tables, two recipes, reverb by kind, band-limited warps | Qwen3 4B | 96.9 | fresh 3/3 3/3 3/3 3/3 3/3 |
+| 2026-11-15 14.57 | round two rerun, idle machine | Qwen3 4B | 97.6 | fresh 3/3 3/3 3/3 3/3 3/3 |
