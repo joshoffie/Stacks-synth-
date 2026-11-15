@@ -227,6 +227,40 @@ Still open from the list below: items 3's remaining half (a drive law and
 compensation are in; the filter character beyond that is taste), 4, 5, 10,
 12, 13, 14, and 6 and 11 wait for the ear.
 
+## 2c. The first listening pass, and a decision (15 Nov, afternoon)
+
+Josh rated 41 sounds in the new build: pads and keys fine, nothing broken.
+Of 11 factory leads, 8 were rated 1 and 2 were rated 5; five of the 8 were
+already on the audit's regrown list, so the ear and the measurements agree
+on what is weak. The regrown candidates were put in the library (Regrown
+folder) and rated: 7 earned a 4 or 5, 11 a 1 or 2, the rest were fine.
+
+Swaps made from that: candidates rated 4 or 5 replaced their originals
+(Glassy Hiss, Piano Chime, Psychedelic Vibrato, Stereo Future Bass, Vibrant
+Bass, Whispering Wind); Glowing Formant Pad was itself rated 4, so its
+candidate joined beside it, as did Whispering Wind's second 4; the ten
+originals rated 1 whose candidates were all fine took the candidate the audit
+liked best (two renamed with "II" for a name clash). Sixteen files left the
+factory, eighteen came in: 167 presets. The review folder keeps the fine,
+unplaced candidates (134); the 1-2 rated ones are gone.
+
+**Decision (Josh):** the rating system stays in the shipped synth. Every
+player rates with 1 to 5 and their Stacks nudges what it generates toward
+their taste, so each copy becomes personally tuned. That turns the rig from
+an internal tool into a feature, with design work ahead:
+
+- the nudge has to be automatic and bounded per user: recipe weights with the
+  40% floor and the wildcard slot, avoid-lines from a user's own ACT traits,
+  never examples of liked patches (the policy in `Docs/Tuning rig.md` holds);
+- a reset ("forget my ratings") and a view of what the synth has learned, in
+  plain words;
+- the ratings and the derived weights live with the user's library, not in
+  app support, so they travel with a backup;
+- the hidden-rig switch goes; the pill and the keys become a normal part of
+  the Home and Lab screens, with the tour explaining them;
+- the pooled ratings from testers keep feeding the baked-in guards exactly as
+  now, so the shipped defaults keep improving too.
+
 ## 3. Next, ranked
 
 ### Engine

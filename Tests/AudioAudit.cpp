@@ -41,17 +41,26 @@ namespace
             ctx.lfoTables = &lfoTables;
             ctx.samples = &samples;
             ctx.randomSeed = 2026;   // the same patch renders the same twice
-            for (int i = 0; i < 16; ++i) synth.addVoice (new SynthVoice (ctx));
+            freshVoices();
             synth.addSound (new SynthSound());
             synth.setNoteStealingEnabled (true);
-            synth.setCurrentPlaybackSampleRate (sr);
             distortion.prepare (sr, block); eq.prepare (sr, block); compressor.prepare (sr, block); chorus.prepare (sr, block);
             delay.prepare (sr, block); reverb.prepare (sr, block); hyper.prepare (sr, block); tape.prepare (sr, block);
+        }
+
+        // Voices seeded from scratch, so a patch renders the same whatever was rendered before it.
+        void freshVoices()
+        {
+            synth.clearVoices();
+            ctx.voiceCounter.store (0);
+            for (int i = 0; i < 16; ++i) synth.addVoice (new SynthVoice (ctx));
+            synth.setCurrentPlaybackSampleRate (sampleRate);
         }
 
         void load (const Patch& p)
         {
             patch = p;
+            freshVoices();
             for (int i = 0; i < kNumParams; ++i) params.v[i] = p.values[(size_t) i];
             for (int osc = 0; osc < kNumOscs; ++osc)
                 user.set (UserWavetables::customSlot (osc), p.waves[(size_t) osc].isEmpty() ? nullptr : buildSpectralTable (p.waves[(size_t) osc]));

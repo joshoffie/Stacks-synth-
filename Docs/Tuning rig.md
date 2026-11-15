@@ -101,6 +101,15 @@ Two more commands act on a library rather than measure it:
     StacksTests --level Factory [--target -10] [--dry-run]   # Master per preset so one note peaks at the target
     StacksTests --regrow <presets> --out Tuning/regrown      # three new candidates per preset from its own prompt, levelled; the ear picks
 
+## Where this is going
+
+Decided 15 Nov 2026: the rig ships. Every player rates 1 to 5 and their own
+Stacks nudges its generation toward their taste, within the same bounds as
+above (recipe weights with a floor and a wildcard, avoid-lines from their own
+ACT traits, never examples of liked patches), with a reset and a plain-words
+view of what it has learned. Until that is built, this document describes the
+internal rig; the policy section is what the shipped version will automate.
+
 ## Sessions
 
 - **v1, 14 Nov 2026** (build 0.1.3, three-point scale): exported to
